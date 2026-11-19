@@ -82,9 +82,6 @@ final class DataStore {
         return profiles.first(where: { $0.id == activeProfileId })
     }
 
-    var dataVersion: String {
-        didSet { UserDefaults.standard.set(dataVersion, forKey: Keys.dataVersion) }
-    }
     var serverRegion: MaimaiConstants.ServerRegion {
         didSet { UserDefaults.standard.set(serverRegion.rawValue, forKey: Keys.serverRegion) }
     }
@@ -193,7 +190,6 @@ final class DataStore {
 
     private typealias Keys = PreferenceKeys
 
-    private static let seedDataVersion = "2026-11-18"
     private var didBootstrap = false
 
     private var appSupportDir: URL {
@@ -232,7 +228,6 @@ final class DataStore {
         self.profiles = loadedProfiles.profiles
         self.activeProfileId = loadedProfiles.activeProfileId
 
-        self.dataVersion = ud.string(forKey: Keys.dataVersion) ?? Self.seedDataVersion
         self.serverRegion = ud.string(forKey: Keys.serverRegion)
             .flatMap(MaimaiConstants.ServerRegion.init(rawValue:)) ?? .cn
 
@@ -284,7 +279,6 @@ final class DataStore {
                let decoded = try? JSONDecoder().decode([SongData].self, from: data) {
                 try? data.write(to: songsURL, options: .atomic)
                 cache.songs = decoded
-                cache.usedSeed = true
             }
 
             if let pData = try? Data(contentsOf: platesURL) {
@@ -320,7 +314,6 @@ final class DataStore {
         var cnSnapshot: SongSnapshot?
         if let loadedCNSongs = caches.songs {
             cnSnapshot = await storeCNBaseline(loadedCNSongs)
-            if caches.usedSeed { dataVersion = Self.seedDataVersion }
         }
 
         let epoch = regionEpoch
@@ -351,7 +344,7 @@ final class DataStore {
 
         // If the active region is JP/INTL and has never cached Zetaraku yet, pull it once so the song list isn't empty.
         if serverRegion != .cn && zetarakuCatalog == nil {
-            await syncZetarakuCatalog(force: false)
+            await syncZetarakuCatalog()
         }
 
         // Defer low-frequency periodic checks so app launch never bursts upstream APIs.
@@ -544,7 +537,7 @@ final class DataStore {
             await refreshZetarakuIfStale()
             return
         }
-        await syncZetarakuCatalog(force: false)
+        await syncZetarakuCatalog()
     }
 
     /// Unified full catalog & rules sync (LXNS CN songs + aliases + plates, plus Zetaraku JP/INTL catalog + DXData IDs)
@@ -623,16 +616,15 @@ final class DataStore {
            dxDataIdMap != nil {
             return
         }
-        await syncZetarakuCatalog(force: false)
+        await syncZetarakuCatalog()
     }
 
-    func syncZetarakuCatalog(force: Bool = false) async {
+    private func syncZetarakuCatalog() async {
         let err = await performZetarakuSync()
         if let catalog = zetarakuCatalog, serverRegion != .cn {
             await applyZetarakuCatalog(catalog, for: serverRegion, epoch: regionEpoch)
         }
         if let err, serverRegion != .cn {
-            statusMessage = force ? "曲库同步失败：\(err.localizedDescription)" : nil
             syncNotice = DataSyncNotice(
                 kind: .songs,
                 message: "\(serverRegion.shortName)曲库获取失败，正在使用本地缓存。\n\(err.localizedDescription)"
@@ -686,18 +678,14 @@ final class DataStore {
             let plateResp = try? await MaimaiAPI.fetchLXNSPlates()
 
             let baselineSnapshot = cnSongs
-            let (convertedSongs, convertedPlates, stamp) = await Task.detached(priority: .userInitiated) { () -> ([SongData], CNPlateCatalog?, String) in
+            let (convertedSongs, convertedPlates) = await Task.detached(priority: .userInitiated) { () -> ([SongData], CNPlateCatalog?) in
                 let catalogResult = LXNSCatalogConverter.convertCatalog(
                     songResponse: songResp,
                     aliasResponse: aliasResp,
                     existingBaseline: baselineSnapshot
                 )
                 let platesResult = plateResp.map { LXNSCatalogConverter.extractPlateCatalog(from: $0) }
-                let formatter = DateFormatter()
-                formatter.calendar = Calendar(identifier: .gregorian)
-                formatter.locale = Locale(identifier: "en_US_POSIX")
-                formatter.dateFormat = "yyyy-MM-dd"
-                return (catalogResult.songs, platesResult, formatter.string(from: Date()))
+                return (catalogResult.songs, platesResult)
             }.value
 
             let encodedSongs = try JSONEncoder().encode(convertedSongs)
@@ -707,7 +695,6 @@ final class DataStore {
                 plateCatalog = convertedPlates
             }
 
-            dataVersion = stamp
             lastCNCatalogSync = Date()
             return (convertedSongs, nil)
         } catch {
@@ -1374,7 +1361,6 @@ private struct LocalCaches {
     var dxIdMap: DXDataIdMap?
     var stats: ChartStatsResponse?
     var records: [ProberRecord]?
-    var usedSeed = false
 }
 
 private struct SongSnapshot {

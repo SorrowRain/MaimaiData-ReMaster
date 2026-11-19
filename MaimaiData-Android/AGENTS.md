@@ -14,14 +14,14 @@ app/src/main/java/dev/sorrowrain/maimaidata/
 │   └── AppTheme.kt                  # Material 3 主题封装、锁定街机色板 Palette、间距 Space、圆角 Radius、字阶 AppTypography
 ├── components/                      # 跨页面复用的标准 Compose 组件（严禁在 views/ 内重复编写野生通用组件）
 │   ├── Badges.kt                    # 胶囊标签、统计砖块、难度定数徽章、分类胶囊、谱面类型角标、封面框、筛选 Chip
-│   ├── Buttons.kt                   # 主/次操作按钮、行内胶囊按钮 AppInlineButton、菜单触发胶囊 AppMenuCapsule、圆形图标按钮
-│   ├── Checklist.kt                 # 进度表顶部完成度统计头 ChecklistStatsHeader（含左侧难度插槽）与曲绘网格单元
-│   ├── Containers.kt                # AppCard / AppSectionCard、内嵌分组 AppInsetGroup（通栏分割线 + 矩形行高亮）、档案单行标签
+│   ├── Buttons.kt                   # 主/次操作按钮、行内胶囊按钮 AppInlineButton、菜单触发胶囊 AppMenuCapsule、圆形图标按钮、统一分段选择器 AppSegmentedControl
+│   ├── Checklist.kt                 # 进度表顶部完成度统计头 ChecklistStatsHeader、自适应网格 ChecklistSongGrid 与曲绘网格单元 ChecklistSongTile
+│   ├── Containers.kt                # AppCard / AppSectionCard、内嵌分组 AppInsetGroup（通栏分割线 AppInsetDivider + 开关行 AppInsetToggleRow + 矩形行高亮）、档案单行标签
 │   ├── RatingTierTable.kt           # 分段达成率与单曲分 / B50 净涨分三列对照表（详情页与计算器共用）
-│   ├── Feedback.kt                  # 底部状态轻提示 ToastState / StatusToastHost、同步状态横幅、错误弹窗
-│   └── Forms.kt                     # 标准输入框 AppTextField / AppSecureField、无刻度极简离散滑条 AppSlider
+│   ├── Feedback.kt                  # 底部状态轻提示 ToastState / StatusToastHost、同步状态横幅、错误/确认弹窗 AppErrorDialog / AppConfirmDialog、加载/空状态占位 AppLoadingState / AppEmptyState
+│   └── Forms.kt                     # 标准输入框 AppTextField / AppSecureField、无刻度极简离散滑条 AppSlider、带标签滑条行 AppLabeledSliderRow
 ├── bridges/
-│   └── SystemBridges.kt             # MediaStore 保存相册、FileProvider 系统分享、双指/双击缩放图片容器 ZoomableImageBox
+│   └── SystemBridges.kt             # MediaStore 保存相册、FileProvider 系统分享、外部链接打开器 ExternalLinkLauncher、双指/双击缩放图片容器 ZoomableImageBox 与全屏预览弹窗 PhotoPreviewDialog
 ├── models/
 │   ├── SongData.kt                  # 曲目与谱面模型、物量解析 ResolvedChart、多源封面候选地址与同曲别名融合
 │   ├── DifficultyType.kt            # 谱面难度枚举及浅色/深色对比度适配色
@@ -46,8 +46,8 @@ app/src/main/java/dev/sorrowrain/maimaidata/
     ├── SearchFilterSheet.kt         # ModalBottomSheet 多维筛选弹窗
     ├── SongDetailView.kt            # 曲目详情、难度切换、拟合定数、物量条、宴谱说明与三列分段算分表
     ├── CoverZoomView.kt             # 高清封面全屏缩放预览、保存相册与系统分享弹窗
-    ├── RatingToolsView.kt           # Rating 与查分主页（静态玩家名称 + 同步成绩、成绩牌子入口、算分工具入口）
-    ├── RatingCalculatorView.kt      # 定数双滑块分段算分 + 目标总分反推 + 旧框换算入口
+    ├── RatingToolsView.kt           # Rating 与查分主页（静态玩家名称 + 同步成绩、成绩牌子入口、算分与旧框换算工具入口）
+    ├── RatingCalculatorView.kt      # 定数双滑块分段算分 + 目标总分反推二级页
     ├── ProberView.kt                # B35 / B15 列表、PullToRefreshBox 下拉刷新与 B50 图片生成预览
     ├── VersionCheckView.kt          # 国服 / 国际服 / 日服统一牌子进度表（右上切换牌子、完成度栏切换难度）
     ├── LevelCheckView.kt            # 1～15 级定数分组全难度进度表

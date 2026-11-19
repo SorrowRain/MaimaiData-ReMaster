@@ -57,7 +57,6 @@ struct AppTextField: View {
     let placeholder: String
     @Binding var text: String
     var keyboardType: UIKeyboardType = .default
-    var onFocusChange: ((Bool) -> Void)? = nil
 
     @FocusState private var isFocused: Bool
 
@@ -70,9 +69,6 @@ struct AppTextField: View {
                     .focused($isFocused)
                 Spacer(minLength: 0)
             }
-        }
-        .onChange(of: isFocused) { _, focused in
-            onFocusChange?(focused)
         }
     }
 }

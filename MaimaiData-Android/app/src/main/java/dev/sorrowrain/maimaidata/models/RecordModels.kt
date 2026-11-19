@@ -159,12 +159,6 @@ enum class ScoreAuthMethod {
     @SerialName("divingFishPassword") DIVING_FISH_PASSWORD,
     @SerialName("divingFishImportToken") DIVING_FISH_IMPORT_TOKEN;
 
-    val provider: ScoreProvider
-        get() = when (this) {
-            LXNS_OAUTH, LXNS_PERSONAL_TOKEN -> ScoreProvider.LXNS
-            DIVING_FISH_PASSWORD, DIVING_FISH_IMPORT_TOKEN -> ScoreProvider.DIVING_FISH
-        }
-
     val shortTitle: String
         get() = when (this) {
             LXNS_OAUTH -> "OAuth 授权"
@@ -284,7 +278,6 @@ data class GitHubLatestReleasePayload(
 
 data class AppReleaseInfo(
     val version: String,
-    val tagName: String,
     val notes: String,
     val htmlUrl: String
 ) {
@@ -306,7 +299,6 @@ data class AppReleaseInfo(
             }
             return AppReleaseInfo(
                 version = cleaned,
-                tagName = rawTag,
                 notes = cappedNotes,
                 htmlUrl = payload.htmlUrl
             )

@@ -264,6 +264,92 @@ class MultiRegionTests {
     }
 
     @Test
+    fun testDynamicB15VersionWindowForINTLAndJP() {
+        val json = """
+            {
+              "versions": [
+                { "version": "CiRCLE", "abbr": "CiRCLE (丸)" },
+                { "version": "CiRCLE PLUS", "abbr": "CiRCLE+ (廻)" },
+                { "version": "MAGiCAL", "abbr": "MAGiCAL (魔)" },
+                { "version": "MAGiCAL PLUS", "abbr": "MAGiCAL+" }
+              ],
+              "songs": [
+                {
+                  "songId": "s_circle",
+                  "category": "maimai",
+                  "title": "Circle Song",
+                  "artist": "A",
+                  "bpm": 150.0,
+                  "imageName": "c.png",
+                  "version": "CiRCLE",
+                  "sheets": [
+                    { "type": "dx", "difficulty": "master", "level": "14", "internalLevelValue": 14.0, "regions": { "jp": true, "intl": true }, "version": "CiRCLE" }
+                  ]
+                },
+                {
+                  "songId": "s_circle_plus",
+                  "category": "maimai",
+                  "title": "Circle Plus Song",
+                  "artist": "A",
+                  "bpm": 150.0,
+                  "imageName": "cp.png",
+                  "version": "CiRCLE PLUS",
+                  "sheets": [
+                    { "type": "dx", "difficulty": "master", "level": "14", "internalLevelValue": 14.2, "regions": { "jp": true, "intl": true }, "version": "CiRCLE PLUS" }
+                  ]
+                },
+                {
+                  "songId": "s_magical",
+                  "category": "maimai",
+                  "title": "Magical Song",
+                  "artist": "A",
+                  "bpm": 150.0,
+                  "imageName": "m.png",
+                  "version": "MAGiCAL",
+                  "sheets": [
+                    { "type": "dx", "difficulty": "master", "level": "14+", "internalLevelValue": 14.7, "regions": { "jp": true, "intl": true }, "version": "MAGiCAL" }
+                  ]
+                },
+                {
+                  "songId": "s_magical_plus",
+                  "category": "maimai",
+                  "title": "Magical Plus Song",
+                  "artist": "A",
+                  "bpm": 150.0,
+                  "imageName": "mp.png",
+                  "version": "MAGiCAL PLUS",
+                  "sheets": [
+                    { "type": "dx", "difficulty": "master", "level": "14+", "internalLevelValue": 14.9, "regions": { "jp": true, "intl": false }, "version": "MAGiCAL PLUS" }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+        val catalog = MaimaiAPI.json.decodeFromString<ZetarakuCatalog>(json)
+
+        val intlSongs = ZetarakuCatalogConverter.convertWithMigrations(
+            catalog = catalog,
+            region = MaimaiConstants.ServerRegion.INTL,
+            cnReference = emptyList(),
+            dxIdMap = null
+        ).songs
+        val intlByTitle = intlSongs.associateBy { it.title }
+        assertEquals(false, intlByTitle["Circle Song"]?.basicInfo?.isNew)
+        assertEquals(true, intlByTitle["Circle Plus Song"]?.basicInfo?.isNew)
+        assertEquals(true, intlByTitle["Magical Song"]?.basicInfo?.isNew)
+
+        val jpSongs = ZetarakuCatalogConverter.convertWithMigrations(
+            catalog = catalog,
+            region = MaimaiConstants.ServerRegion.JP,
+            cnReference = emptyList(),
+            dxIdMap = null
+        ).songs
+        val jpByTitle = jpSongs.associateBy { it.title }
+        assertEquals(false, jpByTitle["Magical Song"]?.basicInfo?.isNew)
+        assertEquals(true, jpByTitle["Magical Plus Song"]?.basicInfo?.isNew)
+    }
+
+    @Test
     fun testShortGenreAndAllVersionAndRankAssetsExist() {
         assertEquals("VOCALOID", MaimaiConstants.shortGenreDisplayName("niconico & VOCALOID"))
         assertEquals("流行&动漫", MaimaiConstants.shortGenreDisplayName("流行&动漫"))

@@ -245,6 +245,93 @@ final class MultiRegionTests: XCTestCase {
         XCTAssertEqual(enrichedCN[0].resolvedCharts[0].kanji, "【魔】")
     }
 
+    func testDynamicB15VersionWindowForINTLAndJP() throws {
+        let json = """
+        {
+          "versions": [
+            { "version": "CiRCLE", "abbr": "CiRCLE (丸)" },
+            { "version": "CiRCLE PLUS", "abbr": "CiRCLE+ (廻)" },
+            { "version": "MAGiCAL", "abbr": "MAGiCAL (魔)" },
+            { "version": "MAGiCAL PLUS", "abbr": "MAGiCAL+" }
+          ],
+          "songs": [
+            {
+              "songId": "s_circle",
+              "category": "maimai",
+              "title": "Circle Song",
+              "artist": "A",
+              "bpm": 150.0,
+              "imageName": "c.png",
+              "version": "CiRCLE",
+              "sheets": [
+                { "type": "dx", "difficulty": "master", "level": "14", "internalLevelValue": 14.0, "regions": { "jp": true, "intl": true }, "version": "CiRCLE" }
+              ]
+            },
+            {
+              "songId": "s_circle_plus",
+              "category": "maimai",
+              "title": "Circle Plus Song",
+              "artist": "A",
+              "bpm": 150.0,
+              "imageName": "cp.png",
+              "version": "CiRCLE PLUS",
+              "sheets": [
+                { "type": "dx", "difficulty": "master", "level": "14", "internalLevelValue": 14.2, "regions": { "jp": true, "intl": true }, "version": "CiRCLE PLUS" }
+              ]
+            },
+            {
+              "songId": "s_magical",
+              "category": "maimai",
+              "title": "Magical Song",
+              "artist": "A",
+              "bpm": 150.0,
+              "imageName": "m.png",
+              "version": "MAGiCAL",
+              "sheets": [
+                { "type": "dx", "difficulty": "master", "level": "14+", "internalLevelValue": 14.7, "regions": { "jp": true, "intl": true }, "version": "MAGiCAL" }
+              ]
+            },
+            {
+              "songId": "s_magical_plus",
+              "category": "maimai",
+              "title": "Magical Plus Song",
+              "artist": "A",
+              "bpm": 150.0,
+              "imageName": "mp.png",
+              "version": "MAGiCAL PLUS",
+              "sheets": [
+                { "type": "dx", "difficulty": "master", "level": "14+", "internalLevelValue": 14.9, "regions": { "jp": true, "intl": false }, "version": "MAGiCAL PLUS" }
+              ]
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let catalog = try JSONDecoder().decode(ZetarakuCatalog.self, from: json)
+
+        // INTL has CiRCLE, CiRCLE PLUS, MAGiCAL active -> B15 window is the latest 2 (CiRCLE PLUS + MAGiCAL), NOT CiRCLE
+        let intlSongs = ZetarakuCatalogConverter.convertWithMigrations(
+            catalog,
+            region: .intl,
+            cnReference: [],
+            dxIdMap: nil
+        ).songs
+        let intlByTitle = Dictionary(uniqueKeysWithValues: intlSongs.map { ($0.title, $0) })
+        XCTAssertEqual(intlByTitle["Circle Song"]?.basicInfo.isNew, false)
+        XCTAssertEqual(intlByTitle["Circle Plus Song"]?.basicInfo.isNew, true)
+        XCTAssertEqual(intlByTitle["Magical Song"]?.basicInfo.isNew, true)
+
+        // JP has MAGiCAL PLUS active -> B15 window advances to the latest 1 (MAGiCAL PLUS)
+        let jpSongs = ZetarakuCatalogConverter.convertWithMigrations(
+            catalog,
+            region: .jp,
+            cnReference: [],
+            dxIdMap: nil
+        ).songs
+        let jpByTitle = Dictionary(uniqueKeysWithValues: jpSongs.map { ($0.title, $0) })
+        XCTAssertEqual(jpByTitle["Magical Song"]?.basicInfo.isNew, false)
+        XCTAssertEqual(jpByTitle["Magical Plus Song"]?.basicInfo.isNew, true)
+    }
+
     func testShortGenreAndAllVersionAndRankAssetsExist() {
         XCTAssertEqual(MaimaiConstants.shortGenreDisplayName(for: "niconico & VOCALOID"), "VOCALOID")
         XCTAssertEqual(MaimaiConstants.shortGenreDisplayName(for: "流行&动漫"), "流行&动漫")

@@ -89,27 +89,16 @@ struct AppCard<Content: View>: View {
 struct AppSectionHeader<Trailing: View>: View {
     let title: String
     var subtitle: String? = nil
-    var subtitleColor: Color = .secondary
     @ViewBuilder let trailing: () -> Trailing
 
     init(
         title: String,
         subtitle: String? = nil,
-        subtitleColor: Color = .secondary,
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
         self.title = title
         self.subtitle = subtitle
-        self.subtitleColor = subtitleColor
         self.trailing = trailing
-    }
-
-    init(
-        title: String,
-        subtitle: String? = nil,
-        subtitleColor: Color = .secondary
-    ) where Trailing == EmptyView {
-        self.init(title: title, subtitle: subtitle, subtitleColor: subtitleColor, trailing: { EmptyView() })
     }
 
     var body: some View {
@@ -125,7 +114,7 @@ struct AppSectionHeader<Trailing: View>: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(AppTheme.Typography.caption)
-                        .foregroundStyle(subtitleColor)
+                        .foregroundStyle(.secondary)
                 }
             }
 

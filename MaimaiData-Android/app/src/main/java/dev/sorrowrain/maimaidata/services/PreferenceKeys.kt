@@ -12,7 +12,6 @@ object PreferenceKeys {
     const val favorites = "favorite_ids"
     const val searchHistory = "search_history"
     const val activeProfileId = "active_score_profile_id"
-    const val dataVersion = "song_data_version"
     const val serverRegion = "server_region"
     const val cnCatalogSync = "cn_catalog_sync_ts"
     const val zetarakuSync = "zetaraku_sync_ts"

@@ -108,7 +108,6 @@ MaimaiData/
 | | `metricDisplay` | `title3.bold` (20pt) | 居中指标砖块大数字（比例字宽，避免等宽 `1` 左侧留白偏移） |
 | | `sectionMetric` | `headline.bold.monospacedDigit` (17pt) | 总览卡片大号数字指标、等级进度表标题 |
 | | `cardTitle` | `headline` (17pt) | `AppSectionHeader` 卡片标题、玩家总览标题 |
-| | `statValue` | `callout.bold.monospacedDigit` (16pt) | 详情页定数与拟合定数指标值 |
 | **L2 行内容与表单** | `songTitle` | `subheadline.semibold` (15pt) | 列表歌曲名、主/次大按钮文案 |
 | | `subheadlineBold` | `subheadline.bold` (15pt) | 圆形图标按钮、工具行图标、小节粗体小标题 |
 | | `rowTitle` | `subheadline.medium` (15pt) | 设置行/工具行标题、详情键值对正文 |
@@ -151,8 +150,8 @@ MaimaiData/
 | `AppCard` | `Containers.swift` | 页面基础圆角卡片（支持浅色白底/深色 `surfaceDark`、可选左上淡渐变 `tint` 与细描边） |
 | `AppSectionHeader` | `Containers.swift` | 带左侧蓝色渐变竖条的标准分组标题栏（含可选 `subtitle` 与右侧 `trailing` 槽位） |
 | `AppSectionCard` | `Containers.swift` | 组合 `AppCard` + `AppSectionHeader` 的页面主力业务卡片，凡带标题的卡片一律使用它 |
-| `AppInsetGroup` | `Containers.swift` | 卡片内部的浅底圆角内嵌容器（内置 `clipShape` 自动裁切首尾行外侧圆角，内部统一用通栏 `Divider()` 分割），用于承载设置组、工具入口列表、数据表格或指标块 |
-| `AppInsetRow` / `.appInsetRowHighlight` | `Containers.swift` | `AppInsetGroup` 内的标准行及显式 `Rectangle()` 通栏高亮修饰符（严禁对表格行裸调 `.background(color)` 以免继承外层圆角） |
+| `AppInsetGroup` | `Containers.swift` | 卡片内部的浅底圆角内嵌容器（内置 `clipShape` 自动裁切首尾行外侧圆角，内部统一用通栏 `AppInsetDivider()` 分割），用于承载设置组、工具入口列表、数据表格或指标块 |
+| `AppInsetRow` / `AppInsetToggleRow` / `.appInsetRowHighlight` | `Containers.swift` | `AppInsetGroup` 内的标准行、开关设置行及显式 `Rectangle()` 通栏高亮修饰符（严禁对表格行裸调 `.background(color)` 以免继承外层圆角） |
 | `ScoreProfileRowLabel` | `Containers.swift` | 统一成绩档案单行展示标签（左侧平台胶囊 + 玩家 ID + 右侧对勾） |
 | `FlowLayout` | `Containers.swift` | 自适应折行流式布局，用于筛选条件 Chip、歌曲别名胶囊等多标签排布 |
 | `PhotoPreviewScaffold` | `Containers.swift` | 全屏纯黑底图片缩放预览、系统分享与保存相册通用脚手架（`CoverZoomView` 与 `B50PreviewSheet` 共用） |
@@ -188,6 +187,7 @@ MaimaiData/
 | 组件名 / 修饰符 | 所在文件 | 职责与选型要求 |
 | :--- | :--- | :--- |
 | `AppTextField` / `AppSecureField` | `Forms.swift` | 标准单行输入框与带显隐切换的密码框（内置 50pt 最小高度、整框点击热区与聚焦高亮边框；除顶部胶囊搜索栏外，表单与工具页严禁直接使用裸 `TextField`） |
+| `AppLabeledSliderRow` | `Forms.swift` | 标准「左侧标签 + `AppValueBadge` + 离散 `Slider`」组合行（筛选弹窗与 Rating 计算器共用，内置 VoiceOver 无障碍标签） |
 | `KeyboardDismiss.hide()` / `.dismissKeyboardOnTap()` | `Forms.swift` / `Feedback.swift` | 收起第一响应者键盘及点击空白区域收起键盘修饰符 |
 | `ToastState` / `.statusToast(_:)` | `Feedback.swift` | 底部液态玻璃轻提示控制器（自动取消上一次倒计时防连点截断）与挂载修饰符 |
 | `SyncStatusBanner` | `Feedback.swift` | 曲库读取/同步进度及失败精准重试横幅 |
@@ -215,7 +215,7 @@ MaimaiData/
    - `DataStore.performSyncRecords` 内部使用非结构化 `Task` 承载网络请求，防止 SwiftUI `.refreshable` 在状态更新重绘瞬间取消底层 `URLSession` 请求（`NSURLErrorCancelled`）。
    - 切换档案异步回填本地成绩缓存（`restoreCachedRecords`）受单调递增令牌 `recordsEpoch` 保护，绝不能覆盖网络刚拉回的新鲜成绩。
 6. **导航栈复用与图片缩放约束 (`RatingToolsView` & `ZoomableImageScrollView`)**：
-   - 「Rating 与查分」Tab 下的二级工具页（`ProberView`、`VersionCheckView`、`LevelCheckView`）点击曲目进入详情页时，统一复用根视图 `RatingToolsView` 注册的 `.navigationDestination(for: SongData.self)`，**严禁在子页面重复注册同类型 `navigationDestination`**。
+   - 「Rating 与查分」Tab 下的二级工具页（`ProberView`、`VersionCheckView`、`LevelCheckView`）点击曲目进入详情页时，统一复用根视图 `RatingToolsView` 注册的 `.navigationDestination(for: SongDetailRoute.self)`，**严禁在子页面重复注册同类型 `navigationDestination`**。
    - `ZoomableImageScrollView` 内的 `UIImageView` 必须同时绑定 `contentLayoutGuide`（四边）与 `frameLayoutGuide`（宽高）共 6 条约束，确保初始自适应居中且支持 `1.0x–4.5x` 双指与双击缩放。
 7. **工程配置同步与测试宿主隔离 (`project.yml` & `MaimaiData.xcodeproj` & `MaimaiDataApp`)**：
    - 增删源码/资源文件或修改构建配置时，必须同步维护 `project.yml` 与 `MaimaiData.xcodeproj/project.pbxproj`。

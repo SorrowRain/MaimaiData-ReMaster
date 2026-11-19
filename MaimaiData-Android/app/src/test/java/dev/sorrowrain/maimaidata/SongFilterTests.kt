@@ -87,6 +87,7 @@ class SongFilterTests {
         assertEquals(listOf("1"), runFilter(SongFilterCriteria(keyword = "FIRST")))
         assertEquals(emptyList<String>(), runFilter(SongFilterCriteria(keyword = "FIRST"), alias = false))
         assertEquals(listOf("2"), runFilter(SongFilterCriteria(keyword = "2")))
+        assertEquals(listOf("2"), runFilter(SongFilterCriteria(keyword = "0002")))
     }
 
     @Test
@@ -119,6 +120,12 @@ class SongFilterTests {
         assertEquals(setOf("maimai", "maimai PLUS"), MaimaiConstants.expandVersionFilter(listOf("maimai")))
         assertEquals(setOf("maimai GreeN", "maimai GreeN PLUS"), MaimaiConstants.expandVersionFilter(listOf("GreeN")))
         assertEquals(setOf("舞萌DX 2021"), MaimaiConstants.expandVersionFilter(listOf("舞萌DX 2021")))
+
+        val criteria = SongFilterCriteria(selectedVersions = setOf("maimai", "舞萌DX 2025", "PRiSM"))
+        val cnPruned = dev.sorrowrain.maimaidata.models.SongFilter.prunedCriteria(criteria, MaimaiConstants.ServerRegion.CN)
+        assertEquals(setOf("maimai", "舞萌DX 2025"), cnPruned.selectedVersions)
+        val jpPruned = dev.sorrowrain.maimaidata.models.SongFilter.prunedCriteria(criteria, MaimaiConstants.ServerRegion.JP)
+        assertEquals(setOf("maimai", "PRiSM"), jpPruned.selectedVersions)
     }
 
     @Test

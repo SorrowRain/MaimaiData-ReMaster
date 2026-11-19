@@ -130,7 +130,6 @@ fun AppSectionHeader(
     title: String,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
-    subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     trailing: (@Composable () -> Unit)? = null
 ) {
     Row(
@@ -163,7 +162,7 @@ fun AppSectionHeader(
                 Text(
                     text = subtitle,
                     style = AppTheme.AppTypography.caption,
-                    color = subtitleColor
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -184,15 +183,13 @@ fun AppSectionCard(
     title: String,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
-    tint: Color? = null,
     padding: Dp = AppTheme.cardPadding,
     trailing: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     AppCard(
         modifier = modifier,
-        padding = padding,
-        tint = tint
+        padding = padding
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),

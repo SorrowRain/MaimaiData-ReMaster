@@ -53,14 +53,10 @@ enum MaimaiAPI {
 
     // MARK: - 1. CN Public Catalog, Aliases & Plates (LXNS Official Public API)
 
-    static func fetchLXNSSongCatalog(version: Int? = nil) async throws -> LXNSSongListResponse {
-        let urlString: String
-        if let version {
-            urlString = "\(LXNSConfiguration.apiBase)/maimai/song/list?version=\(version)"
-        } else {
-            urlString = "\(LXNSConfiguration.apiBase)/maimai/song/list?notes=true"
+    static func fetchLXNSSongCatalog() async throws -> LXNSSongListResponse {
+        guard let url = URL(string: "\(LXNSConfiguration.apiBase)/maimai/song/list?notes=true") else {
+            throw MaimaiAPIError.invalidURL
         }
-        guard let url = URL(string: urlString) else { throw MaimaiAPIError.invalidURL }
         let data = try await performLXNSGETWithRetry(url: url)
         return try await Task.detached(priority: .utility) {
             try JSONDecoder().decode(LXNSSongListResponse.self, from: data)

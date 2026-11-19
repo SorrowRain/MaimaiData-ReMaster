@@ -1,5 +1,6 @@
 package dev.sorrowrain.maimaidata
 
+import dev.sorrowrain.maimaidata.components.ToastState
 import dev.sorrowrain.maimaidata.models.CNPlateCatalog
 import dev.sorrowrain.maimaidata.models.DifficultyType
 import dev.sorrowrain.maimaidata.models.LXNSScore
@@ -16,11 +17,7 @@ import dev.sorrowrain.maimaidata.services.MaimaiAPI
 import dev.sorrowrain.maimaidata.services.MaimaiAPIException
 import dev.sorrowrain.maimaidata.services.PKCEHelper
 import dev.sorrowrain.maimaidata.services.ZetarakuVersionEntry
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -327,40 +324,27 @@ class ScoreProfileAndLXNSTests {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun testCancellingPreviousDismissTimerOnRapidSwitches() = runTest {
-        class CancellableBannerTimer(private val scope: CoroutineScope) {
-            var text: String? = null
-                private set
-            private var dismissJob: Job? = null
-
-            fun show(message: String, durationMs: Long) {
-                dismissJob?.cancel()
-                text = message
-                dismissJob = scope.launch {
-                    delay(durationMs)
-                    text = null
-                }
-            }
-        }
-
-        val banner = CancellableBannerTimer(this)
-        banner.show("已切换至 A", durationMs = 120L)
-        assertEquals("已切换至 A", banner.text)
+    fun testToastStateCancelsPreviousDismissTimerOnRapidSwitches() = runTest {
+        val toast = ToastState(this)
+        toast.show("已切换至 A", durationMs = 120L)
+        assertEquals("已切换至 A", toast.message)
+        assertFalse(toast.isError)
 
         advanceTimeBy(60L)
         runCurrent()
-        banner.show("已切换至 B", durationMs = 280L)
-        assertEquals("已切换至 B", banner.text)
+        toast.show("已切换至 B", isError = true, durationMs = 280L)
+        assertEquals("已切换至 B", toast.message)
+        assertTrue(toast.isError)
 
         // At 60 + 100 = 160ms, the first 120ms timer would have fired if not cancelled.
         advanceTimeBy(100L)
         runCurrent()
-        assertEquals("已切换至 B", banner.text)
+        assertEquals("已切换至 B", toast.message)
 
-        // After the second timer completes, banner clears cleanly.
+        // After the second timer completes, toast clears cleanly.
         advanceTimeBy(200L)
         runCurrent()
-        assertNull(banner.text)
+        assertNull(toast.message)
     }
 
     @Test

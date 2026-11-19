@@ -1,9 +1,13 @@
 package dev.sorrowrain.maimaidata
 
+import dev.sorrowrain.maimaidata.models.DifficultyType
+import dev.sorrowrain.maimaidata.models.ProberRecord
 import dev.sorrowrain.maimaidata.models.RatingCalculator
+import dev.sorrowrain.maimaidata.models.ResolvedChart
 import dev.sorrowrain.maimaidata.models.VersionString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -52,6 +56,19 @@ class RatingCalculatorTests {
             assertTrue(row.singleRating >= 15_000 / 50)
             assertEquals(row.singleRating * 50, row.totalRating)
         }
+    }
+
+    @Test
+    fun testReverseCalculateMaxBoundaryAndUnreachableTarget() {
+        val maxRows = RatingCalculator.reverseCalculate(targetTotalRating = 16_850)
+        assertFalse(maxRows.isEmpty())
+        val ssspRow = maxRows.firstOrNull { it.achi == 1_005_000 }
+        assertNotNull(ssspRow)
+        assertEquals(150, ssspRow!!.minLv)
+        assertEquals(337, ssspRow.singleRating)
+        assertEquals(16_850, ssspRow.totalRating)
+
+        assertTrue(RatingCalculator.reverseCalculate(targetTotalRating = 17_000).isEmpty())
     }
 
     @Test
@@ -139,5 +156,49 @@ class RatingCalculatorTests {
         assertTrue(info.isNewerThan("1.0.0"))
         assertFalse(info.isNewerThan("1.1.0"))
         assertFalse(info.isNewerThan("1.2.0"))
+    }
+
+    @Test
+    fun testRecordAccessibilityLabelsAndChartToleranceMetrics() {
+        val apRecord = ProberRecord(
+            achievements = 101.0,
+            ds = 14.8,
+            fc = "ap",
+            fs = "fsd",
+            level = "14+",
+            levelIndex = 3,
+            ra = 333,
+            rate = "sssp",
+            songId = 10001,
+            title = "T",
+            type = "DX"
+        )
+        val appRecord = apRecord.copy(fc = "app", fs = "fsdp")
+        assertEquals("连击状态 AP", apRecord.fcAccessibilityLabel)
+        assertEquals("连击状态 AP+", appRecord.fcAccessibilityLabel)
+        assertEquals("同步状态 FSD", apRecord.fsAccessibilityLabel)
+        assertEquals("同步状态 FSD+", appRecord.fsAccessibilityLabel)
+
+        val chart = ResolvedChart(
+            index = 3,
+            difficulty = DifficultyType.MASTER,
+            ds = 14.8,
+            oldDs = null,
+            level = "14+",
+            charter = "Tester",
+            kanji = null,
+            tap = 500,
+            hold = 50,
+            slide = 50,
+            touch = 0,
+            breakCount = 50,
+            totalNotes = 650
+        )
+        val metrics = chart.toleranceMetrics
+        assertNotNull(metrics)
+        assertEquals(0.0002, metrics!!.tapGreat, 1e-9)
+        assertEquals(0.00005, metrics.breakPerfect50!!, 1e-9)
+        assertEquals(101.0, chart.finaleTheoreticalMax(isDX = false)!!, 1e-6)
+        assertNull(chart.finaleTheoreticalMax(isDX = true))
     }
 }

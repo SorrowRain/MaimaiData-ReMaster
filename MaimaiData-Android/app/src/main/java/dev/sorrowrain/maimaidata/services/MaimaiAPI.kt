@@ -119,21 +119,10 @@ object MaimaiAPI {
         val scores: List<LXNSScore>
     )
 
-    data class LXNSOAuthIdentityAndScores(
-        val userInfo: LXNSUserInfo?,
-        val player: LXNSPlayer?,
-        val scores: List<LXNSScore>
-    )
-
     // 1. CN Public Catalog, Aliases & Plates (LXNS Official Public API)
 
-    suspend fun fetchLXNSSongCatalog(version: Int? = null): LXNSSongListResponse {
-        val url = if (version != null) {
-            "${LXNSConfiguration.API_BASE}/maimai/song/list?version=$version"
-        } else {
-            "${LXNSConfiguration.API_BASE}/maimai/song/list?notes=true"
-        }
-        val bytes = performLXNSGetWithRetry(url)
+    suspend fun fetchLXNSSongCatalog(): LXNSSongListResponse {
+        val bytes = performLXNSGetWithRetry("${LXNSConfiguration.API_BASE}/maimai/song/list?notes=true")
         return withContext(Dispatchers.Default) {
             json.decodeFromString(bytes.toString(Charsets.UTF_8))
         }
@@ -361,16 +350,6 @@ object MaimaiAPI {
 
     suspend fun fetchLXNSOAuthPlayerAndScores(accessToken: String): LXNSPlayerAndScores =
         fetchLXNSPlayerAndScores(headerField = "Authorization", headerValue = "Bearer $accessToken")
-
-    suspend fun fetchLXNSOAuthIdentityAndScores(accessToken: String): LXNSOAuthIdentityAndScores {
-        val userInfo = runCatching { fetchLXNSUserInfo(accessToken) }.getOrNull()
-        val playerAndScores = fetchLXNSOAuthPlayerAndScores(accessToken)
-        return LXNSOAuthIdentityAndScores(
-            userInfo = userInfo,
-            player = playerAndScores.player,
-            scores = playerAndScores.scores
-        )
-    }
 
     suspend fun fetchLXNSPersonalTokenPlayerAndScores(personalToken: String): LXNSPlayerAndScores =
         fetchLXNSPlayerAndScores(headerField = "X-User-Token", headerValue = personalToken.trim())

@@ -186,15 +186,6 @@ enum ScoreAuthMethod: String, Codable, Hashable {
     case divingFishPassword
     case divingFishImportToken
 
-    var provider: ScoreProvider {
-        switch self {
-        case .lxnsOAuth, .lxnsPersonalToken:
-            return .lxns
-        case .divingFishPassword, .divingFishImportToken:
-            return .divingFish
-        }
-    }
-
     var shortTitle: String {
         switch self {
         case .lxnsOAuth: return "OAuth 授权"
@@ -324,7 +315,6 @@ struct GitHubLatestReleasePayload: Decodable {
 struct AppReleaseInfo: Identifiable, Equatable {
     var id: String { version }
     let version: String
-    let tagName: String
     let notes: String
     let htmlURL: String
 
@@ -342,7 +332,6 @@ struct AppReleaseInfo: Identifiable, Equatable {
             : trimmedNotes
         return AppReleaseInfo(
             version: cleaned,
-            tagName: rawTag,
             notes: cappedNotes,
             htmlURL: payload.htmlURL
         )

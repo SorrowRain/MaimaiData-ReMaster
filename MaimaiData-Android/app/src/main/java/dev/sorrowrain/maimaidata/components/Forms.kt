@@ -45,7 +45,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
@@ -72,7 +71,6 @@ fun AppTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
     label: String? = null,
-    leadingIcon: ImageVector? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     singleLine: Boolean = true,
@@ -101,17 +99,6 @@ fun AppTextField(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-            },
-            leadingIcon = if (leadingIcon != null) {
-                {
-                    Icon(
-                        imageVector = leadingIcon,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            } else {
-                null
             },
             singleLine = singleLine,
             keyboardOptions = keyboardOptions,

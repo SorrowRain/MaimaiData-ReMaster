@@ -24,8 +24,7 @@ import kotlin.math.roundToInt
 object LXNSCatalogConverter {
     data class CatalogConversionResult(
         val songs: List<SongData>,
-        val latestMajorVersion: Int,
-        val latestVersionTitle: String
+        val latestMajorVersion: Int
     )
 
     private data class PlateMeta(
@@ -71,12 +70,10 @@ object LXNSCatalogConverter {
     fun convertCatalog(
         songResponse: LXNSSongListResponse,
         aliasResponse: LXNSAliasListResponse?,
-        existingBaseline: List<SongData> = emptyList(),
-        previousVersionResponse: LXNSSongListResponse? = null
+        existingBaseline: List<SongData> = emptyList()
     ): CatalogConversionResult {
         val sortedVersions = songResponse.versions.sortedBy { it.version }
         val latestMajor = sortedVersions.lastOrNull()?.version ?: 25_500
-        val latestTitle = sortedVersions.lastOrNull()?.title ?: MaimaiConstants.latestCNVersion.name
 
         val aliasByBaseId = HashMap<Int, List<String>>(aliasResponse?.aliases?.size ?: 0)
         aliasResponse?.aliases?.forEach { item ->
@@ -96,17 +93,6 @@ object LXNSCatalogConverter {
             .maxOrNull() ?: latestMajor
         val didAdvanceMajorVersion = existingMaxMajor < latestMajor
 
-        val explicitPreviousDs = HashMap<String, Double>()
-        previousVersionResponse?.songs?.forEach { prevSong ->
-            for (diff in prevSong.difficulties.standard) {
-                explicitPreviousDs["${prevSong.id}_${diff.difficulty}"] = diff.levelValue
-            }
-            val dxId = if (prevSong.id < 10_000) prevSong.id + 10_000 else prevSong.id
-            for (diff in prevSong.difficulties.dx) {
-                explicitPreviousDs["${dxId}_${diff.difficulty}"] = diff.levelValue
-            }
-        }
-
         fun resolveFromName(chartVersion: Int): String {
             if (sortedVersions.isEmpty()) return "舞萌DX"
             var matched = sortedVersions[0]
@@ -124,10 +110,6 @@ object LXNSCatalogConverter {
         }
 
         fun resolveOldDs(songId: Int, chartCount: Int): List<Double>? {
-            if (explicitPreviousDs.isNotEmpty()) {
-                val arr = (0 until chartCount).map { idx -> explicitPreviousDs["${songId}_$idx"] ?: 0.0 }
-                return arr.takeIf { list -> list.any { it > 0.0 } }
-            }
             val existing = existingById[songId] ?: return null
             val source = if (didAdvanceMajorVersion) existing.ds else existing.oldDs.orEmpty()
             if (source.isEmpty()) return null
@@ -289,8 +271,7 @@ object LXNSCatalogConverter {
 
         return CatalogConversionResult(
             songs = result,
-            latestMajorVersion = latestMajor,
-            latestVersionTitle = latestTitle
+            latestMajorVersion = latestMajor
         )
     }
 

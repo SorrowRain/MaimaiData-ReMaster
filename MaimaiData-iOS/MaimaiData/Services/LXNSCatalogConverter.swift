@@ -38,12 +38,10 @@ enum LXNSCatalogConverter {
     static func convertCatalog(
         songResponse: LXNSSongListResponse,
         aliasResponse: LXNSAliasListResponse?,
-        existingBaseline: [SongData] = [],
-        previousVersionResponse: LXNSSongListResponse? = nil
-    ) -> (songs: [SongData], latestMajorVersion: Int, latestVersionTitle: String) {
+        existingBaseline: [SongData] = []
+    ) -> (songs: [SongData], latestMajorVersion: Int) {
         let sortedVersions = songResponse.versions.sorted { $0.version < $1.version }
         let latestMajor = sortedVersions.last?.version ?? 25500
-        let latestTitle = sortedVersions.last?.title ?? MaimaiConstants.latestCNVersion.name
 
         var aliasByBaseId: [Int: [String]] = [:]
         if let aliasResponse {
@@ -62,19 +60,6 @@ enum LXNSCatalogConverter {
         let existingMaxMajor: Int = existingBaseline.compactMap { Int($0.basicInfo.version) }.max() ?? latestMajor
         let didAdvanceMajorVersion = existingMaxMajor < latestMajor
 
-        var explicitPreviousDs: [String: Double] = [:]
-        if let previousVersionResponse {
-            for prevSong in previousVersionResponse.songs {
-                for diff in prevSong.difficulties.standard {
-                    explicitPreviousDs["\(prevSong.id)_\(diff.difficulty)"] = diff.levelValue
-                }
-                let dxId = prevSong.id < 10_000 ? prevSong.id + 10_000 : prevSong.id
-                for diff in prevSong.difficulties.dx {
-                    explicitPreviousDs["\(dxId)_\(diff.difficulty)"] = diff.levelValue
-                }
-            }
-        }
-
         func resolveFromName(for chartVersion: Int) -> String {
             guard !sortedVersions.isEmpty else { return "舞萌DX" }
             var matched = sortedVersions[0]
@@ -92,10 +77,6 @@ enum LXNSCatalogConverter {
         }
 
         func resolveOldDs(songId: Int, chartCount: Int) -> [Double]? {
-            if !explicitPreviousDs.isEmpty {
-                let arr = (0..<chartCount).map { idx in explicitPreviousDs["\(songId)_\(idx)"] ?? 0 }
-                return arr.contains(where: { $0 > 0 }) ? arr : nil
-            }
             guard let existing = existingById[songId] else { return nil }
             let source = didAdvanceMajorVersion ? existing.ds : (existing.oldDs ?? [])
             guard !source.isEmpty else { return nil }
@@ -255,7 +236,7 @@ enum LXNSCatalogConverter {
             }
         }
 
-        return (result, latestMajor, latestTitle)
+        return (result, latestMajor)
     }
 
     // MARK: - 2. CN Official Plate Rules Extraction

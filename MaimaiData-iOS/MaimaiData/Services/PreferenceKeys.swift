@@ -5,7 +5,6 @@ enum PreferenceKeys {
     static let favorites = "favorite_ids"
     static let searchHistory = "search_history"
     static let activeProfileId = "active_score_profile_id"
-    static let dataVersion = "song_data_version"
     static let serverRegion = "server_region"
     static let cnCatalogSync = "cn_catalog_sync_ts"
     static let zetarakuSync = "zetaraku_sync_ts"

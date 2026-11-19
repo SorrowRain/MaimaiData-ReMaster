@@ -43,7 +43,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import java.io.File
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -203,16 +202,6 @@ class DataStore(context: Context) {
 
     val isLoggedIn: Boolean
         get() = activeProfile != null
-
-    private var _dataVersion: String by mutableStateOf(SEED_DATA_VERSION)
-    var dataVersion: String
-        get() = _dataVersion
-        private set(value) {
-            if (_dataVersion != value) {
-                _dataVersion = value
-                prefs.edit().putString(PreferenceKeys.dataVersion, value).apply()
-            }
-        }
 
     private var _serverRegion: MaimaiConstants.ServerRegion by mutableStateOf(MaimaiConstants.ServerRegion.CN)
     var serverRegion: MaimaiConstants.ServerRegion
@@ -430,7 +419,6 @@ class DataStore(context: Context) {
         profiles = loadedProfiles.profiles
         activeProfileId = loadedProfiles.activeProfileId
 
-        _dataVersion = prefs.getString(PreferenceKeys.dataVersion, null) ?: SEED_DATA_VERSION
         _serverRegion = MaimaiConstants.ServerRegion.fromRawValue(
             prefs.getString(PreferenceKeys.serverRegion, null)
         )
@@ -465,7 +453,7 @@ class DataStore(context: Context) {
         loadLocalCaches()
 
         if (serverRegion != MaimaiConstants.ServerRegion.CN && zetarakuCatalog == null) {
-            syncZetarakuCatalog(force = false)
+            syncZetarakuCatalog()
         }
 
         delay(SyncPolicy.BOOTSTRAP_DELAY_MS)
@@ -525,8 +513,7 @@ class DataStore(context: Context) {
         val zetaraku: ZetarakuCatalog? = null,
         val dxIdMap: DXDataIdMap? = null,
         val stats: ChartStatsResponse? = null,
-        val records: List<ProberRecord>? = null,
-        val usedSeed: Boolean = false
+        val records: List<ProberRecord>? = null
     )
 
     private data class SongSnapshot(
@@ -541,7 +528,6 @@ class DataStore(context: Context) {
 
         val caches = withContext(Dispatchers.IO) {
             var loadedSongs: List<SongData>? = null
-            var usedSeed = false
             if (cachedSongsFile.exists()) {
                 loadedSongs = runCatching {
                     MaimaiAPI.json.decodeFromString<List<SongData>>(cachedSongsFile.readText(Charsets.UTF_8))
@@ -558,7 +544,6 @@ class DataStore(context: Context) {
                     if (decoded != null) {
                         writeBytesAtomically(cachedSongsFile, seedBytes)
                         loadedSongs = decoded
-                        usedSeed = true
                     }
                 }
             }
@@ -622,8 +607,7 @@ class DataStore(context: Context) {
                 zetaraku = loadedZetaraku,
                 dxIdMap = loadedIdMap,
                 stats = loadedStats,
-                records = loadedRecords,
-                usedSeed = usedSeed
+                records = loadedRecords
             )
         }
 
@@ -633,9 +617,6 @@ class DataStore(context: Context) {
         var cnSnapshot: SongSnapshot? = null
         if (caches.songs != null) {
             cnSnapshot = storeCNBaseline(caches.songs)
-            if (caches.usedSeed) {
-                dataVersion = SEED_DATA_VERSION
-            }
         }
 
         val epoch = regionEpoch
@@ -802,7 +783,7 @@ class DataStore(context: Context) {
             refreshZetarakuIfStale()
             return
         }
-        syncZetarakuCatalog(force = false)
+        syncZetarakuCatalog()
     }
 
     suspend fun syncAllCatalogsAndRules(force: Boolean = false) = withContext(Dispatchers.Main.immediate) {
@@ -888,10 +869,10 @@ class DataStore(context: Context) {
         ) {
             return
         }
-        syncZetarakuCatalog(force = false)
+        syncZetarakuCatalog()
     }
 
-    suspend fun syncZetarakuCatalog(force: Boolean = false) = withContext(Dispatchers.Main.immediate) {
+    private suspend fun syncZetarakuCatalog() = withContext(Dispatchers.Main.immediate) {
         val err = performZetarakuSync()
         val catalog = zetarakuCatalog
         if (catalog != null && serverRegion != MaimaiConstants.ServerRegion.CN) {
@@ -899,7 +880,6 @@ class DataStore(context: Context) {
         }
         if (err != null && serverRegion != MaimaiConstants.ServerRegion.CN) {
             val detail = err.message ?: "网络请求异常"
-            statusMessage = if (force) "曲库同步失败：$detail" else null
             syncNotice = DataSyncNotice(
                 kind = DataSyncNotice.Kind.SONGS,
                 message = "${serverRegion.shortName}曲库获取失败，正在使用本地缓存。\n$detail"
@@ -957,14 +937,14 @@ class DataStore(context: Context) {
             val plateResp = runCatching { MaimaiAPI.fetchLXNSPlates() }.getOrNull()
 
             val baselineSnapshot = cnSongs
-            val (convertedSongs, convertedPlates, stamp) = withContext(Dispatchers.Default) {
+            val (convertedSongs, convertedPlates) = withContext(Dispatchers.Default) {
                 val catalogResult = LXNSCatalogConverter.convertCatalog(
                     songResponse = songResp,
                     aliasResponse = aliasResp,
                     existingBaseline = baselineSnapshot
                 )
                 val platesResult = plateResp?.let { LXNSCatalogConverter.extractPlateCatalog(it) }
-                Triple(catalogResult.songs, platesResult, LocalDate.now().toString())
+                catalogResult.songs to platesResult
             }
 
             withContext(Dispatchers.IO) {
@@ -979,7 +959,6 @@ class DataStore(context: Context) {
             if (convertedPlates != null) {
                 plateCatalog = convertedPlates
             }
-            dataVersion = stamp
             lastCNCatalogSyncEpochMs = System.currentTimeMillis()
             return convertedSongs to null
         } catch (ce: CancellationException) {
@@ -1728,7 +1707,6 @@ class DataStore(context: Context) {
     }
 
     companion object {
-        private const val SEED_DATA_VERSION = "2026-11-18"
         private val SYNC_TIME_FORMATTER: DateTimeFormatter =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
 

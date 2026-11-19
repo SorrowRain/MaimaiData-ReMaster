@@ -71,7 +71,6 @@ object AppTheme {
         // Judgments
         val judgePerfect = Color(0xFF854400)
         val judgeGreat = Color(0xFFB72267)
-        val judgeGood = Color(0xFF176523)
 
         // Rating tool row icons
         val ratingPurple = Color(0xFF9F51DC)
@@ -141,7 +140,6 @@ object AppTheme {
         val surfaceDark = Color(0xFF172135)
         val insetLight = Color(0xFFF3F6FC)
         val insetDark = Color(0xFF101829)
-        val hairline = Color(0xFF0F2952)
         val pageDarkGradient = listOf(Color(0xFF0B1120), Color(0xFF0F172A), Color(0xFF111827))
         val pageLightGradient = listOf(Color(0xFFEFF4FC), Color(0xFFF5F8FD), Color(0xFFF1F5FB))
     }
@@ -182,7 +180,6 @@ object AppTheme {
         val metricDisplay = TextStyle(fontSize = 20.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold, platformStyle = tightPlatform, localeList = cjkLocale)
         val sectionMetric = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = TABULAR, platformStyle = tightPlatform, localeList = cjkLocale)
         val cardTitle = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, platformStyle = tightPlatform, localeList = cjkLocale)
-        val statValue = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = TABULAR, platformStyle = tightPlatform, localeList = cjkLocale)
 
         // L2 Row, Button & Input Content
         val songTitle = TextStyle(fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, platformStyle = tightPlatform, localeList = cjkLocale)

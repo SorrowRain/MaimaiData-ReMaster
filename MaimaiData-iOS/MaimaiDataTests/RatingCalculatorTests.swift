@@ -40,6 +40,18 @@ final class RatingCalculatorTests: XCTestCase {
         }
     }
 
+    func testReverseCalculateMaxBoundaryAndUnreachableTarget() {
+        // 15.0 @ 100.5% = 337 -> 337 * 50 = 16850 exact boundary
+        let maxRows = RatingCalculator.reverseCalculate(targetTotalRating: 16850)
+        XCTAssertFalse(maxRows.isEmpty)
+        let ssspRow = maxRows.first { $0.achi == 1_005_000 }
+        XCTAssertEqual(ssspRow?.minLv, 150)
+        XCTAssertEqual(ssspRow?.singleRating, 337)
+        XCTAssertEqual(ssspRow?.totalRating, 16850)
+
+        XCTAssertTrue(RatingCalculator.reverseCalculate(targetTotalRating: 17000).isEmpty)
+    }
+
     func testFinaleToDxConversion() throws {
         // Missing break notes must throw
         XCTAssertThrowsError(
@@ -116,5 +128,43 @@ final class RatingCalculatorTests: XCTestCase {
         XCTAssertTrue(info.isNewer(than: "1.0.0"))
         XCTAssertFalse(info.isNewer(than: "1.1.0"))
         XCTAssertFalse(info.isNewer(than: "1.2.0"))
+    }
+
+    func testRecordAccessibilityLabelsAndChartToleranceMetrics() throws {
+        let apJson = """
+        {"achievements":101.0,"ds":14.8,"fc":"ap","fs":"fsd","level":"14+","level_index":3,"ra":333,"rate":"sssp","song_id":10001,"title":"T","type":"DX"}
+        """.data(using: .utf8)!
+        let appJson = """
+        {"achievements":101.0,"ds":14.8,"fc":"app","fs":"fsdp","level":"14+","level_index":3,"ra":333,"rate":"sssp","song_id":10001,"title":"T","type":"DX"}
+        """.data(using: .utf8)!
+        let apRecord = try JSONDecoder().decode(ProberRecord.self, from: apJson)
+        let appRecord = try JSONDecoder().decode(ProberRecord.self, from: appJson)
+        XCTAssertEqual(apRecord.fcAccessibilityLabel, "连击状态 AP")
+        XCTAssertEqual(appRecord.fcAccessibilityLabel, "连击状态 AP+")
+        XCTAssertEqual(apRecord.fsAccessibilityLabel, "同步状态 FSD")
+        XCTAssertEqual(appRecord.fsAccessibilityLabel, "同步状态 FSD+")
+
+        let chart = ResolvedChart(
+            index: 3,
+            difficulty: .master,
+            ds: 14.8,
+            oldDs: nil,
+            level: "14+",
+            charter: "Tester",
+            kanji: nil,
+            tap: 500,
+            hold: 50,
+            slide: 50,
+            touch: 0,
+            breakCount: 50,
+            totalNotes: 650
+        )
+        let metrics = try XCTUnwrap(chart.toleranceMetrics)
+        // totalWeightedScore = 500 + 100 + 150 + 250 = 1000
+        XCTAssertEqual(metrics.tapGreat, 0.0002, accuracy: 1e-9)
+        XCTAssertEqual(metrics.breakPerfect50 ?? 0, 0.00005, accuracy: 1e-9)
+        // FiNALE theoretical max: (250000 + 50000 + 75000 + 130000) / (250000 + 50000 + 75000 + 125000) = 505000 / 500000 = 101.00%
+        XCTAssertEqual(chart.finaleTheoreticalMax(isDX: false), 101.0)
+        XCTAssertNil(chart.finaleTheoreticalMax(isDX: true))
     }
 }

@@ -33,8 +33,6 @@ enum AppTheme {
         // Judgments
         static let judgePerfect = Color(hex: 0x854400)
         static let judgeGreat = Color(hex: 0xB72267)
-        static let judgeGood = Color(hex: 0x176523)
-        static let judgeMiss = Color(.secondaryLabel)
 
         // Rating tool row icons (shared with note / difficulty colors)
         static let ratingPurple = Color(hex: 0x9F51DC)
@@ -135,7 +133,6 @@ enum AppTheme {
         static let metricDisplay = Font.title3.weight(.bold)
         static let sectionMetric = Font.headline.weight(.bold).monospacedDigit()
         static let cardTitle = Font.headline
-        static let statValue = Font.callout.weight(.bold).monospacedDigit()
 
         // 2. Row, Button & Input Content (15pt)
         static let songTitle = Font.subheadline.weight(.semibold)
