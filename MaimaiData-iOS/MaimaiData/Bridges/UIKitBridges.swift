@@ -166,6 +166,7 @@ struct TabCrossfadeBridge: UIViewControllerRepresentable {
 enum WebAuthSessionError: LocalizedError {
     case cancelled
     case missingCallbackURL
+    case failedToStart
 
     var errorDescription: String? {
         switch self {
@@ -173,6 +174,8 @@ enum WebAuthSessionError: LocalizedError {
             return nil
         case .missingCallbackURL:
             return "未收到授权回调地址"
+        case .failedToStart:
+            return "无法启动系统授权窗口，请稍后重试"
         }
     }
 }
@@ -181,36 +184,65 @@ enum WebAuthSessionError: LocalizedError {
 @MainActor
 final class WebAuthSessionRunner: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var activeSession: ASWebAuthenticationSession?
+    private var activeContinuation: CheckedContinuation<URL, Error>?
 
     func authenticate(url: URL, callbackScheme: String) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(
-                url: url,
-                callbackURLScheme: callbackScheme
-            ) { [weak self] callbackURL, error in
-                Task { @MainActor in
-                    self?.activeSession = nil
-                    if let error {
-                        if let authError = error as? ASWebAuthenticationSessionError,
-                           authError.code == .canceledLogin {
-                            continuation.resume(throwing: WebAuthSessionError.cancelled)
-                        } else {
-                            continuation.resume(throwing: error)
+        cancelActiveSession()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.activeContinuation = continuation
+                let session = ASWebAuthenticationSession(
+                    url: url,
+                    callbackURLScheme: callbackScheme
+                ) { [weak self] callbackURL, error in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        if let error {
+                            if let authError = error as? ASWebAuthenticationSessionError,
+                               authError.code == .canceledLogin {
+                                self.finish(with: .failure(WebAuthSessionError.cancelled))
+                            } else {
+                                self.finish(with: .failure(error))
+                            }
+                            return
                         }
-                        return
+                        guard let callbackURL else {
+                            self.finish(with: .failure(WebAuthSessionError.missingCallbackURL))
+                            return
+                        }
+                        self.finish(with: .success(callbackURL))
                     }
-                    guard let callbackURL else {
-                        continuation.resume(throwing: WebAuthSessionError.missingCallbackURL)
-                        return
-                    }
-                    continuation.resume(returning: callbackURL)
+                }
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = false
+                self.activeSession = session
+                if !session.start() {
+                    self.finish(with: .failure(WebAuthSessionError.failedToStart))
                 }
             }
-            session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = false
-            self.activeSession = session
-            session.start()
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelActiveSession()
+            }
         }
+    }
+
+    private func cancelActiveSession() {
+        let session = activeSession
+        activeSession = nil
+        session?.cancel()
+        if let continuation = activeContinuation {
+            activeContinuation = nil
+            continuation.resume(throwing: WebAuthSessionError.cancelled)
+        }
+    }
+
+    private func finish(with result: Result<URL, Error>) {
+        activeSession = nil
+        guard let continuation = activeContinuation else { return }
+        activeContinuation = nil
+        continuation.resume(with: result)
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -223,6 +255,9 @@ final class WebAuthSessionRunner: NSObject, ASWebAuthenticationPresentationConte
         }
         if let anyWindow = scenes.flatMap(\.windows).first {
             return anyWindow
+        }
+        if let scene = scenes.first {
+            return UIWindow(windowScene: scene)
         }
         return ASPresentationAnchor()
     }

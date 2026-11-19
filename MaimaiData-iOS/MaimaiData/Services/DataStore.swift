@@ -733,6 +733,7 @@ final class DataStore {
 
     func removeProfile(id profileId: UUID) {
         let wasActive = (activeProfileId == profileId)
+        inFlightTokenRefreshTasks.removeValue(forKey: profileId)?.cancel()
         AccountCredentialStore.deleteSecret(for: profileId)
         let recordFile = AccountCredentialStore.recordsFileURL(for: profileId, in: appSupportDir)
         try? FileManager.default.removeItem(at: recordFile)
@@ -999,7 +1000,11 @@ final class DataStore {
                     try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: initialAccessToken)
                 }.value
             } catch MaimaiAPIError.unauthorized {
-                let refreshedAccessToken = try await validLXNSAccessToken(for: profileId, forceRefresh: true)
+                let refreshedAccessToken = try await validLXNSAccessToken(
+                    for: profileId,
+                    forceRefresh: true,
+                    failedAccessToken: initialAccessToken
+                )
                 (player, lxScores) = try await Task {
                     try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: refreshedAccessToken)
                 }.value
@@ -1040,13 +1045,20 @@ final class DataStore {
     }
 
     /// Serializes LXNS refresh-token exchange per profile and persists the rotated `refresh_token` immediately.
-    private func validLXNSAccessToken(for profileId: UUID, forceRefresh: Bool) async throws -> String {
+    private func validLXNSAccessToken(
+        for profileId: UUID,
+        forceRefresh: Bool,
+        failedAccessToken: String? = nil
+    ) async throws -> String {
         if let existingTask = inFlightTokenRefreshTasks[profileId] {
             return try await existingTask.value
         }
 
         let currentSecret = AccountCredentialStore.loadSecret(for: profileId)
-        if !forceRefresh,
+        let alreadyRotatedSinceFailure = failedAccessToken != nil
+            && !currentSecret.accessToken.isEmpty
+            && currentSecret.accessToken != failedAccessToken
+        if (!forceRefresh || alreadyRotatedSinceFailure),
            !currentSecret.accessToken.isEmpty,
            let expiresAt = currentSecret.accessTokenExpiresAt,
            Date().timeIntervalSince1970 < expiresAt - 30 {
@@ -1061,14 +1073,21 @@ final class DataStore {
         let task = Task<String, Error> { @MainActor in
             defer { inFlightTokenRefreshTasks[profileId] = nil }
             let refreshed = try await MaimaiAPI.refreshLXNSToken(refreshToken: refreshTokenToUse)
+            guard profiles.contains(where: { $0.id == profileId }) else {
+                throw MaimaiAPIError.unauthorized("该成绩档案已被移除")
+            }
             var updated = AccountCredentialStore.loadSecret(for: profileId)
             updated.accessToken = refreshed.accessToken
             if let newRefresh = refreshed.refreshToken, !newRefresh.isEmpty {
                 updated.refreshToken = newRefresh
             }
             updated.accessTokenExpiresAt = Date().timeIntervalSince1970 + Double(refreshed.expiresIn)
-            // Persist rotated refresh token synchronously before returning!
-            AccountCredentialStore.saveSecret(updated, for: profileId)
+            // Persist rotated refresh token synchronously before returning; retry once on transient Keychain error.
+            let persisted = AccountCredentialStore.saveSecret(updated, for: profileId)
+                || AccountCredentialStore.saveSecret(updated, for: profileId)
+            guard persisted else {
+                throw MaimaiAPIError.unauthorized("落雪授权令牌保存失败，请重新授权登录")
+            }
             return refreshed.accessToken
         }
         inFlightTokenRefreshTasks[profileId] = task

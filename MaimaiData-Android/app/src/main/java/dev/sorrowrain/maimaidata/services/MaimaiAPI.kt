@@ -37,7 +37,6 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 sealed class MaimaiAPIException(message: String) : Exception(message) {
@@ -487,6 +486,9 @@ object MaimaiAPI {
                 return bytes
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                if (e is MaimaiAPIException.HttpError && e.code in 400..499 && e.code != 429) {
+                    throw e
+                }
                 lastError = e
                 if (attempt + 1 < maxAttempts) {
                     delay((attempt + 1) * 700L)
@@ -535,10 +537,12 @@ object MaimaiAPI {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                if (cont.isCancelled) {
+                if (!cont.isActive) {
                     response.close()
                 } else {
-                    cont.resume(response)
+                    cont.resume(response) { _, res, _ ->
+                        res.close()
+                    }
                 }
             }
         })
@@ -567,8 +571,16 @@ object MaimaiAPI {
             val eqIdx = pair.indexOf('=')
             val rawKey = if (eqIdx >= 0) pair.substring(0, eqIdx) else pair
             val rawVal = if (eqIdx >= 0) pair.substring(eqIdx + 1) else ""
-            val key = URLDecoder.decode(rawKey, Charsets.UTF_8.name())
-            val value = URLDecoder.decode(rawVal, Charsets.UTF_8.name())
+            val key = try {
+                URLDecoder.decode(rawKey, Charsets.UTF_8.name())
+            } catch (_: IllegalArgumentException) {
+                throw MaimaiAPIException.InvalidUrl()
+            }
+            val value = try {
+                URLDecoder.decode(rawVal, Charsets.UTF_8.name())
+            } catch (_: IllegalArgumentException) {
+                throw MaimaiAPIException.InvalidUrl()
+            }
             result.putIfAbsent(key, value)
         }
         return result

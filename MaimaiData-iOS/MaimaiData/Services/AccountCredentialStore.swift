@@ -8,21 +8,13 @@ enum AccountCredentialStore {
     private static let profilesKey = "score_profiles_v2"
     private static let legacyAccountsKey = "saved_accounts"
 
-    static func load(_ key: String) -> String {
+    private static func load(_ key: String) -> String {
         guard let data = loadData(key),
               let value = String(data: data, encoding: .utf8) else { return "" }
         return value
     }
 
-    static func save(_ value: String, key: String) {
-        if value.isEmpty {
-            delete(key)
-            return
-        }
-        saveData(Data(value.utf8), key: key)
-    }
-
-    static func delete(_ key: String) {
+    private static func delete(_ key: String) {
         let query = baseQuery(key)
         SecItemDelete(query as CFDictionary)
     }
@@ -38,18 +30,20 @@ enum AccountCredentialStore {
         return decoded
     }
 
-    static func saveSecret(_ secret: ScoreProfileSecret, for profileId: UUID) {
-        guard let data = try? JSONEncoder().encode(secret) else { return }
-        saveData(data, key: secretKey(for: profileId))
+    @discardableResult
+    static func saveSecret(_ secret: ScoreProfileSecret, for profileId: UUID) -> Bool {
+        guard let data = try? JSONEncoder().encode(secret) else { return false }
+        return saveData(data, key: secretKey(for: profileId))
     }
 
     static func deleteSecret(for profileId: UUID) {
         delete(secretKey(for: profileId))
     }
 
-    static func saveProfiles(_ profiles: [ScoreProfile]) {
-        guard let data = try? JSONEncoder().encode(profiles) else { return }
-        saveData(data, key: profilesKey)
+    @discardableResult
+    static func saveProfiles(_ profiles: [ScoreProfile]) -> Bool {
+        guard let data = try? JSONEncoder().encode(profiles) else { return false }
+        return saveData(data, key: profilesKey)
     }
 
     static func loadOrMigrateProfiles(
@@ -59,15 +53,24 @@ enum AccountCredentialStore {
         let storedActiveId = defaults.string(forKey: PreferenceKeys.activeProfileId)
             .flatMap(UUID.init(uuidString:))
 
-        if let existingData = loadData(profilesKey),
-           let existingProfiles = try? JSONDecoder().decode([ScoreProfile].self, from: existingData) {
-            let validActiveId = existingProfiles.contains(where: { $0.id == storedActiveId })
-                ? storedActiveId
-                : existingProfiles.first?.id
-            if validActiveId != storedActiveId {
-                defaults.set(validActiveId?.uuidString, forKey: PreferenceKeys.activeProfileId)
+        switch loadDataResult(profilesKey) {
+        case .found(let existingData):
+            if let existingProfiles = try? JSONDecoder().decode([ScoreProfile].self, from: existingData) {
+                let validActiveId = existingProfiles.contains(where: { $0.id == storedActiveId })
+                    ? storedActiveId
+                    : existingProfiles.first?.id
+                if validActiveId != storedActiveId {
+                    defaults.set(validActiveId?.uuidString, forKey: PreferenceKeys.activeProfileId)
+                }
+                return (existingProfiles, validActiveId)
             }
-            return (existingProfiles, validActiveId)
+            // Existing profiles payload could not be decoded — never overwrite or wipe saved data.
+            return ([], nil)
+        case .failed:
+            // Keychain temporarily unavailable (e.g. locked) — never overwrite or wipe saved data.
+            return ([], nil)
+        case .notFound:
+            break
         }
 
         // One-time migration from legacy Diving-Fish single-account storage
@@ -173,29 +176,52 @@ enum AccountCredentialStore {
 
     // MARK: - Keychain Helpers
 
+    private enum KeychainReadResult {
+        case found(Data)
+        case notFound
+        case failed(OSStatus)
+    }
+
     private static func secretKey(for profileId: UUID) -> String {
         "profile_secret_\(profileId.uuidString.lowercased())"
     }
 
     private static func loadData(_ key: String) -> Data? {
+        if case .found(let data) = loadDataResult(key) {
+            return data
+        }
+        return nil
+    }
+
+    private static func loadDataResult(_ key: String) -> KeychainReadResult {
         var query = baseQuery(key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return data
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess, let data = result as? Data {
+            return .found(data)
+        }
+        if status == errSecItemNotFound {
+            return .notFound
+        }
+        return .failed(status)
     }
 
-    private static func saveData(_ data: Data, key: String) {
+    @discardableResult
+    private static func saveData(_ data: Data, key: String) -> Bool {
         let query = baseQuery(key)
         let attributes = [kSecValueData as String: data]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecSuccess {
+            return true
+        }
         if status == errSecItemNotFound {
             var item = query
             item.merge(attributes) { _, new in new }
-            SecItemAdd(item as CFDictionary, nil)
+            return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
         }
+        return false
     }
 
     private static func baseQuery(_ key: String) -> [String: Any] {

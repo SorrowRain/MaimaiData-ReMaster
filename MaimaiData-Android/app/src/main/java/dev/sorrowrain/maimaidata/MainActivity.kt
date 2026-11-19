@@ -18,7 +18,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        dispatchOAuthCallbackIfPresent(intent)
+        if (savedInstanceState == null) {
+            dispatchOAuthCallbackIfPresent(intent)
+        }
 
         setContent {
             MaimaiDataTheme {
@@ -38,6 +40,7 @@ class MainActivity : ComponentActivity() {
     private fun dispatchOAuthCallbackIfPresent(intent: Intent?) {
         val uri = intent?.data ?: return
         if (uri.scheme == "maimaidata") {
+            intent.data = null
             dataStore.onOAuthCallbackIntent(uri.toString())
         }
     }

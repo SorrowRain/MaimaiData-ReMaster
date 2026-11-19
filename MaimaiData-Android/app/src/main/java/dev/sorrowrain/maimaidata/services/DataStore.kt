@@ -31,11 +31,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -149,12 +149,12 @@ class DataStore(context: Context) {
     @Volatile
     private var pendingPKCESession: PendingPKCESession? = null
 
-    private val _pendingOAuthCallbacks = MutableSharedFlow<String>(extraBufferCapacity = 4)
-    val pendingOAuthCallbacks: SharedFlow<String> = _pendingOAuthCallbacks.asSharedFlow()
+    private val _pendingOAuthCallbacks = Channel<String>(capacity = Channel.BUFFERED)
+    val pendingOAuthCallbacks: Flow<String> = _pendingOAuthCallbacks.receiveAsFlow()
 
-    // Per-profile single-flight mutex & recent rotation timestamp for LXNS refresh_token rotation
+    // Per-profile single-flight mutex for LXNS refresh_token rotation & profile list write serialization
     private val tokenRefreshMutexes = ConcurrentHashMap<String, Mutex>()
-    private val lastTokenRotationEpochMs = ConcurrentHashMap<String, Long>()
+    private val profilePersistMutex = Mutex()
 
     // Persisted Preferences & Multi-Provider Score Profiles
     private var _favoriteIds: Set<String> by mutableStateOf(emptySet())
@@ -1017,12 +1017,8 @@ class DataStore(context: Context) {
 
     // Multi-Provider Score Profile Management & OAuth 2.0 + PKCE
 
-    fun emitOAuthCallback(uriString: String) {
-        _pendingOAuthCallbacks.tryEmit(uriString)
-    }
-
     fun onOAuthCallbackIntent(uriString: String) {
-        emitOAuthCallback(uriString)
+        _pendingOAuthCallbacks.trySend(uriString)
     }
 
     fun cancelPendingLXNSOAuth() {
@@ -1043,202 +1039,177 @@ class DataStore(context: Context) {
         )
     }
 
+    private suspend fun <T> runDetachedRecordSync(block: suspend () -> T): T =
+        withContext(Dispatchers.Main.immediate) {
+            if (isSyncingRecords) throw MaimaiAPIException.SyncInProgress()
+            isSyncingRecords = true
+            storeScope.async {
+                try {
+                    block()
+                } finally {
+                    withContext(NonCancellable + Dispatchers.Main.immediate) {
+                        isSyncingRecords = false
+                    }
+                }
+            }.await()
+        }
+
     suspend fun completeLXNSOAuth(callbackUriString: String): ScoreProfile = withContext(Dispatchers.Main.immediate) {
         val session = pendingPKCESession ?: throw MaimaiAPIException.OAuthStateMismatch()
         pendingPKCESession = null
         val code = MaimaiAPI.parseOAuthCallback(callbackUriString, expectedState = session.state)
 
-        if (isSyncingRecords) throw MaimaiAPIException.SyncInProgress()
-        isSyncingRecords = true
-        try {
-            storeScope.async {
-                val tokenResp = MaimaiAPI.exchangeLXNSCode(code = code, codeVerifier = session.codeVerifier)
-                val expiresAtSec = System.currentTimeMillis() / 1000L + tokenResp.expiresIn
-                val userInfo = runCatching { MaimaiAPI.fetchLXNSUserInfo(tokenResp.accessToken) }.getOrNull()
+        runDetachedRecordSync {
+            val tokenResp = MaimaiAPI.exchangeLXNSCode(code = code, codeVerifier = session.codeVerifier)
+            val expiresAtSec = System.currentTimeMillis() / 1000L + tokenResp.expiresIn
+            val userInfo = runCatching { MaimaiAPI.fetchLXNSUserInfo(tokenResp.accessToken) }.getOrNull()
 
-                val accountKey = userInfo?.sub?.takeIf { it.isNotEmpty() }?.let { "oidc_$it" }
-                    ?: "lxns_oauth_${UUID.randomUUID().toString().lowercase(Locale.ROOT)}"
-                val lxUsername = userInfo?.displayUsername.orEmpty()
+            val accountKey = userInfo?.sub?.takeIf { it.isNotEmpty() }?.let { "oidc_$it" }
+                ?: "lxns_oauth_${UUID.randomUUID().toString().lowercase(Locale.ROOT)}"
+            val lxUsername = userInfo?.displayUsername.orEmpty()
 
-                val initialProfile = upsertProfile(
-                    provider = ScoreProvider.LXNS,
-                    authMethod = ScoreAuthMethod.LXNS_OAUTH,
-                    accountKey = accountKey,
-                    username = lxUsername,
-                    nickname = null
+            val initialProfile = upsertProfile(
+                provider = ScoreProvider.LXNS,
+                authMethod = ScoreAuthMethod.LXNS_OAUTH,
+                accountKey = accountKey,
+                username = lxUsername,
+                nickname = null
+            )
+            withContext(NonCancellable + Dispatchers.IO) {
+                AccountCredentialStore.saveSecret(
+                    appContext,
+                    initialProfile.id,
+                    ScoreProfileSecret(
+                        accessToken = tokenResp.accessToken,
+                        refreshToken = tokenResp.refreshToken.orEmpty(),
+                        accessTokenExpiresAtEpochSec = expiresAtSec
+                    )
                 )
-                withContext(NonCancellable + Dispatchers.IO) {
-                    AccountCredentialStore.saveSecret(
-                        appContext,
-                        initialProfile.id,
-                        ScoreProfileSecret(
-                            accessToken = tokenResp.accessToken,
-                            refreshToken = tokenResp.refreshToken.orEmpty(),
-                            accessTokenExpiresAtEpochSec = expiresAtSec
-                        )
-                    )
-                }
-                setActiveProfileInternal(initialProfile.id, restoreFromCache = false)
+            }
+            setActiveProfileInternal(initialProfile.id, restoreFromCache = false)
 
-                try {
-                    val playerAndScores = MaimaiAPI.fetchLXNSOAuthPlayerAndScores(tokenResp.accessToken)
-                    val lookup = mergedSongLookupForScoreImport()
-                    val converted = withContext(Dispatchers.Default) {
-                        LXNSCatalogConverter.convertScores(playerAndScores.scores, lookup)
-                    }
-                    val syncedAt = System.currentTimeMillis()
-                    updateProfileMetadata(
-                        profileId = initialProfile.id,
-                        username = lxUsername,
-                        nickname = playerAndScores.player?.name ?: lxUsername,
-                        syncedAtEpochMs = syncedAt
-                    )
-                    installFetchedRecords(converted, initialProfile.id)
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (err: Throwable) {
-                    throw MaimaiAPIException.RecordSyncFailedAfterLogin(err.message ?: "成绩拉取失败")
+            try {
+                val playerAndScores = MaimaiAPI.fetchLXNSOAuthPlayerAndScores(tokenResp.accessToken)
+                val lookup = mergedSongLookupForScoreImport()
+                val converted = withContext(Dispatchers.Default) {
+                    LXNSCatalogConverter.convertScores(playerAndScores.scores, lookup)
                 }
+                val syncedAt = System.currentTimeMillis()
+                updateProfileMetadata(
+                    profileId = initialProfile.id,
+                    username = lxUsername,
+                    nickname = playerAndScores.player?.name ?: lxUsername,
+                    syncedAtEpochMs = syncedAt
+                )
+                installFetchedRecords(converted, initialProfile.id)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (err: Throwable) {
+                throw MaimaiAPIException.RecordSyncFailedAfterLogin(err.message ?: "成绩拉取失败")
+            }
 
-                profiles.first { it.id == initialProfile.id }
-            }.await()
-        } finally {
-            isSyncingRecords = false
+            profiles.first { it.id == initialProfile.id }
         }
     }
 
     suspend fun addLXNSPersonalTokenProfile(
         rawToken: String,
         remarkName: String = ""
-    ): ScoreProfile = withContext(Dispatchers.Main.immediate) {
-        if (isSyncingRecords) throw MaimaiAPIException.SyncInProgress()
-        isSyncingRecords = true
-        try {
-            storeScope.async {
-                val token = rawToken.trim()
-                val playerAndScores = MaimaiAPI.fetchLXNSPersonalTokenPlayerAndScores(token)
-                val trimmedRemark = remarkName.trim()
-                val accountKey = playerAndScores.player?.friendCode?.let { "fc_$it" }
-                    ?: "lxns_pt_${token.sha256Hex().take(16)}"
-                val nickname = playerAndScores.player?.name?.takeIf { it.isNotEmpty() } ?: trimmedRemark
+    ): ScoreProfile = runDetachedRecordSync {
+        val token = rawToken.trim()
+        val playerAndScores = MaimaiAPI.fetchLXNSPersonalTokenPlayerAndScores(token)
+        val trimmedRemark = remarkName.trim()
+        val accountKey = playerAndScores.player?.friendCode?.let { "fc_$it" }
+            ?: "lxns_pt_${token.sha256Hex().take(16)}"
+        val nickname = playerAndScores.player?.name?.takeIf { it.isNotEmpty() } ?: trimmedRemark
 
-                val lookup = mergedSongLookupForScoreImport()
-                val converted = withContext(Dispatchers.Default) {
-                    LXNSCatalogConverter.convertScores(playerAndScores.scores, lookup)
-                }
-
-                val profile = upsertProfile(
-                    provider = ScoreProvider.LXNS,
-                    authMethod = ScoreAuthMethod.LXNS_PERSONAL_TOKEN,
-                    accountKey = accountKey,
-                    username = trimmedRemark,
-                    nickname = nickname,
-                    syncedAtEpochMs = System.currentTimeMillis()
-                )
-                withContext(NonCancellable + Dispatchers.IO) {
-                    AccountCredentialStore.saveSecret(
-                        appContext,
-                        profile.id,
-                        ScoreProfileSecret(personalToken = token)
-                    )
-                }
-                installFetchedRecords(converted, profile.id)
-                profile
-            }.await()
-        } finally {
-            isSyncingRecords = false
+        val lookup = mergedSongLookupForScoreImport()
+        val converted = withContext(Dispatchers.Default) {
+            LXNSCatalogConverter.convertScores(playerAndScores.scores, lookup)
         }
+
+        val profile = upsertProfile(
+            provider = ScoreProvider.LXNS,
+            authMethod = ScoreAuthMethod.LXNS_PERSONAL_TOKEN,
+            accountKey = accountKey,
+            username = trimmedRemark,
+            nickname = nickname,
+            syncedAtEpochMs = System.currentTimeMillis()
+        )
+        withContext(NonCancellable + Dispatchers.IO) {
+            AccountCredentialStore.saveSecret(
+                appContext,
+                profile.id,
+                ScoreProfileSecret(personalToken = token)
+            )
+        }
+        installFetchedRecords(converted, profile.id)
+        profile
     }
 
     suspend fun addDivingFishPasswordProfile(
         username: String,
         password: String
-    ): ScoreProfile = withContext(Dispatchers.Main.immediate) {
-        if (isSyncingRecords) throw MaimaiAPIException.SyncInProgress()
-        isSyncingRecords = true
-        try {
-            storeScope.async {
-                val trimmedUser = username.trim()
-                val cookie = MaimaiAPI.loginDivingFish(trimmedUser, password)
-                val profile = upsertProfile(
-                    provider = ScoreProvider.DIVING_FISH,
-                    authMethod = ScoreAuthMethod.DIVING_FISH_PASSWORD,
-                    accountKey = trimmedUser,
-                    username = trimmedUser,
-                    nickname = null
-                )
-                withContext(NonCancellable + Dispatchers.IO) {
-                    AccountCredentialStore.saveSecret(
-                        appContext,
-                        profile.id,
-                        ScoreProfileSecret(password = password, cookie = cookie)
-                    )
-                }
-                setActiveProfileInternal(profile.id, restoreFromCache = false)
-
-                try {
-                    performSyncRecords(profile.id)
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (err: Throwable) {
-                    throw MaimaiAPIException.RecordSyncFailedAfterLogin(err.message ?: "成绩拉取失败")
-                }
-
-                profiles.first { it.id == profile.id }
-            }.await()
-        } finally {
-            isSyncingRecords = false
+    ): ScoreProfile = runDetachedRecordSync {
+        val trimmedUser = username.trim()
+        val cookie = MaimaiAPI.loginDivingFish(trimmedUser, password)
+        val profile = upsertProfile(
+            provider = ScoreProvider.DIVING_FISH,
+            authMethod = ScoreAuthMethod.DIVING_FISH_PASSWORD,
+            accountKey = trimmedUser,
+            username = trimmedUser,
+            nickname = null
+        )
+        withContext(NonCancellable + Dispatchers.IO) {
+            AccountCredentialStore.saveSecret(
+                appContext,
+                profile.id,
+                ScoreProfileSecret(password = password, cookie = cookie)
+            )
         }
+        setActiveProfileInternal(profile.id, restoreFromCache = false)
+
+        try {
+            performSyncRecords(profile.id)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
+            throw MaimaiAPIException.RecordSyncFailedAfterLogin(err.message ?: "成绩拉取失败")
+        }
+
+        profiles.first { it.id == profile.id }
     }
 
     suspend fun addDivingFishImportTokenProfile(
         rawToken: String,
         remarkName: String = ""
-    ): ScoreProfile = withContext(Dispatchers.Main.immediate) {
-        if (isSyncingRecords) throw MaimaiAPIException.SyncInProgress()
-        isSyncingRecords = true
-        try {
-            storeScope.async {
-                val token = rawToken.trim()
-                val resp = MaimaiAPI.fetchDivingFishRecordsByImportToken(token)
-                val trimmedRemark = remarkName.trim()
-                val resolvedUsername = resp.username?.takeIf { it.isNotEmpty() } ?: trimmedRemark
-                val accountKey = resp.username?.takeIf { it.isNotEmpty() }
-                    ?: "df_token_${token.sha256Hex().take(16)}"
-                val resolvedNickname = resp.nickname?.takeIf { it.isNotEmpty() } ?: trimmedRemark
+    ): ScoreProfile = runDetachedRecordSync {
+        val token = rawToken.trim()
+        val resp = MaimaiAPI.fetchDivingFishRecordsByImportToken(token)
+        val trimmedRemark = remarkName.trim()
+        val resolvedUsername = resp.username?.takeIf { it.isNotEmpty() } ?: trimmedRemark
+        val accountKey = resp.username?.takeIf { it.isNotEmpty() }
+            ?: "df_token_${token.sha256Hex().take(16)}"
+        val resolvedNickname = resp.nickname?.takeIf { it.isNotEmpty() } ?: trimmedRemark
 
-                val profile = upsertProfile(
-                    provider = ScoreProvider.DIVING_FISH,
-                    authMethod = ScoreAuthMethod.DIVING_FISH_IMPORT_TOKEN,
-                    accountKey = accountKey,
-                    username = resolvedUsername,
-                    nickname = resolvedNickname,
-                    syncedAtEpochMs = System.currentTimeMillis()
-                )
-                withContext(NonCancellable + Dispatchers.IO) {
-                    AccountCredentialStore.saveSecret(
-                        appContext,
-                        profile.id,
-                        ScoreProfileSecret(importToken = token)
-                    )
-                }
-                installFetchedRecords(resp.records.orEmpty(), profile.id)
-                profile
-            }.await()
-        } finally {
-            isSyncingRecords = false
+        val profile = upsertProfile(
+            provider = ScoreProvider.DIVING_FISH,
+            authMethod = ScoreAuthMethod.DIVING_FISH_IMPORT_TOKEN,
+            accountKey = accountKey,
+            username = resolvedUsername,
+            nickname = resolvedNickname,
+            syncedAtEpochMs = System.currentTimeMillis()
+        )
+        withContext(NonCancellable + Dispatchers.IO) {
+            AccountCredentialStore.saveSecret(
+                appContext,
+                profile.id,
+                ScoreProfileSecret(importToken = token)
+            )
         }
+        installFetchedRecords(resp.records.orEmpty(), profile.id)
+        profile
     }
-
-    // Convenience aliases matching iOS method names
-    suspend fun connectLXNSPersonalToken(rawToken: String, remarkName: String = ""): ScoreProfile =
-        addLXNSPersonalTokenProfile(rawToken, remarkName)
-
-    suspend fun connectDivingFishPassword(username: String, password: String): ScoreProfile =
-        addDivingFishPasswordProfile(username, password)
-
-    suspend fun connectDivingFishImportToken(rawToken: String, remarkName: String = ""): ScoreProfile =
-        addDivingFishImportTokenProfile(rawToken, remarkName)
 
     fun switchProfile(profileId: String) {
         if (profiles.none { it.id == profileId } || activeProfileId == profileId) return
@@ -1249,16 +1220,17 @@ class DataStore(context: Context) {
         val wasActive = activeProfileId == profileId
         val updated = profiles.filterNot { it.id == profileId }
         profiles = updated
-        storeScope.launch(Dispatchers.IO) {
-            AccountCredentialStore.saveProfiles(appContext, updated)
-            AccountCredentialStore.deleteSecret(appContext, profileId)
-            val recordFile = AccountCredentialStore.recordsFile(appFilesDir, profileId)
-            if (recordFile.exists()) {
-                recordFile.delete()
+        tokenRefreshMutexes.remove(profileId)
+        storeScope.launch {
+            persistProfiles(updated)
+            withContext(NonCancellable + Dispatchers.IO) {
+                AccountCredentialStore.deleteSecret(appContext, profileId)
+                val recordFile = AccountCredentialStore.recordsFile(appFilesDir, profileId)
+                if (recordFile.exists()) {
+                    recordFile.delete()
+                }
             }
         }
-        tokenRefreshMutexes.remove(profileId)
-        lastTokenRotationEpochMs.remove(profileId)
 
         if (wasActive) {
             val nextId = updated.firstOrNull()?.id
@@ -1276,14 +1248,8 @@ class DataStore(context: Context) {
     suspend fun syncActiveProfileRecords() = withContext(Dispatchers.Main.immediate) {
         if (isSyncingRecords) return@withContext
         val profile = activeProfile ?: throw MaimaiAPIException.Unauthorized("请先添加查分器成绩档案")
-        isSyncingRecords = true
-        try {
-            // Runs in SupervisorJob-backed storeScope so UI pull-to-refresh recomposition never aborts network sync
-            storeScope.async {
-                performSyncRecords(profile.id)
-            }.await()
-        } finally {
-            isSyncingRecords = false
+        runDetachedRecordSync {
+            performSyncRecords(profile.id)
         }
     }
 
@@ -1354,7 +1320,11 @@ class DataStore(context: Context) {
                 val playerAndScores: MaimaiAPI.LXNSPlayerAndScores = try {
                     MaimaiAPI.fetchLXNSOAuthPlayerAndScores(initialToken)
                 } catch (_: MaimaiAPIException.Unauthorized) {
-                    val refreshedToken = validLXNSAccessToken(profileId, forceRefresh = true)
+                    val refreshedToken = validLXNSAccessToken(
+                        profileId = profileId,
+                        forceRefresh = true,
+                        failedAccessToken = initialToken
+                    )
                     MaimaiAPI.fetchLXNSOAuthPlayerAndScores(refreshedToken)
                 }
 
@@ -1397,17 +1367,22 @@ class DataStore(context: Context) {
      * Single-flight per-profile `Mutex` serialization for LXNS OAuth `refresh_token` rotation.
      * Immediately persists rotated `refresh_token` under `NonCancellable` before releasing the lock.
      */
-    private suspend fun validLXNSAccessToken(profileId: String, forceRefresh: Boolean): String {
+    private suspend fun validLXNSAccessToken(
+        profileId: String,
+        forceRefresh: Boolean,
+        failedAccessToken: String? = null
+    ): String {
         val mutex = tokenRefreshMutexes.getOrPut(profileId) { Mutex() }
         return mutex.withLock {
             val currentSecret = withContext(Dispatchers.IO) {
                 AccountCredentialStore.loadSecret(appContext, profileId)
             }
-            val nowMs = System.currentTimeMillis()
-            val nowSec = nowMs / 1000L
-            val recentlyRotated = lastTokenRotationEpochMs[profileId]?.let { nowMs - it < 5_000L } ?: false
+            val nowSec = System.currentTimeMillis() / 1000L
+            val alreadyRotatedSinceFailure = failedAccessToken != null &&
+                currentSecret.accessToken.isNotEmpty() &&
+                currentSecret.accessToken != failedAccessToken
 
-            if ((!forceRefresh || recentlyRotated) &&
+            if ((!forceRefresh || alreadyRotatedSinceFailure) &&
                 currentSecret.accessToken.isNotEmpty() &&
                 currentSecret.accessTokenExpiresAtEpochSec != null &&
                 nowSec < currentSecret.accessTokenExpiresAtEpochSec - 30L
@@ -1420,17 +1395,30 @@ class DataStore(context: Context) {
             }
 
             val refreshed = MaimaiAPI.refreshLXNSToken(currentSecret.refreshToken)
-            val rotatedAtMs = System.currentTimeMillis()
+            val stillExists = withContext(Dispatchers.Main.immediate) {
+                profiles.any { it.id == profileId }
+            }
+            if (!stillExists) {
+                throw MaimaiAPIException.Unauthorized("该成绩档案已被移除")
+            }
+            val rotatedAtSec = System.currentTimeMillis() / 1000L
             val updatedSecret = currentSecret.copy(
                 accessToken = refreshed.accessToken,
                 refreshToken = refreshed.refreshToken?.takeIf { it.isNotEmpty() } ?: currentSecret.refreshToken,
-                accessTokenExpiresAtEpochSec = rotatedAtMs / 1000L + refreshed.expiresIn
+                accessTokenExpiresAtEpochSec = rotatedAtSec + refreshed.expiresIn
             )
             withContext(NonCancellable + Dispatchers.IO) {
                 AccountCredentialStore.saveSecret(appContext, profileId, updatedSecret)
             }
-            lastTokenRotationEpochMs[profileId] = rotatedAtMs
             refreshed.accessToken
+        }
+    }
+
+    private suspend fun persistProfiles(snapshot: List<ScoreProfile>) {
+        profilePersistMutex.withLock {
+            withContext(NonCancellable + Dispatchers.IO) {
+                AccountCredentialStore.saveProfiles(appContext, snapshot)
+            }
         }
     }
 
@@ -1476,9 +1464,7 @@ class DataStore(context: Context) {
             created
         }
         profiles = list
-        withContext(NonCancellable + Dispatchers.IO) {
-            AccountCredentialStore.saveProfiles(appContext, list)
-        }
+        persistProfiles(list)
         return target
     }
 
@@ -1498,9 +1484,7 @@ class DataStore(context: Context) {
             lastSyncedAtEpochMs = syncedAtEpochMs
         )
         profiles = list
-        withContext(NonCancellable + Dispatchers.IO) {
-            AccountCredentialStore.saveProfiles(appContext, list)
-        }
+        persistProfiles(list)
     }
 
     private suspend fun installFetchedRecords(fetched: List<ProberRecord>, profileId: String) {

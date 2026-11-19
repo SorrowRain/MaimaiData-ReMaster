@@ -87,11 +87,14 @@ object AccountCredentialStore {
         val storedActiveId = prefs.getString(PreferenceKeys.activeProfileId, null)
             ?.takeIf { it.isNotEmpty() }
 
-        val existingBytes = readEncryptedBytes(context, PROFILES_SLOT)
-        if (existingBytes != null) {
-            val existingProfiles = runCatching {
-                json.decodeFromString<List<ScoreProfile>>(existingBytes.toString(Charsets.UTF_8))
-            }.getOrNull()
+        val profilesFile = slotFile(context, PROFILES_SLOT)
+        if (profilesFile.exists()) {
+            val existingBytes = readEncryptedBytes(context, PROFILES_SLOT)
+            val existingProfiles = existingBytes?.let { raw ->
+                runCatching {
+                    json.decodeFromString<List<ScoreProfile>>(raw.toString(Charsets.UTF_8))
+                }.getOrNull()
+            }
             if (existingProfiles != null) {
                 val validActiveId = if (existingProfiles.any { it.id == storedActiveId }) {
                     storedActiveId
@@ -103,6 +106,9 @@ object AccountCredentialStore {
                 }
                 return LoadedProfiles(profiles = existingProfiles, activeProfileId = validActiveId)
             }
+            // Encrypted profiles file already exists but failed to decrypt/decode transiently —
+            // never fall through to legacy migration or overwrite saved credentials with [].
+            return LoadedProfiles(profiles = emptyList(), activeProfileId = null)
         }
 
         // One-time migration from legacy single-provider preferences
@@ -231,8 +237,7 @@ object AccountCredentialStore {
     }
 
     private fun writeEncryptedBytes(context: Context, slot: String, plaintext: ByteArray) {
-        val encoded = runCatching { encryptPayload(plaintext, recreateKey = false) }
-            .getOrElse { encryptPayload(plaintext, recreateKey = true) }
+        val encoded = encryptPayload(plaintext)
         val dest = slotFile(context, slot)
         val tmp = File(dest.parentFile, "${dest.name}.tmp")
         tmp.writeBytes(encoded)
@@ -253,13 +258,13 @@ object AccountCredentialStore {
             val iv = blob.copyOfRange(1, 1 + ivLength)
             val ciphertext = blob.copyOfRange(1 + ivLength, blob.size)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, getOrCreateSecretKey(recreate = false), GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateSecretKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
             cipher.doFinal(ciphertext)
         }.getOrNull()
     }
 
-    private fun encryptPayload(plaintext: ByteArray, recreateKey: Boolean): ByteArray {
-        val secretKey = getOrCreateSecretKey(recreate = recreateKey)
+    private fun encryptPayload(plaintext: ByteArray): ByteArray {
+        val secretKey = getOrCreateSecretKey()
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, secretKey)
         val iv = cipher.iv
@@ -271,14 +276,16 @@ object AccountCredentialStore {
         return output
     }
 
-    private fun getOrCreateSecretKey(recreate: Boolean): SecretKey {
+    private fun getOrCreateSecretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        if (recreate && keyStore.containsAlias(MASTER_KEY_ALIAS)) {
-            runCatching { keyStore.deleteEntry(MASTER_KEY_ALIAS) }
-        }
         val existing = keyStore.getEntry(MASTER_KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
         if (existing != null) {
             return existing.secretKey
+        }
+        // Only generate a master key if none exists; never delete/recreate an existing alias
+        // because doing so would permanently orphan all other encrypted credential slots.
+        if (keyStore.containsAlias(MASTER_KEY_ALIAS)) {
+            throw IllegalStateException("AndroidKeyStore master key alias exists but could not be loaded")
         }
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         val spec = KeyGenParameterSpec.Builder(

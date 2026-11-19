@@ -150,11 +150,25 @@ enum MaimaiAPI {
             let errMsg = extractErrorMessage(from: data) ?? "用户名或密码错误 (HTTP \(httpResp.statusCode))"
             throw MaimaiAPIError.httpError(httpResp.statusCode, errMsg)
         }
-        let cookieHeader = httpResp.value(forHTTPHeaderField: "Set-Cookie") ?? ""
-        guard !cookieHeader.isEmpty else {
+        let rawSetCookie = httpResp.value(forHTTPHeaderField: "Set-Cookie") ?? ""
+        let extractedCookie = extractDivingFishCookie(from: rawSetCookie)
+        guard !extractedCookie.isEmpty else {
             throw MaimaiAPIError.missingCookie
         }
-        return cookieHeader
+        return extractedCookie
+    }
+
+    private static func extractDivingFishCookie(from setCookieHeader: String) -> String {
+        let segments = setCookieHeader
+            .components(separatedBy: CharacterSet(charactersIn: ",;"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let jwt = segments.first(where: { $0.hasPrefix("jwt_token=") && $0.count > "jwt_token=".count }) {
+            return jwt
+        }
+        return setCookieHeader
+            .split(separator: ";", maxSplits: 1)
+            .first
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
     }
 
     static func fetchPlayerRecords(cookie: String) async throws -> ProberRecordsResponse {
@@ -163,6 +177,10 @@ enum MaimaiAPI {
         req.setValue(cookie, forHTTPHeaderField: "Cookie")
         req.setValue(divingFishUA, forHTTPHeaderField: "User-Agent")
         let (data, resp) = try await session.data(for: req)
+        if let httpResp = resp as? HTTPURLResponse,
+           httpResp.statusCode == 400 || httpResp.statusCode == 401 || httpResp.statusCode == 403 {
+            throw MaimaiAPIError.unauthorized(extractErrorMessage(from: data) ?? "登录已过期，请重新登录")
+        }
         try validateHTTP(resp, data: data)
         let decoded = try JSONDecoder().decode(ProberRecordsResponse.self, from: data)
         if decoded.status == "error" {
@@ -385,10 +403,21 @@ enum MaimaiAPI {
                 }
                 try validateHTTP(resp, data: data)
                 return data
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let apiError as MaimaiAPIError {
+                if case let .httpError(code, _) = apiError,
+                   (400...499).contains(code), code != 429 {
+                    throw apiError
+                }
+                lastError = apiError
+                if attempt + 1 < maxAttempts {
+                    try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 700_000_000)
+                }
             } catch {
                 lastError = error
                 if attempt + 1 < maxAttempts {
-                    try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 700_000_000)
+                    try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 700_000_000)
                 }
             }
         }
