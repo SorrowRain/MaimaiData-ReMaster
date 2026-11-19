@@ -4,13 +4,18 @@ import UIKit
 final class CoverImageCache: @unchecked Sendable {
     static let shared = CoverImageCache()
 
+    private static let maxMemoryCostBytes = 80 * 1024 * 1024
+    private static let maxDiskCacheBytes: Int64 = 256 * 1024 * 1024
+
     private let memory = NSCache<NSString, UIImage>()
     private let diskDir: URL
     private let session: URLSession
     private let coordinator = InFlightCoordinator()
+    private let diskMaintenance = DiskCacheMaintenance()
 
     private init() {
         memory.countLimit = 400
+        memory.totalCostLimit = Self.maxMemoryCostBytes
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         diskDir = caches.appendingPathComponent("MaimaiCovers", isDirectory: true)
         try? FileManager.default.createDirectory(at: diskDir, withIntermediateDirectories: true)
@@ -67,32 +72,52 @@ final class CoverImageCache: @unchecked Sendable {
 
         let urls = song.coverCandidateURLs
         let diskFile = diskDir.appendingPathComponent("\(keyString).png")
-        let loaded = await coordinator.coalesce(key: keyString) { [session] in
-            await Self.fetchFromDiskOrNetwork(diskFile: diskFile, urls: urls, session: session)
+        let loaded = await coordinator.coalesce(key: keyString) { [session, diskDir, diskMaintenance] in
+            await Self.fetchFromDiskOrNetwork(
+                diskFile: diskFile,
+                diskDir: diskDir,
+                urls: urls,
+                session: session,
+                diskMaintenance: diskMaintenance
+            )
         }
         if let loaded {
-            memory.setObject(loaded, forKey: key)
+            memory.setObject(loaded, forKey: key, cost: Self.imageMemoryCost(loaded))
         }
         return loaded
     }
 
+    private static func imageMemoryCost(_ image: UIImage) -> Int {
+        let pixelsW = Int(image.size.width * image.scale)
+        let pixelsH = Int(image.size.height * image.scale)
+        return max(1, pixelsW * pixelsH * 4)
+    }
+
     private static func fetchFromDiskOrNetwork(
         diskFile: URL,
+        diskDir: URL,
         urls: [URL],
-        session: URLSession
+        session: URLSession,
+        diskMaintenance: DiskCacheMaintenance
     ) async -> UIImage? {
         if let diskImage = await Task.detached(priority: .utility, operation: { () -> UIImage? in
             guard let data = try? Data(contentsOf: diskFile) else { return nil }
+            try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: diskFile.path)
             return UIImage(data: data)
         }).value {
             return await diskImage.byPreparingForDisplay() ?? diskImage
         }
 
         for url in urls {
-            if Task.isCancelled { return nil }
             if let data = await downloadImageData(url: url, session: session),
                let rawImg = UIImage(data: data) {
                 try? data.write(to: diskFile, options: .atomic)
+                Task.detached(priority: .background) {
+                    await diskMaintenance.recordWriteAndTrimIfNeeded(
+                        diskDir: diskDir,
+                        maxBytes: CoverImageCache.maxDiskCacheBytes
+                    )
+                }
                 return await rawImg.byPreparingForDisplay() ?? rawImg
             }
         }
@@ -133,10 +158,50 @@ private actor InFlightCoordinator {
     }
 }
 
+private actor DiskCacheMaintenance {
+    private var writesSinceTrim = 0
+
+    func recordWriteAndTrimIfNeeded(diskDir: URL, maxBytes: Int64) {
+        writesSinceTrim += 1
+        guard writesSinceTrim >= 25 else { return }
+        writesSinceTrim = 0
+
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: diskDir,
+            includingPropertiesForKeys: Array(keys)
+        ) else { return }
+
+        var entries: [(url: URL, size: Int64, mtime: Date)] = []
+        var totalSize: Int64 = 0
+        for url in urls {
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  let size = values.fileSize else { continue }
+            let mtime = values.contentModificationDate ?? .distantPast
+            entries.append((url, Int64(size), mtime))
+            totalSize += Int64(size)
+        }
+        guard totalSize > maxBytes else { return }
+
+        let targetSize = (maxBytes * 8) / 10
+        entries.sort { $0.mtime < $1.mtime }
+        for entry in entries {
+            guard totalSize > targetSize else { break }
+            try? FileManager.default.removeItem(at: entry.url)
+            totalSize -= entry.size
+        }
+    }
+}
+
 struct CoverImageView: View {
     let song: SongData?
 
     @State private var image: UIImage?
+
+    private var taskKey: String {
+        guard let song else { return "" }
+        return "\(song.id)|\(song.remoteCoverName ?? "")|\(song.preferRemoteCover ?? false)"
+    }
 
     var body: some View {
         let displayed = image ?? song.flatMap { CoverImageCache.shared.cachedMemoryImage(for: $0) }
@@ -151,7 +216,7 @@ struct CoverImageView: View {
                     .aspectRatio(contentMode: .fill)
             }
         }
-        .task(id: song?.id) {
+        .task(id: taskKey) {
             guard let song else {
                 image = nil
                 return
@@ -160,6 +225,7 @@ struct CoverImageView: View {
                 image = mem
                 return
             }
+            image = nil
             if let loaded = await CoverImageCache.shared.loadCover(song: song) {
                 withAnimation(.easeOut(duration: 0.18)) {
                     image = loaded

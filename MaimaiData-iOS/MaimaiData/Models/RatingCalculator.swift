@@ -63,11 +63,12 @@ enum RatingCalculator {
         let perSong = targetTotalRating / 50
         var minLv = 0
         for i in 10...150 {
-            if perSong < achievementToRating(levelTenths: i, achievementTenThousandths: 1_005_000) {
+            if perSong <= achievementToRating(levelTenths: i, achievementTenThousandths: 1_005_000) {
                 minLv = i
                 break
             }
         }
+        guard minLv > 0 else { return [] }
         var bestByAchi: [Int: Int] = [:]
         for lv in stride(from: 150, through: minLv, by: -1) {
             let achi = reachableAchievement(levelTenths: lv, targetSingleRating: perSong)

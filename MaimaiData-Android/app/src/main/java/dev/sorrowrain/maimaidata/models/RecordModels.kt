@@ -85,10 +85,28 @@ data class ProberRecord(
         get() = "评级 ${rate.uppercase().replace("P", "+")}"
 
     val fcAccessibilityLabel: String
-        get() = "连击状态 ${fc.uppercase().replace("P", "+")}"
+        get() {
+            val display = when (fc) {
+                "fc" -> "FC"
+                "fcp" -> "FC+"
+                "ap" -> "AP"
+                "app" -> "AP+"
+                else -> fc.uppercase()
+            }
+            return "连击状态 $display"
+        }
 
     val fsAccessibilityLabel: String
-        get() = "同步状态 ${fs.uppercase().replace("P", "+")}"
+        get() {
+            val display = when (fs) {
+                "fs" -> "FS"
+                "fsp" -> "FS+"
+                "fsd" -> "FSD"
+                "fsdp" -> "FSD+"
+                else -> fs.uppercase()
+            }
+            return "同步状态 $display"
+        }
 
     val typeAssetName: String
         get() = if (type == MaimaiConstants.CHART_TYPE_DX) {

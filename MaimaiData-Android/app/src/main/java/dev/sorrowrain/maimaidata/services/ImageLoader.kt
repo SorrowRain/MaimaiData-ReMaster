@@ -68,8 +68,6 @@ object CoverImageManager {
         }
     }
 
-    fun getImageLoader(context: Context): ImageLoader = imageLoader(context)
-
     private fun buildImageLoader(appContext: Context): ImageLoader {
         val cacheDir = File(appContext.cacheDir, DISK_CACHE_DIR)
         return ImageLoader.Builder(appContext)
@@ -104,8 +102,12 @@ object CoverImageManager {
 
     fun clearCache(context: Context) {
         val appContext = context.applicationContext
-        singletonLoader?.memoryCache?.clear()
-        singletonLoader?.diskCache?.clear()
+        val oldLoader = synchronized(this) {
+            singletonLoader.also { singletonLoader = null }
+        }
+        oldLoader?.memoryCache?.clear()
+        oldLoader?.diskCache?.clear()
+        oldLoader?.shutdown()
         val dir = File(appContext.cacheDir, DISK_CACHE_DIR)
         if (dir.exists()) {
             dir.deleteRecursively()
@@ -122,7 +124,7 @@ object CoverImageManager {
         val urls = song.coverCandidateUrls
         if (urls.isEmpty()) return@withContext null
 
-        val memKey = if (targetPx > 256) "${song.coverCacheKey}_$targetPx" else song.coverCacheKey
+        val memKey = if (targetPx > 0) "${song.coverCacheKey}_thumb_$targetPx" else song.coverCacheKey
         for (url in urls) {
             try {
                 val requestBuilder = ImageRequest.Builder(appContext)
@@ -191,7 +193,7 @@ fun CoverImageView(
     val urls = remember(song.id, song.remoteCoverName, song.preferRemoteCover) {
         song.coverCandidateUrls
     }
-    var index by remember(song.id, song.remoteCoverName) { mutableIntStateOf(0) }
+    var index by remember(song.id, song.remoteCoverName, song.preferRemoteCover) { mutableIntStateOf(0) }
 
     if (urls.isEmpty() || index >= urls.size) {
         Image(
@@ -227,9 +229,3 @@ fun CoverImageView(
         modifier = modifier
     )
 }
-
-suspend fun loadCoverBitmap(
-    context: Context,
-    song: SongData,
-    targetPx: Int = 200
-): Bitmap? = CoverImageManager.loadCoverBitmap(context = context, song = song, targetPx = targetPx)

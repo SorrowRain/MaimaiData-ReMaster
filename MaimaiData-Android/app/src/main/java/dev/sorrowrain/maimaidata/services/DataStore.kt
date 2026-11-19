@@ -89,6 +89,16 @@ class DataStore(context: Context) {
     private val appFilesDir: File = appContext.filesDir
     private val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    private object SyncPolicy {
+        const val CATALOG_AUTO_REFRESH_MS = 7L * 24L * 3600L * 1000L
+        const val CATALOG_MANUAL_COOLDOWN_MS = 10L * 60L * 1000L
+        const val STATS_AUTO_REFRESH_MS = 5L * 24L * 3600L * 1000L
+        const val STATS_MANUAL_COOLDOWN_MS = 5L * 60L * 1000L
+        const val APP_UPDATE_CHECK_INTERVAL_MS = 24L * 3600L * 1000L
+        const val BOOTSTRAP_DELAY_MS = 3_000L
+        const val OAUTH_EXPIRY_BUFFER_SEC = 30L
+    }
+
     // Domain Catalog & Score State
     var songs: List<SongData> by mutableStateOf(emptyList())
         private set
@@ -352,37 +362,40 @@ class DataStore(context: Context) {
             return "Player"
         }
 
-    val cnPlateCheckGroups: List<CNPlateRuleGroup>
-        get() {
-            val list = plateCatalog?.groups.orEmpty().toMutableList()
-            val sourceSongs = cnSongs.ifEmpty { songs }
-            val newSongs = sourceSongs.filter {
-                !it.isUtage && it.isDisabled != true && it.basicInfo.isNew && it.numericId > 0
-            }
-            if (newSongs.isNotEmpty()) {
-                val currentTitle = newSongs.first().basicInfo.from.ifEmpty { "舞萌DX 2026" }
-                val alreadyCovered = list.any { it.title.contains(currentTitle) }
-                if (!alreadyCovered) {
-                    list += CNPlateRuleGroup(
-                        id = "current_$currentTitle",
-                        title = currentTitle,
-                        versionAsset = MaimaiConstants.cnVersionAsset(currentTitle) ?: "maimaidx_2026",
-                        badges = emptyList(),
-                        basicToMasterSongIds = newSongs.map { it.numericId },
-                        remasterSongIds = emptyList()
-                    )
-                }
-            }
-            return list
-        }
+    var cnPlateCheckGroups: List<CNPlateRuleGroup> by mutableStateOf(emptyList())
+        private set
 
-    val activePlateScopes: List<PlateCheckScope>
-        get() = LXNSCatalogConverter.buildPlateScopes(
+    var activePlateScopes: List<PlateCheckScope> by mutableStateOf(emptyList())
+        private set
+
+    private fun rebuildPlateScopeCache() {
+        val list = plateCatalog?.groups.orEmpty().toMutableList()
+        val sourceSongs = cnSongs.ifEmpty { songs }
+        val newSongs = sourceSongs.filter {
+            !it.isUtage && it.isDisabled != true && it.basicInfo.isNew && it.numericId > 0
+        }
+        if (newSongs.isNotEmpty()) {
+            val currentTitle = newSongs.first().basicInfo.from.ifEmpty { "舞萌DX 2026" }
+            val alreadyCovered = list.any { it.title.contains(currentTitle) }
+            if (!alreadyCovered) {
+                list += CNPlateRuleGroup(
+                    id = "current_$currentTitle",
+                    title = currentTitle,
+                    versionAsset = MaimaiConstants.cnVersionAsset(currentTitle) ?: "maimaidx_2026",
+                    badges = emptyList(),
+                    basicToMasterSongIds = newSongs.map { it.numericId },
+                    remasterSongIds = emptyList()
+                )
+            }
+        }
+        cnPlateCheckGroups = list
+        activePlateScopes = LXNSCatalogConverter.buildPlateScopes(
             region = serverRegion,
-            cnPlateGroups = cnPlateCheckGroups,
+            cnPlateGroups = list,
             activeSongs = songs,
             zetarakuVersions = zetarakuCatalog?.versions
         )
+    }
 
     val lastCatalogSyncText: String
         get() {
@@ -455,7 +468,7 @@ class DataStore(context: Context) {
             syncZetarakuCatalog(force = false)
         }
 
-        delay(3_000L)
+        delay(SyncPolicy.BOOTSTRAP_DELAY_MS)
         coroutineScope {
             val catalogJob = async { syncAllCatalogsAndRules(force = false) }
             val statsJob = async { refreshChartStatsIfStale(force = false) }
@@ -471,7 +484,7 @@ class DataStore(context: Context) {
         val nowMs = System.currentTimeMillis()
         if (!manual) {
             val lastMs = prefs.getLong(PreferenceKeys.appUpdateCheck, 0L)
-            if (lastMs > 0L && nowMs - lastMs < 24L * 3600L * 1000L) {
+            if (lastMs > 0L && nowMs - lastMs < SyncPolicy.APP_UPDATE_CHECK_INTERVAL_MS) {
                 return@withContext
             }
         }
@@ -617,8 +630,9 @@ class DataStore(context: Context) {
         plateCatalog = caches.plates
         zetarakuCatalog = caches.zetaraku
         dxDataIdMap = caches.dxIdMap
+        var cnSnapshot: SongSnapshot? = null
         if (caches.songs != null) {
-            storeCNBaseline(caches.songs)
+            cnSnapshot = storeCNBaseline(caches.songs)
             if (caches.usedSeed) {
                 dataVersion = SEED_DATA_VERSION
             }
@@ -627,9 +641,7 @@ class DataStore(context: Context) {
         val epoch = regionEpoch
         when (serverRegion) {
             MaimaiConstants.ServerRegion.CN -> {
-                if (cnSongs.isNotEmpty()) {
-                    applySongs(cnSongs, epoch = epoch)
-                }
+                cnSnapshot?.let { applySnapshot(it, epoch = epoch) }
             }
             MaimaiConstants.ServerRegion.INTL, MaimaiConstants.ServerRegion.JP -> {
                 zetarakuCatalog?.let { catalog ->
@@ -637,6 +649,7 @@ class DataStore(context: Context) {
                 }
             }
         }
+        rebuildPlateScopeCache()
 
         caches.stats?.let(::applyChartStats)
         if (activeProfileId == currentProfileId && recordsEpoch == 0) {
@@ -646,7 +659,7 @@ class DataStore(context: Context) {
         prefetchBest50Covers()
     }
 
-    private suspend fun storeCNBaseline(rawList: List<SongData>) {
+    private suspend fun storeCNBaseline(rawList: List<SongData>): SongSnapshot {
         val zCatalog = zetarakuCatalog
         val snapshot = withContext(Dispatchers.Default) {
             val withUtageMeta = ZetarakuCatalogConverter.enrichCNSongsWithUtageMetadata(rawList, zCatalog)
@@ -654,17 +667,23 @@ class DataStore(context: Context) {
         }
         cnSongs = snapshot.songs
         cnSongsById = snapshot.songsById
+        return snapshot
+    }
+
+    private fun applySnapshot(snapshot: SongSnapshot, epoch: Int? = null) {
+        if (epoch != null && regionEpoch != epoch) return
+        songs = snapshot.songs
+        songsById = snapshot.songsById
+        maxNotesStats = snapshot.maxNotes
+        catalogRevision += 1
+        rebuildPlateScopeCache()
     }
 
     private suspend fun applySongs(list: List<SongData>, epoch: Int? = null) {
         val snapshot = withContext(Dispatchers.Default) {
             buildSnapshotSync(list)
         }
-        if (epoch != null && regionEpoch != epoch) return
-        songs = snapshot.songs
-        songsById = snapshot.songsById
-        maxNotesStats = snapshot.maxNotes
-        catalogRevision += 1
+        applySnapshot(snapshot, epoch = epoch)
     }
 
     private suspend fun applyZetarakuCatalog(
@@ -685,10 +704,7 @@ class DataStore(context: Context) {
         }
         if (epoch != null && regionEpoch != epoch) return
         migrateFavoriteIdsIfNeeded(migrations)
-        songs = snapshot.songs
-        songsById = snapshot.songsById
-        maxNotesStats = snapshot.maxNotes
-        catalogRevision += 1
+        applySnapshot(snapshot, epoch = epoch)
     }
 
     private fun migrateFavoriteIdsIfNeeded(pairs: List<ZetarakuCatalogConverter.MigratedIdPair>) {
@@ -748,6 +764,7 @@ class DataStore(context: Context) {
                     songs = emptyList()
                     songsById = emptyMap()
                     catalogRevision += 1
+                    rebuildPlateScopeCache()
                     loadOrFetchZetaraku(region = newRegion, epoch = epoch)
                 }
             }
@@ -793,12 +810,11 @@ class DataStore(context: Context) {
         val now = System.currentTimeMillis()
 
         if (force) {
-            val manualCooldownMs = 10L * 60L * 1000L
             val lastCN = lastCNCatalogSyncEpochMs
             val lastZ = lastZetarakuSyncEpochMs
             if (lastCN != null &&
                 lastZ != null &&
-                now - min(lastCN, lastZ) < manualCooldownMs &&
+                now - min(lastCN, lastZ) < SyncPolicy.CATALOG_MANUAL_COOLDOWN_MS &&
                 cnSongs.isNotEmpty() &&
                 plateCatalog != null &&
                 zetarakuCatalog != null
@@ -807,38 +823,42 @@ class DataStore(context: Context) {
                 return@withContext
             }
         } else {
-            val sevenDaysMs = 7L * 24L * 3600L * 1000L
             if (lastCNCatalogSyncEpochMs == null && cnSongs.isNotEmpty() && plateCatalog != null) {
                 // Record seed baseline timestamp on cold install; never burst upstream APIs on first launch.
                 lastCNCatalogSyncEpochMs = now
                 return@withContext
             }
-            val cnFresh = lastCNCatalogSyncEpochMs?.let { now - it < sevenDaysMs } ?: false
+            val cnFresh = lastCNCatalogSyncEpochMs?.let { now - it < SyncPolicy.CATALOG_AUTO_REFRESH_MS } ?: false
             val zFresh = (serverRegion == MaimaiConstants.ServerRegion.CN && zetarakuCatalog == null) ||
-                (lastZetarakuSyncEpochMs?.let { now - it < sevenDaysMs } ?: false)
+                (lastZetarakuSyncEpochMs?.let { now - it < SyncPolicy.CATALOG_AUTO_REFRESH_MS } ?: false)
             if (cnFresh && zFresh && cnSongs.isNotEmpty() && plateCatalog != null) {
                 return@withContext
             }
         }
 
-        val (cnErr, zErr) = coroutineScope {
+        val (cnResult, zErr) = coroutineScope {
             val cnDeferred = async { performLXNSCatalogSync() }
             val zDeferred = async { performZetarakuSync() }
             cnDeferred.await() to zDeferred.await()
         }
+        val cnErr = cnResult.second
 
-        if (cnSongs.isNotEmpty()) {
-            storeCNBaseline(cnSongs)
-        }
+        val cnSource = cnResult.first ?: cnSongs
+        val cnSnapshot = if (cnSource.isNotEmpty()) storeCNBaseline(cnSource) else null
         when (serverRegion) {
             MaimaiConstants.ServerRegion.CN -> {
-                if (cnSongs.isNotEmpty()) {
-                    applySongs(cnSongs, epoch = regionEpoch)
+                if (cnSnapshot != null) {
+                    applySnapshot(cnSnapshot, epoch = regionEpoch)
+                } else {
+                    rebuildPlateScopeCache()
                 }
             }
             MaimaiConstants.ServerRegion.INTL, MaimaiConstants.ServerRegion.JP -> {
-                zetarakuCatalog?.let { catalog ->
+                val catalog = zetarakuCatalog
+                if (catalog != null) {
                     applyZetarakuCatalog(catalog, region = serverRegion, epoch = regionEpoch)
+                } else {
+                    rebuildPlateScopeCache()
                 }
             }
         }
@@ -860,10 +880,9 @@ class DataStore(context: Context) {
     }
 
     private suspend fun refreshZetarakuIfStale() {
-        val sevenDaysMs = 7L * 24L * 3600L * 1000L
         val last = lastZetarakuSyncEpochMs
         if (last != null &&
-            System.currentTimeMillis() - last < sevenDaysMs &&
+            System.currentTimeMillis() - last < SyncPolicy.CATALOG_AUTO_REFRESH_MS &&
             zetarakuCatalog != null &&
             dxDataIdMap != null
         ) {
@@ -910,11 +929,13 @@ class DataStore(context: Context) {
 
             return zResult.fold(
                 onSuccess = { (rawBytes, decoded) ->
-                    withContext(Dispatchers.IO) {
-                        runCatching { writeBytesAtomically(cachedZetarakuFile, rawBytes) }
+                    val persisted = withContext(Dispatchers.IO) {
+                        runCatching { writeBytesAtomically(cachedZetarakuFile, rawBytes) }.isSuccess
                     }
                     zetarakuCatalog = decoded
-                    lastZetarakuSyncEpochMs = System.currentTimeMillis()
+                    if (persisted) {
+                        lastZetarakuSyncEpochMs = System.currentTimeMillis()
+                    }
                     null
                 },
                 onFailure = { err ->
@@ -927,8 +948,8 @@ class DataStore(context: Context) {
         }
     }
 
-    private suspend fun performLXNSCatalogSync(): Throwable? {
-        if (isFetchingCNSongs) return null
+    private suspend fun performLXNSCatalogSync(): Pair<List<SongData>?, Throwable?> {
+        if (isFetchingCNSongs) return null to null
         isFetchingCNSongs = true
         try {
             val songResp = MaimaiAPI.fetchLXNSSongCatalog()
@@ -960,12 +981,11 @@ class DataStore(context: Context) {
             }
             dataVersion = stamp
             lastCNCatalogSyncEpochMs = System.currentTimeMillis()
-            storeCNBaseline(convertedSongs)
-            return null
+            return convertedSongs to null
         } catch (ce: CancellationException) {
             throw ce
         } catch (err: Throwable) {
-            return err
+            return null to err
         } finally {
             isFetchingCNSongs = false
         }
@@ -975,16 +995,14 @@ class DataStore(context: Context) {
         if (isSyncingStats) return@withContext
         val now = System.currentTimeMillis()
         if (force) {
-            val manualCooldownMs = 5L * 60L * 1000L
             val last = lastChartStatsSyncEpochMs
-            if (last != null && now - last < manualCooldownMs && chartStats.isNotEmpty()) {
+            if (last != null && now - last < SyncPolicy.STATS_MANUAL_COOLDOWN_MS && chartStats.isNotEmpty()) {
                 statusMessage = "当前已是最新数据"
                 return@withContext
             }
         } else {
-            val fiveDaysMs = 5L * 24L * 3600L * 1000L
             val last = lastChartStatsSyncEpochMs
-            if (last != null && now - last < fiveDaysMs && chartStats.isNotEmpty()) {
+            if (last != null && now - last < SyncPolicy.STATS_AUTO_REFRESH_MS && chartStats.isNotEmpty()) {
                 return@withContext
             }
         }
@@ -1385,7 +1403,7 @@ class DataStore(context: Context) {
             if ((!forceRefresh || alreadyRotatedSinceFailure) &&
                 currentSecret.accessToken.isNotEmpty() &&
                 currentSecret.accessTokenExpiresAtEpochSec != null &&
-                nowSec < currentSecret.accessTokenExpiresAtEpochSec - 30L
+                nowSec < currentSecret.accessTokenExpiresAtEpochSec - SyncPolicy.OAUTH_EXPIRY_BUFFER_SEC
             ) {
                 return@withLock currentSecret.accessToken
             }

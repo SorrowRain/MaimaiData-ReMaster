@@ -99,11 +99,20 @@ data class SongData(
         }
 
     val coverCacheKey: String
-        get() = if (numericId > 0 && preferRemoteCover != true) {
-            "jacket_$baseJacketId"
-        } else {
-            val stem = remoteCoverName?.substringBeforeLast('.') ?: id
-            "jacket_remote_$stem"
+        get() {
+            if (numericId > 0 && preferRemoteCover != true) {
+                return "jacket_$baseJacketId"
+            }
+            val remote = remoteCoverName?.takeIf { it.isNotEmpty() }
+            if (remote != null) {
+                val sanitized = remote.replace("/", "_")
+                val stem = sanitized.substringBeforeLast('.')
+                return "jacket_remote_${stem.ifEmpty { sanitized }}"
+            }
+            if (numericId > 0) {
+                return "jacket_$baseJacketId"
+            }
+            return "jacket_$id"
         }
 
     @Serializable

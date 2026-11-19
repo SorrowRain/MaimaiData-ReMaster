@@ -95,6 +95,17 @@ object Best50Renderer {
         val output = Bitmap.createBitmap(CONTAINER_WIDTH, TOTAL_HEIGHT, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
         val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            typeface = Typeface.DEFAULT_BOLD
+            textSize = 14f
+            textAlign = Paint.Align.CENTER
+        }
+        val metricPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            typeface = Typeface.DEFAULT_BOLD
+            textSize = 11.5f
+        }
         val spriteCache = HashMap<String, Bitmap?>()
 
         fun sprite(assetName: String): Bitmap? {
@@ -110,119 +121,127 @@ object Best50Renderer {
             return decoded
         }
 
-        val fullRect = RectF(0f, 0f, CONTAINER_WIDTH.toFloat(), TOTAL_HEIGHT.toFloat())
-        val bg = sprite("mmd_player_best50")
-        if (bg != null) {
-            canvas.drawBitmap(bg, null, fullRect, bitmapPaint)
-        } else {
-            val fallbackBgPaint = Paint().apply { color = Color.rgb(64, 148, 240) }
-            canvas.drawRect(fullRect, fallbackBgPaint)
-        }
-
-        val placeholderCover = sprite("mmd_song_jacket_placeholder")
-
-        // Old Version (B35: 7 columns x 5 rows)
-        b35.forEachIndexed { idx, record ->
-            val x = (idx % 7) * (ITEM_WIDTH + ITEM_PADDING)
-            val y = HEADER_HEIGHT + (idx / 7) * (ITEM_HEIGHT + ITEM_PADDING)
-            drawRecordCard(
-                canvas = canvas,
-                bitmapPaint = bitmapPaint,
-                sprite = ::sprite,
-                record = record,
-                cover = covers[record.songId] ?: placeholderCover,
-                region = region,
-                originX = x,
-                originY = y
-            )
-        }
-
-        // New Version (B15: 3 columns x 5 rows)
-        val newOriginX = (ITEM_WIDTH + ITEM_PADDING) * 7f + VERSION_PADDING
-        b15.forEachIndexed { idx, record ->
-            val x = newOriginX + (idx % 3) * (ITEM_WIDTH + ITEM_PADDING)
-            val y = HEADER_HEIGHT + (idx / 3) * (ITEM_HEIGHT + ITEM_PADDING)
-            drawRecordCard(
-                canvas = canvas,
-                bitmapPaint = bitmapPaint,
-                sprite = ::sprite,
-                record = record,
-                cover = covers[record.songId] ?: placeholderCover,
-                region = region,
-                originX = x,
-                originY = y
-            )
-        }
-
-        val oldRating = b35.sumOf { it.computedRating }
-        val newRating = b15.sumOf { it.computedRating }
-        val totalRating = oldRating + newRating
-
-        // Rating Plate
-        sprite(ratingPlateName(totalRating))?.let { plate ->
-            canvas.drawBitmap(plate, null, RectF(432f, 49f, 635f, 101f), bitmapPaint)
-        }
-
-        // Name Box + Rating Box
-        sprite("mmd_player_name_box")?.let { box ->
-            canvas.drawBitmap(box, null, RectF(432f, 110f, 734f, 156f), bitmapPaint)
-        }
-        sprite("mmd_player_rating_box")?.let { box ->
-            canvas.drawBitmap(box, null, RectF(432f, 165f, 734f, 206f), bitmapPaint)
-        }
-
-        // Player Name (full-width arcade style when fitting within 274px)
-        val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            typeface = Typeface.DEFAULT_BOLD
-            textSize = 26f
-            letterSpacing = 0.06f
-        }
-        val fullWidthCandidate = toFullWidthName(playerName)
-        val displayPlayer = if (namePaint.measureText(fullWidthCandidate) <= 274f) {
-            fullWidthCandidate
-        } else {
-            ellipsizeToWidth(playerName, namePaint, 274f)
-        }
-        val nameBaseline = centeredBaseline(110f, 156f, namePaint)
-        canvas.drawText(displayPlayer, 446f, nameBaseline, namePaint)
-
-        // Total Rating Digits (right-to-left)
-        if (totalRating <= 0) {
-            sprite("mmd_player_num_drating_0")?.let { zeroBmp ->
-                canvas.drawBitmap(zeroBmp, null, RectF(598f, 58f, 626f, 92f), bitmapPaint)
+        try {
+            val fullRect = RectF(0f, 0f, CONTAINER_WIDTH.toFloat(), TOTAL_HEIGHT.toFloat())
+            val bg = sprite("mmd_player_best50")
+            if (bg != null) {
+                canvas.drawBitmap(bg, null, fullRect, bitmapPaint)
+            } else {
+                val fallbackBgPaint = Paint().apply { color = Color.rgb(64, 148, 240) }
+                canvas.drawRect(fullRect, fallbackBgPaint)
             }
-        } else {
-            var rem = totalRating
-            var digitIdx = 0
-            while (rem > 0) {
-                val digit = rem % 10
-                rem /= 10
-                sprite("mmd_player_num_drating_$digit")?.let { dBmp ->
-                    val dx = 598f - 21f * digitIdx
-                    canvas.drawBitmap(dBmp, null, RectF(dx, 58f, dx + 28f, 92f), bitmapPaint)
+
+            val placeholderCover = sprite("mmd_song_jacket_placeholder")
+
+            // Old Version (B35: 7 columns x 5 rows)
+            b35.forEachIndexed { idx, record ->
+                val x = (idx % 7) * (ITEM_WIDTH + ITEM_PADDING)
+                val y = HEADER_HEIGHT + (idx / 7) * (ITEM_HEIGHT + ITEM_PADDING)
+                drawRecordCard(
+                    canvas = canvas,
+                    bitmapPaint = bitmapPaint,
+                    titlePaint = titlePaint,
+                    metricPaint = metricPaint,
+                    sprite = ::sprite,
+                    record = record,
+                    cover = covers[record.songId] ?: placeholderCover,
+                    region = region,
+                    originX = x,
+                    originY = y
+                )
+            }
+
+            // New Version (B15: 3 columns x 5 rows)
+            val newOriginX = (ITEM_WIDTH + ITEM_PADDING) * 7f + VERSION_PADDING
+            b15.forEachIndexed { idx, record ->
+                val x = newOriginX + (idx % 3) * (ITEM_WIDTH + ITEM_PADDING)
+                val y = HEADER_HEIGHT + (idx / 3) * (ITEM_HEIGHT + ITEM_PADDING)
+                drawRecordCard(
+                    canvas = canvas,
+                    bitmapPaint = bitmapPaint,
+                    titlePaint = titlePaint,
+                    metricPaint = metricPaint,
+                    sprite = ::sprite,
+                    record = record,
+                    cover = covers[record.songId] ?: placeholderCover,
+                    region = region,
+                    originX = x,
+                    originY = y
+                )
+            }
+
+            val oldRating = b35.sumOf { it.computedRating }
+            val newRating = b15.sumOf { it.computedRating }
+            val totalRating = oldRating + newRating
+
+            // Rating Plate
+            sprite(ratingPlateName(totalRating))?.let { plate ->
+                canvas.drawBitmap(plate, null, RectF(432f, 49f, 635f, 101f), bitmapPaint)
+            }
+
+            // Name Box + Rating Box
+            sprite("mmd_player_name_box")?.let { box ->
+                canvas.drawBitmap(box, null, RectF(432f, 110f, 734f, 156f), bitmapPaint)
+            }
+            sprite("mmd_player_rating_box")?.let { box ->
+                canvas.drawBitmap(box, null, RectF(432f, 165f, 734f, 206f), bitmapPaint)
+            }
+
+            // Player Name (full-width arcade style when fitting within 274px)
+            val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                typeface = Typeface.DEFAULT_BOLD
+                textSize = 26f
+                letterSpacing = 0.06f
+            }
+            val fullWidthCandidate = toFullWidthName(playerName)
+            val displayPlayer = if (namePaint.measureText(fullWidthCandidate) <= 274f) {
+                fullWidthCandidate
+            } else {
+                ellipsizeToWidth(playerName, namePaint, 274f)
+            }
+            val nameBaseline = centeredBaseline(110f, 156f, namePaint)
+            canvas.drawText(displayPlayer, 446f, nameBaseline, namePaint)
+
+            // Total Rating Digits (right-to-left)
+            if (totalRating <= 0) {
+                sprite("mmd_player_num_drating_0")?.let { zeroBmp ->
+                    canvas.drawBitmap(zeroBmp, null, RectF(598f, 58f, 626f, 92f), bitmapPaint)
                 }
-                digitIdx += 1
+            } else {
+                var rem = totalRating
+                var digitIdx = 0
+                while (rem > 0) {
+                    val digit = rem % 10
+                    rem /= 10
+                    sprite("mmd_player_num_drating_$digit")?.let { dBmp ->
+                        val dx = 598f - 21f * digitIdx
+                        canvas.drawBitmap(dBmp, null, RectF(dx, 58f, dx + 28f, 92f), bitmapPaint)
+                    }
+                    digitIdx += 1
+                }
             }
-        }
 
-        // Breakdown Text
-        val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textSize = 14f
+            // Breakdown Text
+            val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                textSize = 14f
+            }
+            val breakdown = "旧版本：$oldRating   现行版本：$newRating"
+            val subBaseline = centeredBaseline(165f, 206f, subPaint)
+            canvas.drawText(breakdown, 472f, subBaseline, subPaint)
+            return output
+        } finally {
+            spriteCache.values.forEach { it?.recycle() }
         }
-        val breakdown = "旧版本：$oldRating   现行版本：$newRating"
-        val subBaseline = centeredBaseline(165f, 206f, subPaint)
-        canvas.drawText(breakdown, 472f, subBaseline, subPaint)
-
-        spriteCache.values.forEach { it?.recycle() }
-        return output
     }
 
     private fun drawRecordCard(
         canvas: Canvas,
         bitmapPaint: Paint,
+        titlePaint: Paint,
+        metricPaint: Paint,
         sprite: (String) -> Bitmap?,
         record: ProberRecord,
         cover: Bitmap?,
@@ -277,22 +296,11 @@ object Best50Renderer {
         }
 
         // Song Title
-        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = Typeface.DEFAULT_BOLD
-            textSize = 14f
-            textAlign = Paint.Align.CENTER
-        }
         val truncatedTitle = ellipsizeToWidth(record.title, titlePaint, ITEM_WIDTH - 32f)
         val titleBaseline = centeredBaseline(originY + 186f, originY + 206f, titlePaint)
         canvas.drawText(truncatedTitle, originX + ITEM_WIDTH * 0.5f, titleBaseline, titlePaint)
 
         // Bottom metrics (Lv, Achievement, Ra)
-        val metricPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = Typeface.DEFAULT_BOLD
-            textSize = 11.5f
-        }
         val metricBaseline = centeredBaseline(originY + 214f, originY + 232f, metricPaint)
 
         metricPaint.textAlign = Paint.Align.LEFT

@@ -324,7 +324,10 @@ struct PlateCheckScope: Identifiable, Equatable, Hashable {
     }
 
     func contains(_ song: SongData, difficulty: DifficultyType) -> Bool {
-        guard !song.isUtage, song.isDisabled != true, song.charts.count > difficulty.rawValue else {
+        guard difficulty.rawValue >= 0,
+              !song.isUtage,
+              song.isDisabled != true,
+              song.charts.count > difficulty.rawValue else {
             return false
         }
         switch rule {

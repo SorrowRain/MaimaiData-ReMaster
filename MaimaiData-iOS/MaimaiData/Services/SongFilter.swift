@@ -10,7 +10,8 @@ enum SongFilter {
         enableCharterSearch: Bool,
         region: MaimaiConstants.ServerRegion = .cn
     ) -> [SongData] {
-        let query = criteria.keyword.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let query = normalizeSearchText(criteria.keyword)
+        let queryNumericId = Int(query).flatMap { $0 > 0 ? $0 : nil }
         let expandedVersions = MaimaiConstants.expandVersionFilter(
             Array(criteria.selectedVersions),
             region: region
@@ -37,12 +38,13 @@ enum SongFilter {
                 return false
             }
 
-            // 4. Keyword
+            // 4. Keyword (title, alias, charter, or exact ID / numericId)
             if !query.isEmpty {
-                let titleMatch = song.title.lowercased().contains(query)
-                let aliasMatch = enableAliasSearch && (song.alias?.contains { $0.lowercased().contains(query) } ?? false)
-                let charterMatch = enableCharterSearch && song.charts.contains { $0.charter.lowercased().contains(query) }
-                let idMatch = song.id == query
+                let titleMatch = normalizeSearchText(song.title).contains(query)
+                let aliasMatch = enableAliasSearch && (song.alias?.contains { normalizeSearchText($0).contains(query) } ?? false)
+                let charterMatch = enableCharterSearch && song.charts.contains { normalizeSearchText($0.charter).contains(query) }
+                let idMatch = normalizeSearchText(song.id) == query
+                    || (queryNumericId != nil && song.numericId == queryNumericId)
                 if !(titleMatch || aliasMatch || charterMatch || idMatch) {
                     return false
                 }
@@ -93,5 +95,26 @@ enum SongFilter {
         let bDs = b.ds[safe: 4] ?? 0
         if aDs == bDs { return a.defaultSortKey > b.defaultSortKey }
         return ascending ? aDs < bDs : aDs > bDs
+    }
+
+    /// Normalizes full-width ASCII (`Ａ`..`Ｚ`, `０`..`９`, `　`) to half-width and lowercases.
+    static func normalizeSearchText(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        var scalars = String.UnicodeScalarView()
+        scalars.reserveCapacity(trimmed.unicodeScalars.count)
+        for scalar in trimmed.unicodeScalars {
+            let v = scalar.value
+            if v == 0x3000 {
+                scalars.append(UnicodeScalar(0x20)!)
+            } else if v >= 0xFF01 && v <= 0xFF5E, let mapped = UnicodeScalar(v - 0xFEE0) {
+                scalars.append(mapped)
+            } else {
+                scalars.append(scalar)
+            }
+        }
+        return String(scalars)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }

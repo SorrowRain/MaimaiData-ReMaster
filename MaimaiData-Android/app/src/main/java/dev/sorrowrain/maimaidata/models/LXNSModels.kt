@@ -155,11 +155,13 @@ object LXNSUtageNotesSerializer : KSerializer<LXNSUtageNotes> {
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("LXNSUtageNotes")
 
     override fun deserialize(decoder: Decoder): LXNSUtageNotes {
-        val jsonDecoder = decoder as JsonDecoder
-        val obj = jsonDecoder.decodeJsonElement() as JsonObject
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: return LXNSUtageNotes.Single(LXNSNotes())
+        val obj = jsonDecoder.decodeJsonElement() as? JsonObject
+            ?: return LXNSUtageNotes.Single(LXNSNotes())
         val json = jsonDecoder.json
-        val leftEl = obj["left"]
-        val rightEl = obj["right"]
+        val leftEl = obj["left"] as? JsonObject
+        val rightEl = obj["right"] as? JsonObject
         if (leftEl != null && rightEl != null) {
             return LXNSUtageNotes.Buddy(
                 left = json.decodeFromJsonElement(leftEl),
@@ -285,7 +287,7 @@ data class PlateCheckScope(
         }
 
     fun contains(song: SongData, difficulty: DifficultyType): Boolean {
-        if (song.isUtage || song.isDisabled == true || song.charts.size <= difficulty.rawValue) {
+        if (difficulty.rawValue < 0 || song.isUtage || song.isDisabled == true || song.charts.size <= difficulty.rawValue) {
             return false
         }
         return when (val r = rule) {

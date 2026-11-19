@@ -111,12 +111,26 @@ struct ProberRecord: Codable, Identifiable, Hashable {
     }
 
     var fcAccessibilityLabel: String {
-        let display = fc.uppercased().replacingOccurrences(of: "P", with: "+")
+        let display: String
+        switch fc {
+        case "fc": display = "FC"
+        case "fcp": display = "FC+"
+        case "ap": display = "AP"
+        case "app": display = "AP+"
+        default: display = fc.uppercased()
+        }
         return "连击状态 \(display)"
     }
 
     var fsAccessibilityLabel: String {
-        let display = fs.uppercased().replacingOccurrences(of: "P", with: "+")
+        let display: String
+        switch fs {
+        case "fs": display = "FS"
+        case "fsp": display = "FS+"
+        case "fsd": display = "FSD"
+        case "fsdp": display = "FSD+"
+        default: display = fs.uppercased()
+        }
         return "同步状态 \(display)"
     }
 

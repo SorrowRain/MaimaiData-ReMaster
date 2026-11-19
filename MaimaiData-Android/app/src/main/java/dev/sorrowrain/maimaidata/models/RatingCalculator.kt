@@ -62,7 +62,7 @@ object RatingCalculator {
         val perSong = targetTotalRating / 50
         var minLv = 0
         for (i in 10..150) {
-            if (perSong < achievementToRating(levelTenths = i, achievementTenThousandths = 1_005_000)) {
+            if (perSong <= achievementToRating(levelTenths = i, achievementTenThousandths = 1_005_000)) {
                 minLv = i
                 break
             }

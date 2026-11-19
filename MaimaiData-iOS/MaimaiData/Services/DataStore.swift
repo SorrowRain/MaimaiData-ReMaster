@@ -44,6 +44,17 @@ final class DataStore {
 
     // Single-flight guard for rotating LXNS OAuth refresh tokens
     private var inFlightTokenRefreshTasks: [UUID: Task<String, Error>] = [:]
+    private var suppressNextProfileRestore = false
+
+    private enum SyncPolicy {
+        static let catalogAutoRefresh: TimeInterval = 7 * 24 * 3600
+        static let catalogManualCooldown: TimeInterval = 10 * 60
+        static let statsAutoRefresh: TimeInterval = 5 * 24 * 3600
+        static let statsManualCooldown: TimeInterval = 5 * 60
+        static let appUpdateCheckInterval: TimeInterval = 24 * 3600
+        static let bootstrapDelaySeconds: Int = 3
+        static let oauthExpiryBufferSeconds: TimeInterval = 30
+    }
 
     // MARK: - User Preferences & Multi-Provider Score Profiles
     var favoriteIds: Set<String> {
@@ -59,7 +70,11 @@ final class DataStore {
         didSet {
             guard oldValue != activeProfileId else { return }
             UserDefaults.standard.set(activeProfileId?.uuidString, forKey: Keys.activeProfileId)
-            restoreCachedRecords()
+            if suppressNextProfileRestore {
+                suppressNextProfileRestore = false
+            } else {
+                restoreCachedRecords()
+            }
         }
     }
     var activeProfile: ScoreProfile? {
@@ -129,9 +144,12 @@ final class DataStore {
         }
     }
 
-    /// Official CN plate rule groups from cached LXNS `/maimai/plate/list`, plus a trailing current-version preview group
-    /// when the latest CN version has not been assigned achievement plates yet.
-    var cnPlateCheckGroups: [CNPlateRuleGroup] {
+    /// Cached official CN plate rule groups + unified plate scopes for the active server region.
+    /// Rebuilt whenever songs, CN baseline, plate catalog, or server region changes.
+    private(set) var cnPlateCheckGroups: [CNPlateRuleGroup] = []
+    private(set) var activePlateScopes: [PlateCheckScope] = []
+
+    private func rebuildPlateScopeCache() {
         var list = plateCatalog?.groups ?? []
         let sourceSongs = cnSongs.isEmpty ? songs : cnSongs
         let newSongs = sourceSongs.filter { !$0.isUtage && $0.isDisabled != true && $0.basicInfo.isNew && $0.numericId > 0 }
@@ -152,14 +170,10 @@ final class DataStore {
                 )
             }
         }
-        return list
-    }
-
-    /// Unified plate progress scopes for the active server region (`.cn`, `.intl`, or `.jp`).
-    var activePlateScopes: [PlateCheckScope] {
-        LXNSCatalogConverter.buildPlateScopes(
+        cnPlateCheckGroups = list
+        activePlateScopes = LXNSCatalogConverter.buildPlateScopes(
             for: serverRegion,
-            cnPlateGroups: cnPlateCheckGroups,
+            cnPlateGroups: list,
             activeSongs: songs,
             zetarakuVersions: zetarakuCatalog?.versions
         )
@@ -299,28 +313,33 @@ final class DataStore {
             return cache
         }.value
 
+        let currentProfileId = activeProfileId
         plateCatalog = caches.plates
         zetarakuCatalog = caches.zetaraku
         dxDataIdMap = caches.dxIdMap
+        var cnSnapshot: SongSnapshot?
         if let loadedCNSongs = caches.songs {
-            await storeCNBaseline(loadedCNSongs)
+            cnSnapshot = await storeCNBaseline(loadedCNSongs)
             if caches.usedSeed { dataVersion = Self.seedDataVersion }
         }
 
         let epoch = regionEpoch
         switch serverRegion {
         case .cn:
-            if !cnSongs.isEmpty {
-                await applySongs(cnSongs, epoch: epoch)
+            if let cnSnapshot {
+                applySnapshot(cnSnapshot, epoch: epoch)
             }
         case .intl, .jp:
             if let catalog = zetarakuCatalog {
                 await applyZetarakuCatalog(catalog, for: serverRegion, epoch: epoch)
             }
         }
+        rebuildPlateScopeCache()
 
         if let stats = caches.stats { applyChartStats(stats) }
-        records = caches.records ?? []
+        if activeProfileId == currentProfileId && recordsEpoch == 0 {
+            records = caches.records ?? []
+        }
         isLoadingLocalData = false
         prefetchBest50Covers()
     }
@@ -336,7 +355,7 @@ final class DataStore {
         }
 
         // Defer low-frequency periodic checks so app launch never bursts upstream APIs.
-        try? await Task.sleep(for: .seconds(3))
+        try? await Task.sleep(for: .seconds(SyncPolicy.bootstrapDelaySeconds))
         async let periodicCatalogCheck: Void = syncAllCatalogsAndRules(force: false)
         async let periodicStatsCheck: Void = refreshChartStatsIfStale(force: false)
         async let periodicAppUpdateCheck: Void = checkAppUpdateIfNeeded(manual: false)
@@ -353,7 +372,7 @@ final class DataStore {
             guard channel == .sideloadOrDev else { return }
             let ud = UserDefaults.standard
             if let lastTs = ud.object(forKey: Keys.appUpdateCheck) as? TimeInterval,
-               Date().timeIntervalSince1970 - lastTs < 24 * 3600 {
+               Date().timeIntervalSince1970 - lastTs < SyncPolicy.appUpdateCheckInterval {
                 return
             }
         }
@@ -386,7 +405,8 @@ final class DataStore {
         availableAppUpdate = nil
     }
 
-    private func storeCNBaseline(_ rawList: [SongData]) async {
+    @discardableResult
+    private func storeCNBaseline(_ rawList: [SongData]) async -> SongSnapshot {
         let zCatalog = zetarakuCatalog
         let snapshot = await Task.detached(priority: .userInitiated) {
             let withUtageMeta = ZetarakuCatalogConverter.enrichCNSongsWithUtageMetadata(rawList, from: zCatalog)
@@ -394,15 +414,21 @@ final class DataStore {
         }.value
         cnSongs = snapshot.songs
         cnSongsById = snapshot.songsById
+        return snapshot
     }
 
-    private func applySongs(_ list: [SongData], epoch: Int? = nil) async {
-        let snapshot = await Self.buildSnapshot(from: list)
+    private func applySnapshot(_ snapshot: SongSnapshot, epoch: Int? = nil) {
         if let epoch, regionEpoch != epoch { return }
         songs = snapshot.songs
         songsById = snapshot.songsById
         maxNotesStats = snapshot.maxNotes
         catalogRevision &+= 1
+        rebuildPlateScopeCache()
+    }
+
+    private func applySongs(_ list: [SongData], epoch: Int? = nil) async {
+        let snapshot = await Self.buildSnapshot(from: list)
+        applySnapshot(snapshot, epoch: epoch)
     }
 
     private func applyZetarakuCatalog(
@@ -423,10 +449,7 @@ final class DataStore {
         }.value
         if let epoch, regionEpoch != epoch { return }
         migrateFavoriteIdsIfNeeded(migrations)
-        songs = snapshot.songs
-        songsById = snapshot.songsById
-        maxNotesStats = snapshot.maxNotes
-        catalogRevision &+= 1
+        applySnapshot(snapshot, epoch: epoch)
     }
 
     /// Smoothly upgrades any favorited temporary key (`zeta_dx_*`) to its official numeric ID once online `dxdata` provides it.
@@ -495,6 +518,7 @@ final class DataStore {
                 songs = []
                 songsById = [:]
                 catalogRevision &+= 1
+                rebuildPlateScopeCache()
                 await loadOrFetchZetaraku(for: newRegion, epoch: epoch)
             }
         }
@@ -532,10 +556,9 @@ final class DataStore {
         guard !isSyncingSongs else { return }
 
         if force {
-            let manualCooldown: TimeInterval = 10 * 60
             if let lastCN = lastCNCatalogSync,
                let lastZ = lastZetarakuSync,
-               Date().timeIntervalSince(min(lastCN, lastZ)) < manualCooldown,
+               Date().timeIntervalSince(min(lastCN, lastZ)) < SyncPolicy.catalogManualCooldown,
                !cnSongs.isEmpty,
                plateCatalog != nil,
                zetarakuCatalog != nil {
@@ -543,36 +566,39 @@ final class DataStore {
                 return
             }
         } else {
-            let sevenDays: TimeInterval = 7 * 24 * 3600
             if lastCNCatalogSync == nil, !cnSongs.isEmpty, plateCatalog != nil {
                 // Record seed baseline date on first launch; do not burst APIs on cold install.
                 lastCNCatalogSync = Date()
                 return
             }
-            let cnFresh = lastCNCatalogSync.map { Date().timeIntervalSince($0) < sevenDays } ?? false
+            let cnFresh = lastCNCatalogSync.map { Date().timeIntervalSince($0) < SyncPolicy.catalogAutoRefresh } ?? false
             let zFresh = (serverRegion == .cn && zetarakuCatalog == nil)
-                || (lastZetarakuSync.map { Date().timeIntervalSince($0) < sevenDays } ?? false)
+                || (lastZetarakuSync.map { Date().timeIntervalSince($0) < SyncPolicy.catalogAutoRefresh } ?? false)
             if cnFresh && zFresh && !cnSongs.isEmpty && plateCatalog != nil {
                 return
             }
         }
 
-        async let cnOutcome: Error? = performLXNSCatalogSync()
+        async let cnOutcome: (songs: [SongData]?, error: Error?) = performLXNSCatalogSync()
         async let zOutcome: Error? = performZetarakuSync()
-        let (cnErr, zErr) = await (cnOutcome, zOutcome)
+        let (cnResult, zErr) = await (cnOutcome, zOutcome)
+        let cnErr = cnResult.error
 
-        // Re-apply active region once both CN baseline and Zetaraku/DXData caches have settled.
-        if !cnSongs.isEmpty {
-            await storeCNBaseline(cnSongs)
-        }
+        // Build CN baseline once after both LXNS and Zetaraku/DXData have settled, then apply active region once.
+        let cnSource = cnResult.songs ?? cnSongs
+        let cnSnapshot: SongSnapshot? = cnSource.isEmpty ? nil : await storeCNBaseline(cnSource)
         switch serverRegion {
         case .cn:
-            if !cnSongs.isEmpty {
-                await applySongs(cnSongs, epoch: regionEpoch)
+            if let cnSnapshot {
+                applySnapshot(cnSnapshot, epoch: regionEpoch)
+            } else {
+                rebuildPlateScopeCache()
             }
         case .intl, .jp:
             if let catalog = zetarakuCatalog {
                 await applyZetarakuCatalog(catalog, for: serverRegion, epoch: regionEpoch)
+            } else {
+                rebuildPlateScopeCache()
             }
         }
 
@@ -591,9 +617,8 @@ final class DataStore {
     }
 
     private func refreshZetarakuIfStale() async {
-        let sevenDays: TimeInterval = 7 * 24 * 3600
         if let last = lastZetarakuSync,
-           Date().timeIntervalSince(last) < sevenDays,
+           Date().timeIntervalSince(last) < SyncPolicy.catalogAutoRefresh,
            zetarakuCatalog != nil,
            dxDataIdMap != nil {
             return
@@ -640,17 +665,18 @@ final class DataStore {
 
         switch zResult {
         case .success(let (raw, decoded)):
-            try? raw.write(to: cachedZetarakuURL, options: .atomic)
             zetarakuCatalog = decoded
-            lastZetarakuSync = Date()
+            if (try? raw.write(to: cachedZetarakuURL, options: .atomic)) != nil {
+                lastZetarakuSync = Date()
+            }
             return nil
         case .failure(let error):
             return error
         }
     }
 
-    private func performLXNSCatalogSync() async -> Error? {
-        guard !isFetchingCNSongs else { return nil }
+    private func performLXNSCatalogSync() async -> (songs: [SongData]?, error: Error?) {
+        guard !isFetchingCNSongs else { return (nil, nil) }
         isFetchingCNSongs = true
         defer { isFetchingCNSongs = false }
         do {
@@ -674,9 +700,8 @@ final class DataStore {
                 return (catalogResult.songs, platesResult, formatter.string(from: Date()))
             }.value
 
-            if let encodedSongs = try? JSONEncoder().encode(convertedSongs) {
-                try encodedSongs.write(to: cachedSongsURL, options: .atomic)
-            }
+            let encodedSongs = try JSONEncoder().encode(convertedSongs)
+            try encodedSongs.write(to: cachedSongsURL, options: .atomic)
             if let convertedPlates, let encodedPlates = try? JSONEncoder().encode(convertedPlates) {
                 try? encodedPlates.write(to: cachedPlatesURL, options: .atomic)
                 plateCatalog = convertedPlates
@@ -684,24 +709,21 @@ final class DataStore {
 
             dataVersion = stamp
             lastCNCatalogSync = Date()
-            await storeCNBaseline(convertedSongs)
-            return nil
+            return (convertedSongs, nil)
         } catch {
-            return error
+            return (nil, error)
         }
     }
 
     func refreshChartStatsIfStale(force: Bool = false) async {
         guard !isSyncingStats else { return }
         if force {
-            let manualCooldown: TimeInterval = 5 * 60
-            if let last = lastChartStatsSync, Date().timeIntervalSince(last) < manualCooldown, !chartStats.isEmpty {
+            if let last = lastChartStatsSync, Date().timeIntervalSince(last) < SyncPolicy.statsManualCooldown, !chartStats.isEmpty {
                 statusMessage = "当前已是最新数据"
                 return
             }
         } else {
-            let fiveDays: TimeInterval = 5 * 24 * 3600
-            if let last = lastChartStatsSync, Date().timeIntervalSince(last) < fiveDays, !chartStats.isEmpty {
+            if let last = lastChartStatsSync, Date().timeIntervalSince(last) < SyncPolicy.statsAutoRefresh, !chartStats.isEmpty {
                 return
             }
         }
@@ -714,6 +736,7 @@ final class DataStore {
             applyChartStats(decoded)
             if force {
                 statusMessage = "拟合定数已刷新"
+                syncNotice = nil
             }
         } catch {
             statusMessage = force ? "拟合定数获取失败：\(error.localizedDescription)" : nil
@@ -1061,7 +1084,7 @@ final class DataStore {
         if (!forceRefresh || alreadyRotatedSinceFailure),
            !currentSecret.accessToken.isEmpty,
            let expiresAt = currentSecret.accessTokenExpiresAt,
-           Date().timeIntervalSince1970 < expiresAt - 30 {
+           Date().timeIntervalSince1970 < expiresAt - SyncPolicy.oauthExpiryBufferSeconds {
             return currentSecret.accessToken
         }
 
@@ -1155,8 +1178,7 @@ final class DataStore {
             try? encoded.write(to: fileURL, options: .atomic)
         }
         if activeProfileId != profileId {
-            // Set `activeProfileId` then immediately overwrite with fresh network data
-            UserDefaults.standard.set(profileId.uuidString, forKey: Keys.activeProfileId)
+            suppressNextProfileRestore = true
             activeProfileId = profileId
         }
         recordsEpoch += 1
