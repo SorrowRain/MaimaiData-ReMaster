@@ -60,14 +60,10 @@ struct AccountManagementView: View {
                 AppSectionCard(title: "B50 图片玩家名称") {
                     VStack(spacing: AppTheme.itemSpacing) {
                         AppInsetGroup {
-                            Toggle(
-                                "使用查分器返回昵称",
+                            AppInsetToggleRow(
+                                title: "使用查分器返回昵称",
                                 isOn: $storeBindable.useProberNickname.animation(.snappy(duration: 0.2))
                             )
-                            .font(AppTheme.Typography.rowTitle)
-                            .tint(AppTheme.accent)
-                            .padding(.horizontal, AppTheme.Space.m)
-                            .frame(minHeight: AppTheme.rowMinHeight)
                         }
 
                         if !store.useProberNickname {
@@ -105,6 +101,7 @@ struct AccountManagementView: View {
             Button("移除", role: .destructive) {
                 store.removeProfile(id: profile.id)
                 pendingDeleteProfile = nil
+                toast.show("已移除 \(profile.displayTitle)", duration: 1.8)
             }
             Button("取消", role: .cancel) {
                 pendingDeleteProfile = nil
@@ -156,6 +153,7 @@ struct AccountManagementView: View {
             } label: {
                 Label("移除档案", systemImage: "trash")
             }
+            .disabled(store.isSyncingRecords)
         }
     }
 

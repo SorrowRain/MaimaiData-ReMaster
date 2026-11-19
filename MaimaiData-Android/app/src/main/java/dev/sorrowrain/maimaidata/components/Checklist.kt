@@ -172,8 +172,12 @@ fun <T> ChecklistSongGrid(
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val tileSize = 72.dp
-        val spacing = AppTheme.itemSpacing
-        val columns = ((maxWidth + spacing) / (tileSize + spacing)).toInt().coerceAtLeast(3)
+        val spacing = AppTheme.Space.s
+        val columns = if (maxWidth < 10_000.dp) {
+            ((maxWidth + spacing) / (tileSize + spacing)).toInt().coerceAtLeast(1)
+        } else {
+            4
+        }
         val rows = items.chunked(columns)
 
         Column(
@@ -183,7 +187,11 @@ fun <T> ChecklistSongGrid(
             rows.forEach { rowItems ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = if (columns > 1) {
+                        Arrangement.SpaceBetween
+                    } else {
+                        Arrangement.Start
+                    }
                 ) {
                     rowItems.forEach { item ->
                         key(itemKey(item)) {

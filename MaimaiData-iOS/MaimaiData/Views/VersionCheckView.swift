@@ -20,12 +20,7 @@ struct VersionCheckView: View {
     private var activeScope: PlateCheckScope {
         let items = scopes
         guard !items.isEmpty else {
-            return PlateCheckScope(
-                id: "default",
-                title: "真 · maimai ~ PLUS",
-                versionAsset: "maimai",
-                rule: .versions(includedVersions: ["maimai", "maimai PLUS"])
-            )
+            return PlateCheckScope.fallback
         }
         let idx = min(max(0, store.activeVersionCheckIndex), items.count - 1)
         return items[idx]
@@ -49,7 +44,7 @@ struct VersionCheckView: View {
         let filtered = store.songs.filter { scope.contains($0, difficulty: diff) }
         let sorted = filtered.sorted { ($0.ds[safe: diffIdx] ?? 0) > ($1.ds[safe: diffIdx] ?? 0) }
         let dict = Dictionary(grouping: sorted) { $0.level[safe: diffIdx] ?? "?" }
-        groupedSongs = dict.keys.sorted { levelOrder($0) > levelOrder($1) }
+        groupedSongs = dict.keys.sorted { MaimaiConstants.levelSortOrder($0) > MaimaiConstants.levelSortOrder($1) }
             .map { LevelGroup(level: $0, songs: dict[$0] ?? []) }
     }
 
@@ -186,12 +181,5 @@ struct VersionCheckView: View {
         .onChange(of: selectedDifficulty) { _, _ in rebuildGroups() }
         .onChange(of: store.serverRegion) { _, _ in rebuildGroups() }
         .onChange(of: store.catalogRevision) { _, _ in rebuildGroups() }
-    }
-
-    private func levelOrder(_ level: String) -> Double {
-        if level.hasSuffix("+"), let num = Double(level.dropLast()) {
-            return num + 0.5
-        }
-        return Double(level) ?? 0
     }
 }

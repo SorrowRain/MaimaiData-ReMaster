@@ -1,15 +1,12 @@
 package dev.sorrowrain.maimaidata.views
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -17,8 +14,6 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -31,16 +26,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.isSpecified
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppCard
 import dev.sorrowrain.maimaidata.components.AppCircleIconButton
+import dev.sorrowrain.maimaidata.components.AppEmptyState
+import dev.sorrowrain.maimaidata.components.AppLoadingState
 import dev.sorrowrain.maimaidata.components.AppSectionCard
 import dev.sorrowrain.maimaidata.components.AppSlider
 import dev.sorrowrain.maimaidata.components.AppTopBar
 import dev.sorrowrain.maimaidata.components.CheckDisplayMode
+import dev.sorrowrain.maimaidata.components.ChecklistSongGrid
 import dev.sorrowrain.maimaidata.components.ChecklistSongTile
 import dev.sorrowrain.maimaidata.components.ChecklistStatsHeader
 import dev.sorrowrain.maimaidata.models.ChecklistStats
@@ -234,86 +230,28 @@ fun LevelCheckScreen(
                 when {
                     store.isSyncingSongs && store.songs.isEmpty() -> {
                         item(key = "level_syncing_state") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                            ) {
-                                CircularProgressIndicator(
-                                    color = AppTheme.accentText,
-                                    strokeWidth = 2.5.dp,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Text(
-                                    text = "正在同步${store.serverRegion.shortName}曲库…",
-                                    style = AppTheme.AppTypography.caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            AppLoadingState(message = "正在同步${store.serverRegion.shortName}曲库…")
                         }
                     }
 
                     store.songs.isEmpty() -> {
                         item(key = "level_empty_catalog") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp, horizontal = AppTheme.Space.l),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Sync,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(36.dp)
-                                )
-                                Text(
-                                    text = "暂无${store.serverRegion.shortName}曲库数据",
-                                    style = AppTheme.AppTypography.cardTitle,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = "请前往「设置与数据 → 数据同步与存储」点击检查更新",
-                                    style = AppTheme.AppTypography.caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                            AppEmptyState(
+                                icon = Icons.Rounded.Sync,
+                                title = "暂无${store.serverRegion.shortName}曲库数据",
+                                description = "请前往「设置与数据 → 数据同步与存储」点击检查更新"
+                            )
                         }
                     }
 
                     visibleGroups.isEmpty() && totalChartCount > 0 -> {
                         item(key = "level_all_completed") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp, horizontal = AppTheme.Space.l),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.CheckCircle,
-                                    contentDescription = null,
-                                    tint = AppTheme.accentText,
-                                    modifier = Modifier.size(38.dp)
-                                )
-                                Text(
-                                    text = "已全部达成 ${displayMode.title}",
-                                    style = AppTheme.AppTypography.cardTitle,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = "本等级全部谱面均已达成该目标",
-                                    style = AppTheme.AppTypography.caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                            AppEmptyState(
+                                icon = Icons.Rounded.CheckCircle,
+                                title = "已全部达成 ${displayMode.title}",
+                                description = "本等级全部谱面均已达成该目标",
+                                iconTint = AppTheme.accentText
+                            )
                         }
                     }
 
@@ -328,51 +266,24 @@ fun LevelCheckScreen(
                                     AppCapsuleLabel(text = "${group.items.size} 首")
                                 }
                             ) {
-                                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                                    val tileSize = 72.dp
-                                    val minGap = AppTheme.Space.s
-                                    val columns = if (maxWidth.isSpecified && maxWidth < 10_000.dp) {
-                                        max(1, ((maxWidth + minGap) / (tileSize + minGap)).toInt())
-                                    } else {
-                                        4
-                                    }
-                                    val rows = group.items.chunked(columns)
-
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalArrangement = Arrangement.spacedBy(minGap)
-                                    ) {
-                                        rows.forEach { rowItems ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = if (columns > 1) {
-                                                    Arrangement.SpaceBetween
-                                                } else {
-                                                    Arrangement.Start
-                                                }
-                                            ) {
-                                                rowItems.forEach { item ->
-                                                    ChecklistSongTile(
-                                                        song = item.song,
-                                                        record = store.record(
-                                                            item.song.numericId,
-                                                            item.chart.index
-                                                        ),
-                                                        borderColor = item.chart.difficulty.color,
-                                                        displayMode = displayMode,
-                                                        showTypeBadge = true,
-                                                        region = store.serverRegion,
-                                                        onClick = {
-                                                            onOpenSong(item.song.id, item.chart.index)
-                                                        }
-                                                    )
-                                                }
-                                                repeat(columns - rowItems.size) {
-                                                    Spacer(modifier = Modifier.size(tileSize))
-                                                }
-                                            }
+                                ChecklistSongGrid(
+                                    items = group.items,
+                                    itemKey = { it.key }
+                                ) { item ->
+                                    ChecklistSongTile(
+                                        song = item.song,
+                                        record = store.record(
+                                            item.song.numericId,
+                                            item.chart.index
+                                        ),
+                                        borderColor = item.chart.difficulty.color,
+                                        displayMode = displayMode,
+                                        showTypeBadge = true,
+                                        region = store.serverRegion,
+                                        onClick = {
+                                            onOpenSong(item.song.id, item.chart.index)
                                         }
-                                    }
+                                    )
                                 }
                             }
                         }

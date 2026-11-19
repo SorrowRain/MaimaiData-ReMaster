@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -40,7 +39,6 @@ import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SearchOff
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,12 +63,13 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppCard
+import dev.sorrowrain.maimaidata.components.AppEmptyState
 import dev.sorrowrain.maimaidata.components.AppInlineButton
+import dev.sorrowrain.maimaidata.components.AppLoadingState
 import dev.sorrowrain.maimaidata.components.AppTopBar
 import dev.sorrowrain.maimaidata.components.CapsuleStyle
 import dev.sorrowrain.maimaidata.components.ChartTypeBadge
@@ -81,6 +80,7 @@ import dev.sorrowrain.maimaidata.components.SongCoverBadgeView
 import dev.sorrowrain.maimaidata.components.SyncStatusBanner
 import dev.sorrowrain.maimaidata.models.MaimaiConstants
 import dev.sorrowrain.maimaidata.models.SongData
+import dev.sorrowrain.maimaidata.models.SongFilter
 import dev.sorrowrain.maimaidata.models.SongFilterCriteria
 import dev.sorrowrain.maimaidata.models.SongSortOption
 import dev.sorrowrain.maimaidata.services.DataSyncNotice
@@ -148,10 +148,9 @@ fun SongListScreen(
     }
 
     LaunchedEffect(store.serverRegion) {
-        val allowedVersions = MaimaiConstants.searchVersionChips(store.serverRegion).toSet()
-        val pruned = criteria.selectedVersions.intersect(allowedVersions)
-        if (pruned != criteria.selectedVersions) {
-            criteria = criteria.copy(selectedVersions = pruned)
+        val pruned = SongFilter.prunedCriteria(criteria, store.serverRegion)
+        if (pruned != criteria) {
+            criteria = pruned
         }
     }
 
@@ -309,63 +308,26 @@ fun SongListScreen(
                         when {
                             store.isLoadingLocalData && displayedSongs.isEmpty() -> {
                                 item(key = "loading_placeholder") {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 64.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                                    ) {
-                                        CircularProgressIndicator(
-                                            color = AppTheme.accentText,
-                                            strokeWidth = 2.5.dp,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                        Text(
-                                            text = "正在读取曲库…",
-                                            style = AppTheme.AppTypography.body,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    AppLoadingState(message = "正在读取曲库…")
                                 }
                             }
 
                             displayedSongs.isEmpty() -> {
                                 item(key = "empty_placeholder") {
                                     val emptyFavorites = criteria.onlyFavorites && store.favoriteIds.isEmpty()
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 56.dp, start = AppTheme.Space.l, end = AppTheme.Space.l),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (emptyFavorites) {
-                                                Icons.Rounded.FavoriteBorder
-                                            } else {
-                                                Icons.Rounded.SearchOff
-                                            },
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                                            modifier = Modifier.size(40.dp)
-                                        )
-                                        Text(
-                                            text = if (emptyFavorites) "还没有收藏歌曲" else "未找到匹配曲目",
-                                            style = AppTheme.AppTypography.cardTitle,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = if (emptyFavorites) {
-                                                "在曲目详情页点击右上角心形按钮即可收藏"
-                                            } else {
-                                                "试试修改关键词或重置筛选条件"
-                                            },
-                                            style = AppTheme.AppTypography.body,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
+                                    AppEmptyState(
+                                        icon = if (emptyFavorites) {
+                                            Icons.Rounded.FavoriteBorder
+                                        } else {
+                                            Icons.Rounded.SearchOff
+                                        },
+                                        title = if (emptyFavorites) "还没有收藏歌曲" else "未找到匹配曲目",
+                                        description = if (emptyFavorites) {
+                                            "在曲目详情页点击右上角心形按钮即可收藏"
+                                        } else {
+                                            "试试修改关键词或重置筛选条件"
+                                        }
+                                    )
                                 }
                             }
 
@@ -485,7 +447,7 @@ private fun SearchPillInputBar(
             ) {
                 if (fieldValue.text.isEmpty()) {
                     Text(
-                        text = "搜索曲名、别名或曲目 ID",
+                        text = "搜索曲名、别名、谱师或 ID",
                         style = AppTheme.AppTypography.body,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                         maxLines = 1,
@@ -531,18 +493,12 @@ private fun RecentSearchesCard(
     onSelectTerm: (String) -> Unit,
     onClearAll: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(AppTheme.Radius.card),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 4.dp,
-        shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth()
+    AppCard(
+        padding = AppTheme.compactCardPadding,
+        tint = AppTheme.accent
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(AppTheme.compactCardPadding),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
         ) {
             Row(

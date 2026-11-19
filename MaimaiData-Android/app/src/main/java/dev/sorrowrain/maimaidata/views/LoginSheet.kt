@@ -19,11 +19,8 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,14 +36,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.bridges.CustomTabOAuthLauncher
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
+import dev.sorrowrain.maimaidata.components.AppInlineButton
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
 import dev.sorrowrain.maimaidata.components.AppPrimaryButton
 import dev.sorrowrain.maimaidata.components.AppSectionCard
 import dev.sorrowrain.maimaidata.components.AppSecureField
+import dev.sorrowrain.maimaidata.components.AppSegmentedControl
 import dev.sorrowrain.maimaidata.components.AppTextField
 import dev.sorrowrain.maimaidata.models.ScoreProfile
 import dev.sorrowrain.maimaidata.models.ScoreProvider
@@ -67,7 +64,6 @@ fun LoginSheet(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var selectedProvider by rememberSaveable { mutableStateOf(ScoreProvider.LXNS) }
     var lxnsUsePersonalToken by rememberSaveable { mutableStateOf(false) }
@@ -80,6 +76,10 @@ fun LoginSheet(
     var remarkName by rememberSaveable { mutableStateOf("") }
 
     var isSubmitting by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { !(isSubmitting && it == SheetValue.Hidden) }
+    )
     var errorTitle by remember { mutableStateOf("授权或同步提示") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var shouldDismissAfterAlert by remember { mutableStateOf(false) }
@@ -200,7 +200,7 @@ fun LoginSheet(
     ModalBottomSheet(
         onDismissRequest = requestClose,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
@@ -224,16 +224,12 @@ fun LoginSheet(
                     style = AppTheme.AppTypography.cardTitle,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                TextButton(
-                    onClick = requestClose,
-                    enabled = !isSubmitting
-                ) {
-                    Text(
-                        text = "关闭",
-                        style = AppTheme.AppTypography.subheadlineBold,
-                        color = AppTheme.accentText
-                    )
-                }
+                AppInlineButton(
+                    title = "关闭",
+                    isNeutral = true,
+                    enabled = !isSubmitting,
+                    onClick = requestClose
+                )
             }
 
             // 1. Score Provider Selector
@@ -242,27 +238,12 @@ fun LoginSheet(
                 subtitle = "成绩档案仅用于拉取并本地保存成绩单，与外面的游戏区服算分规则互不绑定"
             ) {
                 val providers = ScoreProvider.entries
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    providers.forEachIndexed { index, provider ->
-                        SegmentedButton(
-                            selected = selectedProvider == provider,
-                            onClick = { if (!isSubmitting) selectedProvider = provider },
-                            enabled = !isSubmitting && !store.isLoadingLocalData,
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = providers.size
-                            ),
-                            label = {
-                                Text(
-                                    text = provider.displayName,
-                                    style = AppTheme.AppTypography.inlineAction,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        )
-                    }
-                }
+                AppSegmentedControl(
+                    options = providers.map { it.displayName },
+                    selectedIndex = providers.indexOf(selectedProvider).coerceAtLeast(0),
+                    onSelect = { index -> if (!isSubmitting) selectedProvider = providers[index] },
+                    enabled = !isSubmitting && !store.isLoadingLocalData
+                )
             }
 
             // 2. Provider-specific Auth Section
@@ -275,29 +256,12 @@ fun LoginSheet(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
                     ) {
-                        val methods = listOf("OAuth 2.0 授权", "个人 API 密钥")
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            methods.forEachIndexed { index, label ->
-                                val useToken = (index == 1)
-                                SegmentedButton(
-                                    selected = lxnsUsePersonalToken == useToken,
-                                    onClick = { if (!isSubmitting) lxnsUsePersonalToken = useToken },
-                                    enabled = !isSubmitting && !store.isLoadingLocalData,
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = methods.size
-                                    ),
-                                    label = {
-                                        Text(
-                                            text = label,
-                                            style = AppTheme.AppTypography.inlineAction,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                )
-                            }
-                        }
+                        AppSegmentedControl(
+                            options = listOf("OAuth 授权", "个人 API 密钥"),
+                            selectedIndex = if (lxnsUsePersonalToken) 1 else 0,
+                            onSelect = { index -> if (!isSubmitting) lxnsUsePersonalToken = (index == 1) },
+                            enabled = !isSubmitting && !store.isLoadingLocalData
+                        )
 
                         if (!lxnsUsePersonalToken) {
                             AppInsetGroup(padding = AppTheme.Space.m) {
@@ -366,29 +330,12 @@ fun LoginSheet(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
                     ) {
-                        val methods = listOf("账号密码登录", "成绩导入 Token")
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            methods.forEachIndexed { index, label ->
-                                val useToken = (index == 1)
-                                SegmentedButton(
-                                    selected = dfUseImportToken == useToken,
-                                    onClick = { if (!isSubmitting) dfUseImportToken = useToken },
-                                    enabled = !isSubmitting && !store.isLoadingLocalData,
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = methods.size
-                                    ),
-                                    label = {
-                                        Text(
-                                            text = label,
-                                            style = AppTheme.AppTypography.inlineAction,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                )
-                            }
-                        }
+                        AppSegmentedControl(
+                            options = listOf("账号密码", "成绩导入 Token"),
+                            selectedIndex = if (dfUseImportToken) 1 else 0,
+                            onSelect = { index -> if (!isSubmitting) dfUseImportToken = (index == 1) },
+                            enabled = !isSubmitting && !store.isLoadingLocalData
+                        )
 
                         if (!dfUseImportToken) {
                             AppTextField(

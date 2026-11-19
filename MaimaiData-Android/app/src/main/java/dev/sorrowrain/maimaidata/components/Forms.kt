@@ -355,22 +355,22 @@ fun AppLabeledSliderRow(
     value: Int,
     onValueChange: (Int) -> Unit,
     valueRange: IntRange,
-    badgeTint: Color = AppTheme.accent,
+    isActive: Boolean = true,
     accessibilityLabel: String = label,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+        horizontalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
     ) {
         Text(
             text = label,
-            style = AppTheme.AppTypography.captionBold,
+            style = AppTheme.AppTypography.inlineAction,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(30.dp)
         )
-        AppValueBadge(text = valueText, tint = badgeTint)
+        AppValueBadge(text = valueText, isActive = isActive)
         AppSlider(
             value = value,
             onValueChange = onValueChange,

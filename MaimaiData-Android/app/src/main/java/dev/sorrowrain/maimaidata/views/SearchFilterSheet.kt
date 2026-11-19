@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -18,7 +17,6 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -34,13 +32,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.components.AppInlineButton
+import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
+import dev.sorrowrain.maimaidata.components.AppLabeledSliderRow
 import dev.sorrowrain.maimaidata.components.AppMenuCapsule
 import dev.sorrowrain.maimaidata.components.AppPrimaryButton
 import dev.sorrowrain.maimaidata.components.AppSecondaryButton
 import dev.sorrowrain.maimaidata.components.AppSectionCard
-import dev.sorrowrain.maimaidata.components.AppSlider
-import dev.sorrowrain.maimaidata.components.AppValueBadge
 import dev.sorrowrain.maimaidata.components.FilterCapsuleChip
 import dev.sorrowrain.maimaidata.models.MaimaiConstants
 import dev.sorrowrain.maimaidata.models.SongFilterCriteria
@@ -171,7 +169,7 @@ fun SearchFilterSheet(
                 )
             }
 
-            HorizontalDivider(thickness = 0.8.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            AppInsetDivider()
 
             Column(
                 modifier = Modifier
@@ -212,56 +210,28 @@ fun SearchFilterSheet(
                         }
                     }
                 ) {
-                    AppInsetGroup(padding = 12.dp) {
+                    AppInsetGroup(padding = AppTheme.Space.m) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Text(
-                                    text = "等级",
-                                    style = AppTheme.AppTypography.inlineAction,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.width(30.dp)
-                                )
-                                AppValueBadge(
-                                    text = firstSliderLabelText,
-                                    isActive = currentLevelIndex > 0
-                                )
-                                AppSlider(
-                                    value = currentLevelIndex,
-                                    onValueChange = { syncFromSliders(it, currentDecIndex, changedDecimal = false) },
-                                    valueRange = 0..MaimaiConstants.allLevels.lastIndex,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            AppLabeledSliderRow(
+                                label = "等级",
+                                valueText = firstSliderLabelText,
+                                value = currentLevelIndex,
+                                onValueChange = { syncFromSliders(it, currentDecIndex, changedDecimal = false) },
+                                valueRange = 0..MaimaiConstants.allLevels.lastIndex,
+                                isActive = currentLevelIndex > 0
+                            )
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Text(
-                                    text = "小数",
-                                    style = AppTheme.AppTypography.inlineAction,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.width(30.dp)
-                                )
-                                AppValueBadge(
-                                    text = secondSliderLabelText,
-                                    isActive = currentDecIndex > 0
-                                )
-                                AppSlider(
-                                    value = currentDecIndex,
-                                    onValueChange = { syncFromSliders(currentLevelIndex, it, changedDecimal = true) },
-                                    valueRange = 0..10,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            AppLabeledSliderRow(
+                                label = "小数",
+                                valueText = secondSliderLabelText,
+                                value = currentDecIndex,
+                                onValueChange = { syncFromSliders(currentLevelIndex, it, changedDecimal = true) },
+                                valueRange = 0..10,
+                                isActive = currentDecIndex > 0
+                            )
                         }
                     }
                 }
@@ -347,13 +317,13 @@ fun SearchFilterSheet(
                 }
             }
 
-            HorizontalDivider(thickness = 0.8.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            AppInsetDivider()
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = AppTheme.pagePadding, vertical = 10.dp),
+                    .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.itemSpacing),
                 horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
             ) {
                 AppSecondaryButton(

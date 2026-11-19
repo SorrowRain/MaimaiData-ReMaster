@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -26,15 +24,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,12 +41,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sorrowrain.maimaidata.components.AppConfirmDialog
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
 import dev.sorrowrain.maimaidata.components.AppInlineButton
 import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
+import dev.sorrowrain.maimaidata.components.AppInsetToggleRow
 import dev.sorrowrain.maimaidata.components.AppPrimaryButton
 import dev.sorrowrain.maimaidata.components.AppSectionCard
 import dev.sorrowrain.maimaidata.components.AppTextField
@@ -214,39 +209,14 @@ fun AccountManagementScreen(
                             verticalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
                         ) {
                             AppInsetGroup {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .defaultMinSize(minHeight = AppTheme.rowMinHeight)
-                                        .toggleable(
-                                            value = store.useProberNickname,
-                                            role = Role.Switch,
-                                            onValueChange = {
-                                                focusManager.clearFocus()
-                                                store.useProberNickname = it
-                                            }
-                                        )
-                                        .padding(horizontal = AppTheme.Space.m, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                                ) {
-                                    Text(
-                                        text = "使用查分器返回昵称",
-                                        style = AppTheme.AppTypography.rowTitle,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Switch(
-                                        checked = store.useProberNickname,
-                                        onCheckedChange = null,
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = Color.White,
-                                            checkedTrackColor = AppTheme.accent
-                                        )
-                                    )
-                                }
+                                AppInsetToggleRow(
+                                    title = "使用查分器返回昵称",
+                                    checked = store.useProberNickname,
+                                    onCheckedChange = {
+                                        focusManager.clearFocus()
+                                        store.useProberNickname = it
+                                    }
+                                )
                             }
 
                             AnimatedVisibility(
@@ -292,52 +262,21 @@ fun AccountManagementScreen(
     val deleteTarget = pendingDeleteProfile
     if (deleteTarget != null) {
         val isDeletingActive = deleteTarget.id == store.activeProfileId
-        AlertDialog(
-            onDismissRequest = { pendingDeleteProfile = null },
-            title = {
-                Text(
-                    text = if (isDeletingActive) "移除当前成绩档案" else "移除成绩档案",
-                    style = AppTheme.AppTypography.cardTitle,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+        AppConfirmDialog(
+            title = if (isDeletingActive) "移除当前成绩档案" else "移除成绩档案",
+            message = if (isDeletingActive) {
+                "确定要移除当前使用的成绩档案「${deleteTarget.displayTitle}」及其本地缓存成绩吗？"
+            } else {
+                "确定要移除成绩档案「${deleteTarget.displayTitle}」及其本地缓存成绩吗？"
             },
-            text = {
-                Text(
-                    text = if (isDeletingActive) {
-                        "确定要移除当前使用的成绩档案「${deleteTarget.displayTitle}」及其本地缓存成绩吗？"
-                    } else {
-                        "确定要移除成绩档案「${deleteTarget.displayTitle}」及其本地缓存成绩吗？"
-                    },
-                    style = AppTheme.AppTypography.body,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            confirmText = "移除",
+            isDestructive = true,
+            onConfirm = {
+                store.removeProfile(deleteTarget.id)
+                pendingDeleteProfile = null
+                toastState.show("已移除 ${deleteTarget.displayTitle}")
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        store.removeProfile(deleteTarget.id)
-                        pendingDeleteProfile = null
-                        toastState.show("已移除 ${deleteTarget.displayTitle}")
-                    }
-                ) {
-                    Text(
-                        text = "移除",
-                        style = AppTheme.AppTypography.subheadlineBold,
-                        color = AppTheme.destructiveText
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDeleteProfile = null }) {
-                    Text(
-                        text = "取消",
-                        style = AppTheme.AppTypography.subheadlineBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            shape = RoundedCornerShape(AppTheme.Radius.card),
-            containerColor = MaterialTheme.colorScheme.surface
+            onDismiss = { pendingDeleteProfile = null }
         )
     }
 

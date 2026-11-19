@@ -1,15 +1,14 @@
 package dev.sorrowrain.maimaidata.views
 
-import android.app.Activity
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,6 +48,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import dev.sorrowrain.maimaidata.bridges.ExternalLinkLauncher
 import dev.sorrowrain.maimaidata.services.LocalDataStore
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import kotlinx.serialization.Serializable
@@ -119,7 +119,7 @@ fun MainTabView() {
     val rootTabs = listOf(
         RootTabSpec(
             route = RouteSongList,
-            title = "曲目列表",
+            title = "曲库",
             icon = Icons.Rounded.LibraryMusic,
             matches = { it?.hasRoute<RouteSongList>() == true }
         ),
@@ -223,15 +223,7 @@ fun MainTabView() {
                         fadeIn(animationSpec = tween(200))
                 }
             },
-            exitTransition = {
-                if (initialState.destination.isRootTabDestination() &&
-                    targetState.destination.isRootTabDestination()
-                ) {
-                    fadeOut(animationSpec = tween(160))
-                } else {
-                    fadeOut(animationSpec = tween(160))
-                }
-            },
+            exitTransition = { fadeOut(animationSpec = tween(160)) },
             popEnterTransition = {
                 fadeIn(animationSpec = tween(180))
             },
@@ -254,6 +246,7 @@ fun MainTabView() {
                     onNavigateVersionCheck = { navController.navigate(RouteVersionCheck) },
                     onNavigateLevelCheck = { navController.navigate(RouteLevelCheck) },
                     onNavigateCalculator = { navController.navigate(RouteCalculator) },
+                    onNavigateFinaleToDx = { navController.navigate(RouteFinaleToDx) },
                     onNavigateAccountManagement = { navController.navigate(RouteAccounts) }
                 )
             }
@@ -274,8 +267,7 @@ fun MainTabView() {
                 SongDetailScreen(
                     songId = route.songId,
                     initialDifficultyIndex = route.initialDifficultyIndex.takeIf { it >= 0 },
-                    onBack = navigateBack,
-                    onOpenSong = navigateToSong
+                    onBack = navigateBack
                 )
             }
 
@@ -301,10 +293,7 @@ fun MainTabView() {
             }
 
             composable<RouteCalculator> {
-                RatingCalculatorScreen(
-                    onBack = navigateBack,
-                    onNavigateFinaleToDx = { navController.navigate(RouteFinaleToDx) }
-                )
+                RatingCalculatorScreen(onBack = navigateBack)
             }
 
             composable<RouteFinaleToDx> {
@@ -367,14 +356,25 @@ fun MainTabView() {
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { store.availableAppUpdate = null }
-                ) {
-                    Text(
-                        text = "稍后",
-                        style = AppTheme.AppTypography.subheadlineBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)) {
+                    TextButton(
+                        onClick = { store.ignoreAppUpdate(pendingRelease.version) }
+                    ) {
+                        Text(
+                            text = "忽略此版本",
+                            style = AppTheme.AppTypography.rowTitle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        onClick = { store.availableAppUpdate = null }
+                    ) {
+                        Text(
+                            text = "稍后",
+                            style = AppTheme.AppTypography.rowTitle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -382,13 +382,7 @@ fun MainTabView() {
                     onClick = {
                         val url = pendingRelease.htmlUrl
                         store.availableAppUpdate = null
-                        runCatching {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                            if (context !is Activity) {
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
-                        }
+                        ExternalLinkLauncher.open(context, url)
                     }
                 ) {
                     Text(

@@ -18,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -38,6 +37,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.components.AppInlineButton
+import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
 import dev.sorrowrain.maimaidata.components.AppSectionCard
 import dev.sorrowrain.maimaidata.components.AppTextField
@@ -164,7 +164,7 @@ fun FinaleToDxScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
                     ) {
-                        AppInsetGroup(padding = 14.dp) {
+                        AppInsetGroup(padding = AppTheme.Space.m) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -227,7 +227,7 @@ fun FinaleToDxScreen(
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
                     ) {
                         FinaleNoteJudgmentRow(
                             title = "TAP",
@@ -242,7 +242,7 @@ fun FinaleToDxScreen(
                             onMissChange = { tapM = sanitizeNoteCount(it) }
                         )
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        AppInsetDivider()
 
                         FinaleNoteJudgmentRow(
                             title = "HOLD",
@@ -257,7 +257,7 @@ fun FinaleToDxScreen(
                             onMissChange = { holdM = sanitizeNoteCount(it) }
                         )
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        AppInsetDivider()
 
                         FinaleNoteJudgmentRow(
                             title = "SLIDE",
@@ -272,7 +272,7 @@ fun FinaleToDxScreen(
                             onMissChange = { slideM = sanitizeNoteCount(it) }
                         )
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        AppInsetDivider()
 
                         FinaleNoteJudgmentRow(
                             title = "BREAK",
@@ -337,7 +337,7 @@ private fun FinaleNoteJudgmentRow(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
         ) {
             Box(
                 modifier = Modifier

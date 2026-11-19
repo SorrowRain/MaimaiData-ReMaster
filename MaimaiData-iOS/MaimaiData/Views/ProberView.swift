@@ -13,6 +13,7 @@ struct ProberView: View {
     @State private var errorMessage: String?
     @State private var isRenderingB50 = false
     @State private var b50PreviewItem: B50PreviewItem?
+    @State private var toast = ToastState()
 
     var body: some View {
         let summary = store.best35AndBest15()
@@ -76,10 +77,15 @@ struct ProberView: View {
             .padding(.vertical, AppTheme.Space.m)
         }
         .refreshable {
-            await refreshRecords()
+            if !store.isLoggedIn {
+                showLoginSheet = true
+            } else {
+                await refreshRecords(showToastOnSuccess: true)
+            }
         }
         .appPageBackground()
         .sensoryFeedback(.selection, trigger: selectedTab)
+        .statusToast(toast)
         .navigationTitle("总 Rating \(summary.totalRating)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -133,9 +139,12 @@ struct ProberView: View {
         }
     }
 
-    private func refreshRecords() async {
+    private func refreshRecords(showToastOnSuccess: Bool = false) async {
         do {
             try await store.syncActiveProfileRecords()
+            if showToastOnSuccess {
+                toast.show("成绩已同步")
+            }
         } catch is CancellationError {
             return
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -143,6 +152,10 @@ struct ProberView: View {
         } catch MaimaiAPIError.unauthorized {
             try? await Task.sleep(for: .milliseconds(350))
             showLoginSheet = true
+        } catch let apiError as MaimaiAPIError {
+            let msg = "成绩刷新失败：\(apiError.recoveryMessage)\n已有成绩已保留，请稍后重试。"
+            try? await Task.sleep(for: .milliseconds(350))
+            errorMessage = msg
         } catch {
             let msg = "成绩刷新失败：\(error.localizedDescription)\n已有成绩已保留，请稍后重试。"
             try? await Task.sleep(for: .milliseconds(350))
@@ -215,9 +228,11 @@ private struct ProberRecordRow: View {
 
                         Spacer(minLength: 0)
 
-                        Text("Ra \(record.computedRating)")
-                            .font(AppTheme.Typography.captionMetaBold)
-                            .foregroundStyle(AppTheme.accentText)
+                        AppCapsuleLabel(
+                            text: "Ra \(record.computedRating)",
+                            tint: AppTheme.accent,
+                            style: .count
+                        )
                     }
                 }
             }

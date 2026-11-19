@@ -3,11 +3,9 @@ package dev.sorrowrain.maimaidata.views
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -19,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -38,16 +35,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.isSpecified
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppCard
+import dev.sorrowrain.maimaidata.components.AppEmptyState
+import dev.sorrowrain.maimaidata.components.AppLoadingState
 import dev.sorrowrain.maimaidata.components.AppMenuCapsule
 import dev.sorrowrain.maimaidata.components.AppSectionCard
 import dev.sorrowrain.maimaidata.components.AppTopBar
 import dev.sorrowrain.maimaidata.components.CheckDisplayMode
+import dev.sorrowrain.maimaidata.components.ChecklistSongGrid
 import dev.sorrowrain.maimaidata.components.ChecklistSongTile
 import dev.sorrowrain.maimaidata.components.ChecklistStatsHeader
 import dev.sorrowrain.maimaidata.models.ChecklistStats
@@ -89,16 +87,7 @@ fun VersionCheckScreen(
     }
 
     val activeScope = remember(scopes, clampedScopeIndex) {
-        scopes.getOrElse(clampedScopeIndex) {
-            PlateCheckScope(
-                id = "default",
-                title = "真 · maimai ~ PLUS",
-                versionAsset = "maimai",
-                rule = PlateCheckScope.Rule.Versions(
-                    includedVersions = setOf("maimai", "maimai PLUS")
-                )
-            )
-        }
+        scopes.getOrElse(clampedScopeIndex) { PlateCheckScope.fallback }
     }
 
     val availableDifficulties = remember(activeScope.supportsRemaster) {
@@ -140,7 +129,7 @@ fun VersionCheckScreen(
         val sorted = filtered.sortedByDescending { it.ds.getOrElse(diffIdx) { 0.0 } }
         val byLevel = sorted.groupBy { it.level.getOrElse(diffIdx) { "?" } }
         byLevel.keys
-            .sortedByDescending(::parseLevelOrder)
+            .sortedByDescending(MaimaiConstants::levelSortOrder)
             .map { level ->
                 PlateLevelGroup(
                     level = level,
@@ -349,86 +338,28 @@ fun VersionCheckScreen(
                 when {
                     store.isSyncingSongs && store.songs.isEmpty() -> {
                         item(key = "plate_syncing_state") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                            ) {
-                                CircularProgressIndicator(
-                                    color = AppTheme.accentText,
-                                    strokeWidth = 2.5.dp,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Text(
-                                    text = "正在同步${store.serverRegion.shortName}曲库…",
-                                    style = AppTheme.AppTypography.caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            AppLoadingState(message = "正在同步${store.serverRegion.shortName}曲库…")
                         }
                     }
 
                     store.songs.isEmpty() -> {
                         item(key = "plate_empty_catalog") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp, horizontal = AppTheme.Space.l),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Sync,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(36.dp)
-                                )
-                                Text(
-                                    text = "暂无${store.serverRegion.shortName}曲库数据",
-                                    style = AppTheme.AppTypography.cardTitle,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = "请前往「设置与数据 → 数据同步与存储」点击检查更新",
-                                    style = AppTheme.AppTypography.caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                            AppEmptyState(
+                                icon = Icons.Rounded.Sync,
+                                title = "暂无${store.serverRegion.shortName}曲库数据",
+                                description = "请前往「设置与数据 → 数据同步与存储」点击检查更新"
+                            )
                         }
                     }
 
                     visibleGroups.isEmpty() && allSongs.isNotEmpty() -> {
                         item(key = "plate_all_completed") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp, horizontal = AppTheme.Space.l),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.CheckCircle,
-                                    contentDescription = null,
-                                    tint = AppTheme.accentText,
-                                    modifier = Modifier.size(38.dp)
-                                )
-                                Text(
-                                    text = "已全部达成 ${displayMode.title}",
-                                    style = AppTheme.AppTypography.cardTitle,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = "当前筛选下全部谱面均已达成该目标",
-                                    style = AppTheme.AppTypography.caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                            AppEmptyState(
+                                icon = Icons.Rounded.CheckCircle,
+                                title = "已全部达成 ${displayMode.title}",
+                                description = "当前筛选下全部谱面均已达成该目标",
+                                iconTint = AppTheme.accentText
+                            )
                         }
                     }
 
@@ -446,45 +377,18 @@ fun VersionCheckScreen(
                                     )
                                 }
                             ) {
-                                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                                    val tileSize = 72.dp
-                                    val minGap = AppTheme.Space.s
-                                    val columns = if (maxWidth.isSpecified && maxWidth < 10_000.dp) {
-                                        max(1, ((maxWidth + minGap) / (tileSize + minGap)).toInt())
-                                    } else {
-                                        4
-                                    }
-                                    val rows = group.songs.chunked(columns)
-
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalArrangement = Arrangement.spacedBy(minGap)
-                                    ) {
-                                        rows.forEach { rowSongs ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = if (columns > 1) {
-                                                    Arrangement.SpaceBetween
-                                                } else {
-                                                    Arrangement.Start
-                                                }
-                                            ) {
-                                                rowSongs.forEach { song ->
-                                                    ChecklistSongTile(
-                                                        song = song,
-                                                        record = store.record(song.numericId, diffIdx),
-                                                        borderColor = diffTint,
-                                                        displayMode = displayMode,
-                                                        region = store.serverRegion,
-                                                        onClick = { onOpenSong(song.id, diffIdx) }
-                                                    )
-                                                }
-                                                repeat(columns - rowSongs.size) {
-                                                    Spacer(modifier = Modifier.size(tileSize))
-                                                }
-                                            }
-                                        }
-                                    }
+                                ChecklistSongGrid(
+                                    items = group.songs,
+                                    itemKey = { it.id }
+                                ) { song ->
+                                    ChecklistSongTile(
+                                        song = song,
+                                        record = store.record(song.numericId, diffIdx),
+                                        borderColor = diffTint,
+                                        displayMode = displayMode,
+                                        region = store.serverRegion,
+                                        onClick = { onOpenSong(song.id, diffIdx) }
+                                    )
                                 }
                             }
                         }
@@ -493,12 +397,4 @@ fun VersionCheckScreen(
             }
         }
     }
-}
-
-private fun parseLevelOrder(level: String): Double {
-    if (level.endsWith("+")) {
-        val base = level.dropLast(1).toDoubleOrNull()
-        if (base != null) return base + 0.5
-    }
-    return level.toDoubleOrNull() ?: 0.0
 }

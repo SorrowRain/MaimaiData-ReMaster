@@ -7,25 +7,68 @@ struct FinaleToDxView: View {
     @State private var breakP = ""; @State private var breakGr = ""; @State private var breakGd = ""; @State private var breakM = ""
     @State private var breakScore = ""
 
-    @State private var resultText: String = "—"
-    @State private var errorText: String?
+    private var hasAnyInput: Bool {
+        [
+            tapP, tapGr, tapGd, tapM,
+            holdP, holdGr, holdGd, holdM,
+            slideP, slideGr, slideGd, slideM,
+            breakP, breakGr, breakGd, breakM,
+            breakScore
+        ].contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    private var liveCalculation: (result: String, hint: String?, isError: Bool) {
+        guard hasAnyInput else { return ("—", nil, false) }
+        let counts = RatingCalculator.FinaleNoteCounts(
+            tapPerfect: parseInt(tapP), tapGreat: parseInt(tapGr), tapGood: parseInt(tapGd), tapMiss: parseInt(tapM),
+            holdPerfect: parseInt(holdP), holdGreat: parseInt(holdGr), holdGood: parseInt(holdGd), holdMiss: parseInt(holdM),
+            slidePerfect: parseInt(slideP), slideGreat: parseInt(slideGr), slideGood: parseInt(slideGd), slideMiss: parseInt(slideM),
+            breakPerfect: parseInt(breakP), breakGreat: parseInt(breakGr), breakGood: parseInt(breakGd), breakMiss: parseInt(breakM),
+            breakScore: parseInt(breakScore)
+        )
+        do {
+            let converted = try RatingCalculator.convertFinaleToDx(counts)
+            return (converted, nil, false)
+        } catch RatingCalculator.FinaleConversionError.missingNotesOrBreak {
+            return ("—", "请至少填写 Break 判定数量以换算 DX 达成率", false)
+        } catch {
+            return ("—", error.localizedDescription, true)
+        }
+    }
 
     var body: some View {
+        let calc = liveCalculation
+
         ScrollView {
             VStack(spacing: AppTheme.cardSpacing) {
                 AppSectionCard(
                     title: "换算结果",
-                    subtitle: "根据旧框判定换算对应的 DX 达成率区间或精确值"
+                    subtitle: "根据旧框判定实时换算对应的 DX 达成率区间或精确值"
                 ) {
-                    AppInsetGroup(padding: 14) {
-                        HStack {
-                            Text("DX 达成率")
-                                .font(AppTheme.Typography.inlineAction)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(resultText)
-                                .font(AppTheme.Typography.heroTitle)
-                                .foregroundStyle(AppTheme.accentText)
+                    VStack(alignment: .leading, spacing: AppTheme.Space.s) {
+                        AppInsetGroup(padding: AppTheme.Space.m) {
+                            HStack {
+                                Text("DX 达成率")
+                                    .font(AppTheme.Typography.inlineAction)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(calc.result)
+                                    .font(AppTheme.Typography.heroTitle)
+                                    .foregroundStyle(AppTheme.accentText)
+                            }
+                        }
+
+                        if let hint = calc.hint {
+                            HStack(spacing: AppTheme.Space.xs) {
+                                if calc.isError {
+                                    Image(systemName: "exclamationmark.circle.fill")
+                                        .font(AppTheme.Typography.caption)
+                                        .foregroundStyle(AppTheme.destructive)
+                                }
+                                Text(hint)
+                                    .font(AppTheme.Typography.caption)
+                                    .foregroundStyle(calc.isError ? AppTheme.destructive : .secondary)
+                            }
                         }
                     }
                 }
@@ -34,19 +77,24 @@ struct FinaleToDxView: View {
                     title: "各音符判定数",
                     subtitle: "未填写的项默认按 0 计算"
                 ) {
-                    AppInlineButton(title: "清空", tint: .secondary) {
+                    AppInlineButton(
+                        title: "清空重填",
+                        icon: "arrow.counterclockwise",
+                        tint: .secondary,
+                        isDisabled: !hasAnyInput
+                    ) {
                         KeyboardDismiss.hide()
                         clearAll()
                     }
                 } content: {
-                    VStack(spacing: 14) {
-                        noteGroup("Tap", color: AppTheme.Palette.noteTap, p: $tapP, gr: $tapGr, gd: $tapGd, m: $tapM)
+                    VStack(spacing: AppTheme.Space.m) {
+                        noteGroup("TAP", color: AppTheme.Palette.noteTap, p: sanitizedBinding($tapP), gr: sanitizedBinding($tapGr), gd: sanitizedBinding($tapGd), m: sanitizedBinding($tapM))
                         Divider()
-                        noteGroup("Hold", color: AppTheme.Palette.noteHold, p: $holdP, gr: $holdGr, gd: $holdGd, m: $holdM)
+                        noteGroup("HOLD", color: AppTheme.Palette.noteHold, p: sanitizedBinding($holdP), gr: sanitizedBinding($holdGr), gd: sanitizedBinding($holdGd), m: sanitizedBinding($holdM))
                         Divider()
-                        noteGroup("Slide", color: AppTheme.Palette.noteSlide, p: $slideP, gr: $slideGr, gd: $slideGd, m: $slideM)
+                        noteGroup("SLIDE", color: AppTheme.Palette.noteSlide, p: sanitizedBinding($slideP), gr: sanitizedBinding($slideGr), gd: sanitizedBinding($slideGd), m: sanitizedBinding($slideM))
                         Divider()
-                        noteGroup("Break", color: AppTheme.Palette.noteBreak, p: $breakP, gr: $breakGr, gd: $breakGd, m: $breakM)
+                        noteGroup("BREAK", color: AppTheme.Palette.noteBreak, p: sanitizedBinding($breakP), gr: sanitizedBinding($breakGr), gd: sanitizedBinding($breakGd), m: sanitizedBinding($breakM))
                     }
                 }
 
@@ -56,14 +104,9 @@ struct FinaleToDxView: View {
                 ) {
                     AppTextField(
                         placeholder: "Break 总分（可留空或填 0）",
-                        text: $breakScore,
+                        text: sanitizedBinding($breakScore, maxDigits: 7),
                         keyboardType: .numberPad
                     )
-                }
-
-                AppPrimaryButton(title: "计算 DX 达成率", icon: "equal.circle.fill") {
-                    KeyboardDismiss.hide()
-                    calculate()
                 }
             }
             .padding(.horizontal, AppTheme.pagePadding)
@@ -72,9 +115,8 @@ struct FinaleToDxView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .appPageBackground()
-        .navigationTitle("旧框分数换算 DX")
+        .navigationTitle("旧框达成率换算")
         .navigationBarTitleDisplayMode(.inline)
-        .errorAlert("输入错误", message: $errorText)
     }
 
     private func noteGroup(
@@ -86,7 +128,7 @@ struct FinaleToDxView: View {
         m: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Space.s) {
-            HStack(spacing: 6) {
+            HStack(spacing: AppTheme.Space.s) {
                 Circle()
                     .fill(color)
                     .frame(width: 8, height: 8)
@@ -104,31 +146,24 @@ struct FinaleToDxView: View {
         }
     }
 
+    private func sanitizedBinding(_ source: Binding<String>, maxDigits: Int = 4) -> Binding<String> {
+        Binding(
+            get: { source.wrappedValue },
+            set: { newValue in
+                source.wrappedValue = String(newValue.filter(\.isNumber).prefix(maxDigits))
+            }
+        )
+    }
+
     private func clearAll() {
         tapP = ""; tapGr = ""; tapGd = ""; tapM = ""
         holdP = ""; holdGr = ""; holdGd = ""; holdM = ""
         slideP = ""; slideGr = ""; slideGd = ""; slideM = ""
         breakP = ""; breakGr = ""; breakGd = ""; breakM = ""
         breakScore = ""
-        resultText = "—"
     }
 
-    private func val(_ text: String) -> Int {
+    private func parseInt(_ text: String) -> Int {
         Int(text.trimmingCharacters(in: .whitespaces)) ?? 0
-    }
-
-    private func calculate() {
-        let counts = RatingCalculator.FinaleNoteCounts(
-            tapPerfect: val(tapP), tapGreat: val(tapGr), tapGood: val(tapGd), tapMiss: val(tapM),
-            holdPerfect: val(holdP), holdGreat: val(holdGr), holdGood: val(holdGd), holdMiss: val(holdM),
-            slidePerfect: val(slideP), slideGreat: val(slideGr), slideGood: val(slideGd), slideMiss: val(slideM),
-            breakPerfect: val(breakP), breakGreat: val(breakGr), breakGood: val(breakGd), breakMiss: val(breakM),
-            breakScore: val(breakScore)
-        )
-        do {
-            resultText = try RatingCalculator.convertFinaleToDx(counts)
-        } catch {
-            errorText = error.localizedDescription
-        }
     }
 }

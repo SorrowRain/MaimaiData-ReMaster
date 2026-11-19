@@ -39,17 +39,21 @@ struct RatingCalculatorView: View {
         Double(intPart) + Double(decPart) / 10.0
     }
 
-    private var customRatingResult: Int? {
+    private var parsedCustomAchi: Double? {
         let trimmed = customAchiInput.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, let achi = Double(trimmed), achi >= 0 else { return nil }
+        return achi
+    }
+
+    private var customRatingResult: Int? {
+        guard let achi = parsedCustomAchi else { return nil }
         return RatingCalculator.singleSongRating(ds: selectedDS, achievement: achi)
     }
 
     private var customInputError: String? {
         let trimmed = customAchiInput.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
-        guard let achi = Double(trimmed), achi >= 0 else { return "请输入有效的达成率数值" }
-        return nil
+        return parsedCustomAchi == nil ? "请输入有效的达成率数值" : nil
     }
 
     var body: some View {
@@ -100,29 +104,21 @@ struct RatingCalculatorView: View {
                 VStack(alignment: .leading, spacing: AppTheme.Space.m) {
                     AppInsetGroup(padding: AppTheme.Space.m) {
                         VStack(spacing: AppTheme.Space.m) {
-                            HStack(spacing: AppTheme.itemSpacing) {
-                                Text("整数")
-                                    .font(AppTheme.Typography.inlineAction)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 30, alignment: .leading)
+                            AppLabeledSliderRow(
+                                label: "整数",
+                                valueText: "\(intPart)",
+                                value: $intLevelSlider,
+                                range: 1...15,
+                                accessibilityLabel: "定数整数部分"
+                            )
 
-                                AppValueBadge(text: "\(intPart)", isActive: true)
-
-                                Slider(value: $intLevelSlider, in: 1...15, step: 1)
-                                    .tint(AppTheme.accent)
-                            }
-
-                            HStack(spacing: AppTheme.itemSpacing) {
-                                Text("小数")
-                                    .font(AppTheme.Typography.inlineAction)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 30, alignment: .leading)
-
-                                AppValueBadge(text: ".\(decPart)", isActive: true)
-
-                                Slider(value: $decSlider, in: 0...9, step: 1)
-                                    .tint(AppTheme.accent)
-                            }
+                            AppLabeledSliderRow(
+                                label: "小数",
+                                valueText: ".\(decPart)",
+                                value: $decSlider,
+                                range: 0...9,
+                                accessibilityLabel: "定数小数部分"
+                            )
                         }
                     }
 
@@ -145,7 +141,7 @@ struct RatingCalculatorView: View {
                 RatingTierTable(
                     rows: RatingCalculator.buildTierRows(
                         ds: selectedDS,
-                        currentAchievement: Double(customAchiInput.trimmingCharacters(in: .whitespaces)),
+                        currentAchievement: parsedCustomAchi,
                         includeAPBonusRow: store.serverRegion.usesAPBonus
                     ),
                     showB50Column: false,
@@ -167,7 +163,10 @@ struct RatingCalculatorView: View {
                     AppTextField(
                         title: "目标总 Rating",
                         placeholder: "如 15000",
-                        text: $targetRatingInput,
+                        text: Binding(
+                            get: { targetRatingInput },
+                            set: { targetRatingInput = String($0.filter(\.isNumber).prefix(6)) }
+                        ),
                         keyboardType: .numberPad
                     )
 

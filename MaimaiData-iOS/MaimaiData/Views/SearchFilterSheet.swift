@@ -41,52 +41,32 @@ struct SearchFilterSheet: View {
                             AppMenuCapsule(title: draft.sortOption.rawValue)
                         }
                     } content: {
-                        AppInsetGroup(padding: 12) {
+                        AppInsetGroup(padding: AppTheme.Space.m) {
                             VStack(spacing: AppTheme.Space.m) {
                                 // 第一条：等级 / 整数
-                                HStack(spacing: 10) {
-                                    Text("等级")
-                                        .font(AppTheme.Typography.inlineAction)
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 30, alignment: .leading)
-
-                                    AppValueBadge(
-                                        text: firstSliderLabelText,
-                                        isActive: currentLevelIndex > 0
-                                    )
-
-                                    Slider(
-                                        value: $levelSliderIndex,
-                                        in: 0...Double(MaimaiConstants.allLevels.count - 1),
-                                        step: 1
-                                    )
-                                    .tint(AppTheme.accent)
-                                    .onChange(of: levelSliderIndex) { _, _ in
-                                        syncFromSliders(changedDecimal: false)
-                                    }
+                                AppLabeledSliderRow(
+                                    label: "等级",
+                                    valueText: firstSliderLabelText,
+                                    value: $levelSliderIndex,
+                                    range: 0...Double(MaimaiConstants.allLevels.count - 1),
+                                    isActive: currentLevelIndex > 0,
+                                    accessibilityLabel: "等级筛选"
+                                )
+                                .onChange(of: levelSliderIndex) { _, _ in
+                                    syncFromSliders(changedDecimal: false)
                                 }
 
                                 // 第二条：小数（最左关闭，往右 .0 ~ .9）
-                                HStack(spacing: 10) {
-                                    Text("小数")
-                                        .font(AppTheme.Typography.inlineAction)
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 30, alignment: .leading)
-
-                                    AppValueBadge(
-                                        text: secondSliderLabelText,
-                                        isActive: currentDecIndex > 0
-                                    )
-
-                                    Slider(
-                                        value: $decSliderIndex,
-                                        in: 0...10,
-                                        step: 1
-                                    )
-                                    .tint(AppTheme.accent)
-                                    .onChange(of: decSliderIndex) { _, _ in
-                                        syncFromSliders(changedDecimal: true)
-                                    }
+                                AppLabeledSliderRow(
+                                    label: "小数",
+                                    valueText: secondSliderLabelText,
+                                    value: $decSliderIndex,
+                                    range: 0...10,
+                                    isActive: currentDecIndex > 0,
+                                    accessibilityLabel: "定数小数位筛选"
+                                )
+                                .onChange(of: decSliderIndex) { _, _ in
+                                    syncFromSliders(changedDecimal: true)
                                 }
                             }
                         }
@@ -163,7 +143,7 @@ struct SearchFilterSheet: View {
                     }
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
-                .padding(.top, 10)
+                .padding(.top, AppTheme.itemSpacing)
                 .padding(.bottom, AppTheme.Space.s)
             }
             .onAppear {

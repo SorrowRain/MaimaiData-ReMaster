@@ -53,8 +53,10 @@ struct LoginSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { dismiss() }
+                        .disabled(isSubmitting)
                 }
             }
+            .interactiveDismissDisabled(isSubmitting)
             .errorAlert("授权或同步提示", message: $errorMessage)
             .onChange(of: errorMessage) { oldVal, newVal in
                 if oldVal != nil && newVal == nil && shouldDismissAfterAlert {
@@ -101,6 +103,13 @@ struct LoginSheet: View {
                         placeholder: "粘贴落雪「账号详情」生成的个人 API 密钥",
                         text: $lxnsPersonalToken
                     )
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if !isSubmitting && !lxnsPersonalToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            KeyboardDismiss.hide()
+                            Task { await submitLXNSPersonalToken() }
+                        }
+                    }
 
                     AppTextField(
                         title: "备注名称（选填）",
@@ -108,6 +117,12 @@ struct LoginSheet: View {
                         text: $remarkName
                     )
                     .submitLabel(.done)
+                    .onSubmit {
+                        if !isSubmitting && !lxnsPersonalToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            KeyboardDismiss.hide()
+                            Task { await submitLXNSPersonalToken() }
+                        }
+                    }
 
                     AppPrimaryButton(
                         title: isSubmitting ? "正在验证并同步成绩…" : "验证并保存档案",
@@ -154,6 +169,15 @@ struct LoginSheet: View {
                         placeholder: "输入水鱼密码",
                         text: $dfPassword
                     )
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if !isSubmitting
+                            && !dfUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && !dfPassword.isEmpty {
+                            KeyboardDismiss.hide()
+                            Task { await submitDivingFishPassword() }
+                        }
+                    }
 
                     AppPrimaryButton(
                         title: isSubmitting ? "正在登录并同步成绩…" : "登录并保存档案",
@@ -173,6 +197,13 @@ struct LoginSheet: View {
                         placeholder: "粘贴水鱼「编辑个人资料」生成的成绩导入 Token",
                         text: $dfImportToken
                     )
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if !isSubmitting && !dfImportToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            KeyboardDismiss.hide()
+                            Task { await submitDivingFishToken() }
+                        }
+                    }
 
                     AppInsetGroup(padding: AppTheme.Space.m) {
                         Text("无需输入水鱼账号密码，直接通过 Import-Token 拉取完整成绩单与查分器昵称。")

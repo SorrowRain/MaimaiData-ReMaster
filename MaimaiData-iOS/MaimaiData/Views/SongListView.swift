@@ -24,7 +24,7 @@ struct SongListView: View {
                                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
                         }
 
-                        if store.isLoadingLocalData {
+                        if store.isLoadingLocalData && displayedSongs.isEmpty {
                             ProgressView("正在读取曲库…")
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 56)
@@ -49,7 +49,7 @@ struct SongListView: View {
                         }
                     }
                     .padding(.horizontal, AppTheme.pagePadding)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, AppTheme.itemSpacing)
                 }
                 .scrollDismissesKeyboard(.immediately)
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -121,11 +121,11 @@ struct SongListView: View {
                 }
             }
             .onDisappear {
+                if !criteria.keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    store.addSearchHistory(criteria.keyword)
+                }
                 // 若键盘弹起时直接点进歌曲详情页，无动画收起焦点与最近搜索，避免返回时页面跳动
                 if isSearchFocused || showSearchHistory {
-                    if !criteria.keyword.isEmpty {
-                        store.addSearchHistory(criteria.keyword)
-                    }
                     var transaction = Transaction()
                     transaction.disablesAnimations = true
                     withTransaction(transaction) {
@@ -142,10 +142,9 @@ struct SongListView: View {
             .onChange(of: criteria) { _, _ in refreshDisplayedSongs() }
             .onChange(of: store.catalogRevision) { _, _ in refreshDisplayedSongs() }
             .onChange(of: store.serverRegion) { _, newRegion in
-                let allowedVersions = Set(MaimaiConstants.searchVersionChips(for: newRegion))
-                let pruned = criteria.selectedVersions.intersection(allowedVersions)
-                if pruned != criteria.selectedVersions {
-                    criteria.selectedVersions = pruned
+                let pruned = SongFilter.prunedCriteria(criteria, for: newRegion)
+                if pruned != criteria {
+                    criteria = pruned
                 } else {
                     refreshDisplayedSongs()
                 }
@@ -345,14 +344,13 @@ private struct SongRowView: View {
                     }
                     .padding(.bottom, 7)
 
-                    HStack(spacing: 5) {
+                    FlowLayout(spacing: 5, lineSpacing: 4) {
                         ForEach(song.resolvedCharts) { chart in
                             DifficultyLevelBadge(
                                 difficulty: chart.difficulty,
                                 text: song.isUtage ? chart.level : String(format: "%.1f", chart.ds)
                             )
                         }
-                        Spacer(minLength: 0)
                     }
                 }
             }

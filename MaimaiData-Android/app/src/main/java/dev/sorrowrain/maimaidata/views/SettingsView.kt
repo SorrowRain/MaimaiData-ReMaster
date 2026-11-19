@@ -1,8 +1,5 @@
 package dev.sorrowrain.maimaidata.views
 
-import android.app.Activity
-import android.content.Intent
-import android.net.Uri
 import android.text.format.Formatter
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -17,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,13 +26,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -55,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.BuildConfig
 import dev.sorrowrain.maimaidata.R
+import dev.sorrowrain.maimaidata.bridges.ExternalLinkLauncher
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppCard
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
@@ -62,6 +57,7 @@ import dev.sorrowrain.maimaidata.components.AppInlineButton
 import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
 import dev.sorrowrain.maimaidata.components.AppInsetRow
+import dev.sorrowrain.maimaidata.components.AppInsetToggleRow
 import dev.sorrowrain.maimaidata.components.AppSectionCard
 import dev.sorrowrain.maimaidata.components.AppTopBar
 import dev.sorrowrain.maimaidata.components.CapsuleStyle
@@ -309,19 +305,19 @@ fun PreferencesSettingsScreen(onBack: () -> Unit) {
             ) {
                 AppSectionCard(title = "曲库与搜索") {
                     AppInsetGroup {
-                        PreferenceSwitchRow(
+                        AppInsetToggleRow(
                             title = "曲目详情页显示别名",
                             checked = store.enableShowAlias,
                             onCheckedChange = { store.enableShowAlias = it }
                         )
                         AppInsetDivider()
-                        PreferenceSwitchRow(
+                        AppInsetToggleRow(
                             title = "搜索时匹配曲目别名",
                             checked = store.enableAliasSearch,
                             onCheckedChange = { store.enableAliasSearch = it }
                         )
                         AppInsetDivider()
-                        PreferenceSwitchRow(
+                        AppInsetToggleRow(
                             title = "搜索时匹配谱师名称",
                             checked = store.enableCharterSearch,
                             onCheckedChange = { store.enableCharterSearch = it }
@@ -334,51 +330,13 @@ fun PreferencesSettingsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun PreferenceSwitchRow(
-    title: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = AppTheme.rowMinHeight)
-            .toggleable(
-                value = checked,
-                role = Role.Switch,
-                onValueChange = onCheckedChange
-            )
-            .padding(horizontal = AppTheme.Space.m, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-    ) {
-        Text(
-            text = title,
-            style = AppTheme.AppTypography.rowTitle,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = null,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = AppTheme.accent
-            )
-        )
-    }
-}
-
-@Composable
 fun DataAndStorageSettingsScreen(onBack: () -> Unit) {
     val store = LocalDataStore.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val toastState = rememberToastState()
 
-    var cacheBytes by remember { mutableLongStateOf(0L) }
+    var cacheBytes by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(context) {
         cacheBytes = withContext(Dispatchers.IO) {
@@ -387,7 +345,7 @@ fun DataAndStorageSettingsScreen(onBack: () -> Unit) {
     }
 
     val formattedCacheSize = remember(context, cacheBytes) {
-        Formatter.formatFileSize(context, cacheBytes)
+        cacheBytes?.let { Formatter.formatFileSize(context, it) } ?: "计算中..."
     }
 
     AppPageBackground(tint = AppTheme.accent) {
@@ -562,13 +520,7 @@ fun AboutScreen(onBack: () -> Unit) {
     val iconShape = RoundedCornerShape(AppTheme.Radius.card)
 
     fun openExternalUrl(url: String) {
-        runCatching {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            if (context !is Activity) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        }
+        ExternalLinkLauncher.open(context, url)
     }
 
     AppPageBackground(tint = AppTheme.accent) {
@@ -776,14 +728,7 @@ fun AcknowledgmentsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
 
     fun openExternalUrl(url: String) {
-        runCatching {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                if (context !is Activity) {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            }
-            context.startActivity(intent)
-        }
+        ExternalLinkLauncher.open(context, url)
     }
 
     AppPageBackground(tint = AppTheme.accent) {

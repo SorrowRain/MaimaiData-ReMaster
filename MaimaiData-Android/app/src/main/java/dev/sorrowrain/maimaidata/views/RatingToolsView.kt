@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -59,6 +60,7 @@ fun RatingToolsScreen(
     onNavigateVersionCheck: () -> Unit,
     onNavigateLevelCheck: () -> Unit,
     onNavigateCalculator: () -> Unit,
+    onNavigateFinaleToDx: () -> Unit,
     onNavigateAccountManagement: () -> Unit
 ) {
     val store = LocalDataStore.current
@@ -224,6 +226,14 @@ fun RatingToolsScreen(
                                 iconTint = AppTheme.Palette.ratingBlue,
                                 showsChevron = true,
                                 onClick = onNavigateCalculator
+                            )
+                            AppInsetDivider()
+                            AppInsetRow(
+                                title = "旧框达成率换算",
+                                icon = Icons.Rounded.SwapHoriz,
+                                iconTint = AppTheme.Palette.noteSlide,
+                                showsChevron = true,
+                                onClick = onNavigateFinaleToDx
                             )
                         }
                     }

@@ -12,6 +12,7 @@ struct RatingToolsView: View {
         case versionCheck
         case levelCheck
         case calculator
+        case finaleToDx
         case accountManagement
     }
 
@@ -41,6 +42,8 @@ struct RatingToolsView: View {
                     LevelCheckView()
                 case .calculator:
                     RatingCalculatorView()
+                case .finaleToDx:
+                    FinaleToDxView()
                 case .accountManagement:
                     AccountManagementView()
                 }
@@ -172,14 +175,27 @@ struct RatingToolsView: View {
     private var calculatorsSection: some View {
         AppSectionCard(title: "算分与推分工具") {
             AppInsetGroup {
-                NavigationLink(value: ToolRoute.calculator) {
-                    AppInsetRow(
-                        icon: "function",
-                        iconColor: AppTheme.Palette.ratingBlue,
-                        title: "Rating 计算器"
-                    )
+                VStack(spacing: 0) {
+                    NavigationLink(value: ToolRoute.calculator) {
+                        AppInsetRow(
+                            icon: "function",
+                            iconColor: AppTheme.Palette.ratingBlue,
+                            title: "Rating 计算器"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Divider()
+
+                    NavigationLink(value: ToolRoute.finaleToDx) {
+                        AppInsetRow(
+                            icon: "arrow.left.arrow.right",
+                            iconColor: AppTheme.Palette.noteSlide,
+                            title: "旧框达成率换算"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }

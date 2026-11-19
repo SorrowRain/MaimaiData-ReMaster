@@ -305,8 +305,12 @@ struct SongDetailView: View {
         case .rating:
             ratingSection(chart: chart)
         case .tolerance:
-            if chart.totalWeightedScore > 0 {
-                ChartToleranceCard(chart: chart, isDX: currentSong.isDX, tintColor: genreColors.bg)
+            if let metrics = chart.toleranceMetrics {
+                ChartToleranceCard(
+                    metrics: metrics,
+                    finaleTheoreticalMax: chart.finaleTheoreticalMax(isDX: currentSong.isDX),
+                    tintColor: MaimaiConstants.genreTextColor(for: currentSong.basicInfo.genre)
+                )
             } else {
                 AppSectionCard(title: "容错扣分参考") {
                     Text("当前谱面暂无物量数据")
@@ -335,7 +339,9 @@ struct SongDetailView: View {
         }()
         let titleKey = currentSong.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let aliases = store.enableShowAlias
-            ? (currentSong.alias ?? []).filter { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != titleKey }
+            ? (currentSong.alias ?? [])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && $0.lowercased() != titleKey }
             : []
 
         return VStack(spacing: AppTheme.cardSpacing) {
@@ -398,7 +404,7 @@ struct SongDetailView: View {
                                     }
                                 }
 
-                                Divider()
+                                AppInsetDivider()
 
                                 detailRow("我的成绩") {
                                     recordSummary(record)
@@ -604,14 +610,11 @@ private struct ChartNotesBarCard: View {
 }
 
 private struct ChartToleranceCard: View {
-    let chart: ResolvedChart
-    let isDX: Bool
+    let metrics: ResolvedChart.ToleranceMetrics
+    let finaleTheoreticalMax: Double?
     let tintColor: Color
 
     var body: some View {
-        let total = Double(chart.totalWeightedScore)
-        let brk = Double(chart.breakCount)
-
         AppSectionCard(
             title: "容错扣分参考",
             subtitle: "各判定单项损失达成率"
@@ -620,16 +623,22 @@ private struct ChartToleranceCard: View {
                 AppInsetGroup {
                     VStack(spacing: 0) {
                         toleranceRow("音符", values: ["Great", "Good", "Miss"], isHeader: true)
-                        Divider()
-                        toleranceRow("Tap", values: [pct(1.0 / total * 0.2), pct(1.0 / total * 0.5), pct(1.0 / total)])
-                        Divider()
-                        toleranceRow("Hold", values: [pct(2.0 / total * 0.2), pct(2.0 / total * 0.5), pct(2.0 / total)])
-                        Divider()
-                        toleranceRow("Slide", values: [pct(3.0 / total * 0.2), pct(3.0 / total * 0.5), pct(3.0 / total)])
+                        AppInsetDivider()
+                        toleranceRow("Tap", values: [pct(metrics.tapGreat), pct(metrics.tapGood), pct(metrics.tapMiss)])
+                        AppInsetDivider()
+                        toleranceRow("Hold", values: [pct(metrics.holdGreat), pct(metrics.holdGood), pct(metrics.holdMiss)])
+                        AppInsetDivider()
+                        toleranceRow("Slide", values: [pct(metrics.slideGreat), pct(metrics.slideGood), pct(metrics.slideMiss)])
                     }
                 }
 
-                if brk > 0 {
+                if let p50 = metrics.breakPerfect50,
+                   let p100 = metrics.breakPerfect100,
+                   let g4x = metrics.breakGreat4x,
+                   let g3x = metrics.breakGreat3x,
+                   let g25x = metrics.breakGreat25x,
+                   let bGood = metrics.breakGood,
+                   let bMiss = metrics.breakMiss {
                     Text("Break（绝赞）单项扣分")
                         .font(AppTheme.Typography.inlineAction)
                         .foregroundStyle(.secondary)
@@ -641,13 +650,13 @@ private struct ChartToleranceCard: View {
                             breakCell(
                                 label: "Perfect",
                                 badge: "-50",
-                                value: pct(0.01 / brk * 0.25),
+                                value: pct(p50),
                                 tint: AppTheme.Palette.judgePerfect
                             )
                             breakCell(
                                 label: "Perfect",
                                 badge: "-100",
-                                value: pct(0.01 / brk * 0.5),
+                                value: pct(p100),
                                 tint: AppTheme.Palette.judgePerfect
                             )
                         }
@@ -657,19 +666,19 @@ private struct ChartToleranceCard: View {
                             breakCell(
                                 label: "Great",
                                 badge: "4x",
-                                value: pct(5.0 / total * 0.2 + (0.01 / brk) * 0.6),
+                                value: pct(g4x),
                                 tint: AppTheme.Palette.judgeGreat
                             )
                             breakCell(
                                 label: "Great",
                                 badge: "3x",
-                                value: pct(5.0 / total * 0.4 + (0.01 / brk) * 0.6),
+                                value: pct(g3x),
                                 tint: AppTheme.Palette.judgeGreat
                             )
                             breakCell(
                                 label: "Great",
                                 badge: "2.5x",
-                                value: pct(5.0 / total * 0.5 + (0.01 / brk) * 0.6),
+                                value: pct(g25x),
                                 tint: AppTheme.Palette.judgeGreat
                             )
                         }
@@ -678,31 +687,25 @@ private struct ChartToleranceCard: View {
                         HStack(spacing: AppTheme.Space.s) {
                             breakCell(
                                 label: "Good",
-                                value: pct(5.0 / total * 0.6 + (0.01 / brk) * 0.7),
-                                tint: AppTheme.Palette.judgeGood
+                                value: pct(bGood)
                             )
                             breakCell(
                                 label: "Miss",
-                                value: pct(5.0 / total + 0.01 / brk),
-                                tint: AppTheme.Palette.judgeMiss
+                                value: pct(bMiss)
                             )
                         }
                     }
                 }
 
-                if !isDX && chart.difficulty != .utage && chart.difficulty != .utagePlayer2 {
-                    let num = Double(chart.tap * 500 + chart.hold * 1000 + chart.slide * 1500 + chart.breakCount * 2600)
-                    let den = Double(chart.tap * 500 + chart.hold * 1000 + chart.slide * 1500 + chart.breakCount * 2500)
-                    if den > 0 {
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkles")
-                                .font(AppTheme.Typography.caption2)
-                            Text(String(format: "FiNALE 旧框理论值（全 2600）：%.2f%%", floor(num / den * 10000) / 100))
-                                .font(AppTheme.Typography.captionMeta)
-                        }
-                        .foregroundStyle(tintColor)
-                        .padding(.top, 2)
+                if let finaleMax = finaleTheoreticalMax {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(AppTheme.Typography.caption2)
+                        Text(String(format: "FiNALE 旧框理论值（全 2600）：%.2f%%", finaleMax))
+                            .font(AppTheme.Typography.captionMeta)
                     }
+                    .foregroundStyle(tintColor)
+                    .padding(.top, 2)
                 }
             }
         }
@@ -712,7 +715,7 @@ private struct ChartToleranceCard: View {
         label: String,
         badge: String? = nil,
         value: String,
-        tint: Color
+        tint: Color = .secondary
     ) -> some View {
         AppInsetGroup(padding: AppTheme.itemSpacing) {
             VStack(alignment: .center, spacing: AppTheme.Space.xs) {

@@ -127,16 +127,16 @@ struct AppLabeledSliderRow: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
     var step: Double = 1
-    var badgeTint: Color = AppTheme.accent
+    var isActive: Bool = true
     var accessibilityLabel: String? = nil
 
     var body: some View {
-        HStack(spacing: AppTheme.Space.m) {
+        HStack(spacing: AppTheme.itemSpacing) {
             Text(label)
-                .font(AppTheme.Typography.captionBold)
+                .font(AppTheme.Typography.inlineAction)
                 .foregroundStyle(.secondary)
                 .frame(width: 30, alignment: .leading)
-            AppValueBadge(text: valueText, tint: badgeTint)
+            AppValueBadge(text: valueText, isActive: isActive)
             Slider(value: $value, in: range, step: step)
                 .tint(AppTheme.accent)
                 .accessibilityLabel(accessibilityLabel ?? label)

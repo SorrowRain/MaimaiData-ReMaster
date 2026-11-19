@@ -268,7 +268,7 @@ data class ResolvedChart(
         }
 
     fun finaleTheoreticalMax(isDX: Boolean): Double? {
-        if (isDX || difficulty == DifficultyType.UTAGE || difficulty == DifficultyType.UTAGE_PLAYER_2) {
+        if (isDX || difficulty == DifficultyType.UTAGE || difficulty == DifficultyType.UTAGE_PLAYER2) {
             return null
         }
         val num = (tap * 500 + hold * 1000 + slide * 1500 + breakCount * 2600).toDouble()

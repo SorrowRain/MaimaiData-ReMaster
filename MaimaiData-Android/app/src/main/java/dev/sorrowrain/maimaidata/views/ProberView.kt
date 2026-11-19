@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,13 +19,9 @@ import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -42,14 +37,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.bridges.PhotoPreviewDialog
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppCard
+import dev.sorrowrain.maimaidata.components.AppEmptyState
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
 import dev.sorrowrain.maimaidata.components.AppInlineButton
+import dev.sorrowrain.maimaidata.components.AppInsetDivider
+import dev.sorrowrain.maimaidata.components.AppSegmentedControl
 import dev.sorrowrain.maimaidata.components.AppTopBar
 import dev.sorrowrain.maimaidata.components.CapsuleStyle
 import dev.sorrowrain.maimaidata.components.ChartTypeBadge
@@ -206,30 +203,14 @@ fun ProberScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
                                 ) {
-                                    val tabs = listOf(
-                                        "旧版本 B35 (${summary.b35Rating})",
-                                        "现行版本 B15 (${summary.b15Rating})"
+                                    AppSegmentedControl(
+                                        options = listOf(
+                                            "旧版本 B35 (${summary.b35Rating})",
+                                            "现行版本 B15 (${summary.b15Rating})"
+                                        ),
+                                        selectedIndex = selectedTab,
+                                        onSelect = { selectedTab = it }
                                     )
-                                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                        tabs.forEachIndexed { index, label ->
-                                            SegmentedButton(
-                                                selected = selectedTab == index,
-                                                onClick = { selectedTab = index },
-                                                shape = SegmentedButtonDefaults.itemShape(
-                                                    index = index,
-                                                    count = tabs.size
-                                                ),
-                                                label = {
-                                                    Text(
-                                                        text = label,
-                                                        style = AppTheme.AppTypography.inlineAction,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            )
-                                        }
-                                    }
 
                                     if (!summary.isMatching && store.records.isNotEmpty()) {
                                         Row(
@@ -257,48 +238,26 @@ fun ProberScreen(
                         // 3. Empty States or Record Rows
                         if (targetList.isEmpty()) {
                             item(key = "b50_empty_state") {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 48.dp, horizontal = AppTheme.Space.l),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                                ) {
-                                    Icon(
-                                        imageVector = if (store.isLoggedIn) {
-                                            Icons.Rounded.Inbox
-                                        } else {
-                                            Icons.Rounded.PersonAdd
-                                        },
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(40.dp)
-                                    )
-                                    Text(
-                                        text = if (store.isLoggedIn) "暂无成绩数据" else "尚未添加成绩档案",
-                                        style = AppTheme.AppTypography.cardTitle,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        textAlign = TextAlign.Center
-                                    )
-                                    Text(
-                                        text = if (store.isLoggedIn) {
-                                            "下拉刷新从当前查分器拉取最新成绩"
-                                        } else {
-                                            "连接落雪咖啡屋或水鱼查分器后即可查看 B35 / B15 并生成 Best50 图"
-                                        },
-                                        style = AppTheme.AppTypography.caption,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center
-                                    )
-                                    if (!store.isLoggedIn) {
-                                        Spacer(modifier = Modifier.height(AppTheme.Space.xs))
-                                        AppInlineButton(
-                                            title = "添加成绩档案",
-                                            icon = Icons.Rounded.PersonAdd,
-                                            onClick = { showLoginSheet = true }
-                                        )
+                                AppEmptyState(
+                                    icon = if (store.isLoggedIn) Icons.Rounded.Inbox else Icons.Rounded.PersonAdd,
+                                    title = if (store.isLoggedIn) "暂无成绩数据" else "尚未添加成绩档案",
+                                    description = if (store.isLoggedIn) {
+                                        "下拉刷新从当前查分器拉取最新成绩"
+                                    } else {
+                                        "连接落雪咖啡屋或水鱼查分器后即可查看 B35 / B15 并生成 Best50 图"
+                                    },
+                                    action = if (!store.isLoggedIn) {
+                                        {
+                                            AppInlineButton(
+                                                title = "添加成绩档案",
+                                                icon = Icons.Rounded.PersonAdd,
+                                                onClick = { showLoginSheet = true }
+                                            )
+                                        }
+                                    } else {
+                                        null
                                     }
-                                }
+                                )
                             }
                         } else {
                             itemsIndexed(
@@ -313,19 +272,13 @@ fun ProberScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
                                     ) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.weight(1f),
-                                            color = MaterialTheme.colorScheme.outlineVariant
-                                        )
+                                        AppInsetDivider(modifier = Modifier.weight(1f))
                                         Text(
                                             text = "以下不计入 Best$cutoff",
                                             style = AppTheme.AppTypography.inlineAction,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                        HorizontalDivider(
-                                            modifier = Modifier.weight(1f),
-                                            color = MaterialTheme.colorScheme.outlineVariant
-                                        )
+                                        AppInsetDivider(modifier = Modifier.weight(1f))
                                     }
                                 }
 

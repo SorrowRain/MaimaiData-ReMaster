@@ -23,8 +23,6 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        @Bindable var storeBindable = store
-
         NavigationStack {
             ScrollView {
                 VStack(spacing: AppTheme.cardSpacing) {
@@ -120,7 +118,6 @@ struct SettingsView: View {
                     AcknowledgmentsView()
                 }
             }
-            .errorAlert("同步结果", message: $storeBindable.statusMessage)
         }
     }
 
@@ -202,17 +199,17 @@ private struct PreferencesSettingsView: View {
                 AppSectionCard(title: "曲库与搜索") {
                     AppInsetGroup {
                         VStack(spacing: 0) {
-                            settingToggleRow(
+                            AppInsetToggleRow(
                                 title: "曲目详情页显示别名",
                                 isOn: $storeBindable.enableShowAlias
                             )
                             Divider()
-                            settingToggleRow(
+                            AppInsetToggleRow(
                                 title: "搜索时匹配曲目别名",
                                 isOn: $storeBindable.enableAliasSearch
                             )
                             Divider()
-                            settingToggleRow(
+                            AppInsetToggleRow(
                                 title: "搜索时匹配谱师名称",
                                 isOn: $storeBindable.enableCharterSearch
                             )
@@ -227,14 +224,6 @@ private struct PreferencesSettingsView: View {
         .navigationTitle("检索与显示偏好")
         .navigationBarTitleDisplayMode(.inline)
     }
-
-    private func settingToggleRow(title: String, isOn: Binding<Bool>) -> some View {
-        Toggle(title, isOn: isOn)
-            .font(AppTheme.Typography.rowTitle)
-            .tint(AppTheme.accent)
-            .padding(.horizontal, AppTheme.Space.m)
-            .frame(minHeight: AppTheme.rowMinHeight)
-    }
 }
 
 // MARK: - Secondary Page 3: 数据同步与存储
@@ -242,6 +231,7 @@ private struct PreferencesSettingsView: View {
 private struct DataAndStorageSettingsView: View {
     @Environment(DataStore.self) private var store
     @State private var cacheSizeText: String = "计算中..."
+    @State private var toast = ToastState()
 
     var body: some View {
         @Bindable var storeBindable = store
@@ -294,8 +284,13 @@ private struct DataAndStorageSettingsView: View {
                                 icon: "trash",
                                 tint: AppTheme.destructive
                             ) {
-                                CoverImageCache.shared.clearCache()
-                                refreshCacheSize()
+                                Task {
+                                    await Task.detached(priority: .utility) {
+                                        CoverImageCache.shared.clearCache()
+                                    }.value
+                                    await refreshCacheSize()
+                                    toast.show("封面缓存已清除", duration: 1.8)
+                                }
                             }
                         }
                     }
@@ -307,14 +302,17 @@ private struct DataAndStorageSettingsView: View {
         .appPageBackground()
         .navigationTitle("数据同步与存储")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            refreshCacheSize()
+        .statusToast(toast)
+        .task {
+            await refreshCacheSize()
         }
         .errorAlert("同步结果", message: $storeBindable.statusMessage)
     }
 
-    private func refreshCacheSize() {
-        let bytes = CoverImageCache.shared.cacheSizeBytes()
+    private func refreshCacheSize() async {
+        let bytes = await Task.detached(priority: .utility) {
+            CoverImageCache.shared.cacheSizeBytes()
+        }.value
         cacheSizeText = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }

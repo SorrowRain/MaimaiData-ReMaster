@@ -39,18 +39,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material.icons.rounded.SwapHoriz
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,11 +71,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
+import dev.sorrowrain.maimaidata.components.AppEmptyState
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
 import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
+import dev.sorrowrain.maimaidata.components.AppLoadingState
 import dev.sorrowrain.maimaidata.components.AppMetricTile
 import dev.sorrowrain.maimaidata.components.AppSectionCard
+import dev.sorrowrain.maimaidata.components.AppSegmentedControl
 import dev.sorrowrain.maimaidata.components.AppTopBar
 import dev.sorrowrain.maimaidata.components.CapsuleStyle
 import dev.sorrowrain.maimaidata.components.GenreCapsuleTag
@@ -98,7 +99,6 @@ import dev.sorrowrain.maimaidata.theme.AppPageBackground
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import dev.sorrowrain.maimaidata.theme.LocalIsDarkTheme
 import java.util.Locale
-import kotlin.math.floor
 
 /**
  * Exact 3-tab layout matching iOS `SongDetailView.swift`:
@@ -121,20 +121,33 @@ private enum class DetailTab(val title: String) {
 fun SongDetailScreen(
     songId: String,
     initialDifficultyIndex: Int?,
-    onBack: () -> Unit,
-    @Suppress("UNUSED_PARAMETER")
-    onOpenSong: (songId: String, initialDifficultyIndex: Int?) -> Unit
+    onBack: () -> Unit
 ) {
     val store = LocalDataStore.current
     val context = LocalContext.current
     val toastState = rememberToastState()
 
     var activeSongId by rememberSaveable(songId) { mutableStateOf(songId) }
+    var lastResolvedSong by remember { mutableStateOf<SongData?>(null) }
     val catalogRevision = store.catalogRevision
 
     val song: SongData? = remember(activeSongId, catalogRevision, store.songsById, store.songs) {
         val numeric = activeSongId.toIntOrNull() ?: -1
-        store.songsById[numeric] ?: store.songs.firstOrNull { it.id == activeSongId }
+        store.songsById[numeric]
+            ?: store.songs.firstOrNull { it.id == activeSongId }
+            ?: lastResolvedSong?.let { prev ->
+                store.songs.firstOrNull {
+                    it.title == prev.title &&
+                        it.basicInfo.genre == prev.basicInfo.genre &&
+                        it.type == prev.type
+                }
+            }
+    }
+
+    SideEffect {
+        if (song != null) {
+            lastResolvedSong = song
+        }
     }
 
     var selectedTabOrdinal by rememberSaveable { mutableIntStateOf(0) }
@@ -164,12 +177,11 @@ fun SongDetailScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     if (store.isLoadingLocalData || store.isSyncingSongs) {
-                        CircularProgressIndicator(color = AppTheme.accentText)
+                        AppLoadingState(message = "正在读取曲库…")
                     } else {
-                        Text(
-                            text = "未找到对应曲目数据",
-                            style = AppTheme.AppTypography.body,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        AppEmptyState(
+                            icon = Icons.Rounded.SearchOff,
+                            title = "未找到对应曲目数据"
                         )
                     }
                 }
@@ -265,34 +277,11 @@ fun SongDetailScreen(
                         } else {
                             // 3. 3-Way Segmented Picker: 谱面概览 | Rating与推分 | 容错参考
                             item(key = "detail_segmented_tabs") {
-                                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                    DetailTab.entries.forEachIndexed { idx, tab ->
-                                        SegmentedButton(
-                                            selected = selectedTab == tab,
-                                            onClick = { selectedTabOrdinal = idx },
-                                            shape = SegmentedButtonDefaults.itemShape(
-                                                index = idx,
-                                                count = DetailTab.entries.size
-                                            ),
-                                            colors = SegmentedButtonDefaults.colors(
-                                                activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                inactiveContainerColor = MaterialTheme.colorScheme.surface,
-                                                inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                activeBorderColor = AppTheme.accent.copy(alpha = 0.55f),
-                                                inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant
-                                            ),
-                                            label = {
-                                                Text(
-                                                    text = tab.title,
-                                                    style = AppTheme.AppTypography.inlineAction,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        )
-                                    }
-                                }
+                                AppSegmentedControl(
+                                    options = DetailTab.entries.map { it.title },
+                                    selectedIndex = selectedTabOrdinal,
+                                    onSelect = { selectedTabOrdinal = it }
+                                )
                             }
 
                             when (selectedTab) {
@@ -317,11 +306,15 @@ fun SongDetailScreen(
 
                                 DetailTab.TOLERANCE -> {
                                     item(key = "tab_tolerance") {
-                                        if (activeChart.totalWeightedScore > 0) {
+                                        val metrics = activeChart.toleranceMetrics
+                                        if (metrics != null) {
                                             ChartToleranceCard(
-                                                chart = activeChart,
-                                                isDX = song.isDX,
-                                                tintColor = genreColors.bg
+                                                metrics = metrics,
+                                                finaleTheoreticalMax = activeChart.finaleTheoreticalMax(isDX = song.isDX),
+                                                tintColor = MaimaiConstants.genreTextColor(
+                                                    genre = song.basicInfo.genre,
+                                                    isDark = LocalIsDarkTheme.current
+                                                )
                                             )
                                         } else {
                                             AppSectionCard(title = "容错扣分参考") {
@@ -1065,13 +1058,10 @@ private fun RatingSection(
 
 @Composable
 private fun ChartToleranceCard(
-    chart: ResolvedChart,
-    isDX: Boolean,
+    metrics: ResolvedChart.ToleranceMetrics,
+    finaleTheoreticalMax: Double?,
     tintColor: Color
 ) {
-    val total = chart.totalWeightedScore.toDouble()
-    val brk = chart.breakCount.toDouble()
-
     fun pct(ratio: Double): String = String.format(Locale.US, "%.4f%%", ratio * 100.0)
 
     AppSectionCard(
@@ -1087,21 +1077,29 @@ private fun ChartToleranceCard(
                 AppInsetDivider()
                 ToleranceRow(
                     label = "Tap",
-                    values = listOf(pct(1.0 / total * 0.2), pct(1.0 / total * 0.5), pct(1.0 / total))
+                    values = listOf(pct(metrics.tapGreat), pct(metrics.tapGood), pct(metrics.tapMiss))
                 )
                 AppInsetDivider()
                 ToleranceRow(
                     label = "Hold",
-                    values = listOf(pct(2.0 / total * 0.2), pct(2.0 / total * 0.5), pct(2.0 / total))
+                    values = listOf(pct(metrics.holdGreat), pct(metrics.holdGood), pct(metrics.holdMiss))
                 )
                 AppInsetDivider()
                 ToleranceRow(
                     label = "Slide",
-                    values = listOf(pct(3.0 / total * 0.2), pct(3.0 / total * 0.5), pct(3.0 / total))
+                    values = listOf(pct(metrics.slideGreat), pct(metrics.slideGood), pct(metrics.slideMiss))
                 )
             }
 
-            if (brk > 0.0) {
+            val p50 = metrics.breakPerfect50
+            val p100 = metrics.breakPerfect100
+            val g4x = metrics.breakGreat4x
+            val g3x = metrics.breakGreat3x
+            val g25x = metrics.breakGreat25x
+            val bGood = metrics.breakGood
+            val bMiss = metrics.breakMiss
+
+            if (p50 != null && p100 != null && g4x != null && g3x != null && g25x != null && bGood != null && bMiss != null) {
                 Text(
                     text = "Break（绝赞）单项扣分",
                     style = AppTheme.AppTypography.inlineAction,
@@ -1121,14 +1119,14 @@ private fun ChartToleranceCard(
                         BreakLossCell(
                             label = "Perfect",
                             badge = "-50",
-                            value = pct(0.01 / brk * 0.25),
+                            value = pct(p50),
                             tint = AppTheme.Palette.judgePerfect,
                             modifier = Modifier.weight(1f)
                         )
                         BreakLossCell(
                             label = "Perfect",
                             badge = "-100",
-                            value = pct(0.01 / brk * 0.5),
+                            value = pct(p100),
                             tint = AppTheme.Palette.judgePerfect,
                             modifier = Modifier.weight(1f)
                         )
@@ -1142,21 +1140,21 @@ private fun ChartToleranceCard(
                         BreakLossCell(
                             label = "Great",
                             badge = "4x",
-                            value = pct(5.0 / total * 0.2 + (0.01 / brk) * 0.6),
+                            value = pct(g4x),
                             tint = AppTheme.Palette.judgeGreat,
                             modifier = Modifier.weight(1f)
                         )
                         BreakLossCell(
                             label = "Great",
                             badge = "3x",
-                            value = pct(5.0 / total * 0.4 + (0.01 / brk) * 0.6),
+                            value = pct(g3x),
                             tint = AppTheme.Palette.judgeGreat,
                             modifier = Modifier.weight(1f)
                         )
                         BreakLossCell(
                             label = "Great",
                             badge = "2.5x",
-                            value = pct(5.0 / total * 0.5 + (0.01 / brk) * 0.6),
+                            value = pct(g25x),
                             tint = AppTheme.Palette.judgeGreat,
                             modifier = Modifier.weight(1f)
                         )
@@ -1169,45 +1167,39 @@ private fun ChartToleranceCard(
                     ) {
                         BreakLossCell(
                             label = "Good",
-                            value = pct(5.0 / total * 0.6 + (0.01 / brk) * 0.7),
-                            tint = AppTheme.Palette.judgeGood,
+                            value = pct(bGood),
                             modifier = Modifier.weight(1f)
                         )
                         BreakLossCell(
                             label = "Miss",
-                            value = pct(5.0 / total + 0.01 / brk),
-                            tint = Color.Unspecified,
+                            value = pct(bMiss),
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
             }
 
-            if (!isDX && chart.difficulty != DifficultyType.UTAGE && chart.difficulty != DifficultyType.UTAGE_PLAYER2) {
-                val num = (chart.tap * 500 + chart.hold * 1000 + chart.slide * 1500 + chart.breakCount * 2600).toDouble()
-                val den = (chart.tap * 500 + chart.hold * 1000 + chart.slide * 1500 + chart.breakCount * 2500).toDouble()
-                if (den > 0.0) {
-                    Row(
-                        modifier = Modifier.padding(top = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.AutoAwesome,
-                            contentDescription = null,
-                            tint = tintColor,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = String.format(
-                                Locale.US,
-                                "FiNALE 旧框理论值（全 2600）：%.2f%%",
-                                floor(num / den * 10_000.0) / 100.0
-                            ),
-                            style = AppTheme.AppTypography.captionMeta,
-                            color = tintColor
-                        )
-                    }
+            if (finaleTheoreticalMax != null) {
+                Row(
+                    modifier = Modifier.padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = tintColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = String.format(
+                            Locale.US,
+                            "FiNALE 旧框理论值（全 2600）：%.2f%%",
+                            finaleTheoreticalMax
+                        ),
+                        style = AppTheme.AppTypography.captionMeta,
+                        color = tintColor
+                    )
                 }
             }
         }
@@ -1218,8 +1210,8 @@ private fun ChartToleranceCard(
 private fun BreakLossCell(
     label: String,
     value: String,
-    tint: Color,
     modifier: Modifier = Modifier,
+    tint: Color = Color.Unspecified,
     badge: String? = null
 ) {
     AppInsetGroup(

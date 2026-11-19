@@ -15,13 +15,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,17 +33,16 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
+import dev.sorrowrain.maimaidata.components.AppLabeledSliderRow
 import dev.sorrowrain.maimaidata.components.AppPrimaryButton
 import dev.sorrowrain.maimaidata.components.AppSectionCard
-import dev.sorrowrain.maimaidata.components.AppSlider
+import dev.sorrowrain.maimaidata.components.AppSegmentedControl
 import dev.sorrowrain.maimaidata.components.AppTextField
 import dev.sorrowrain.maimaidata.components.AppTopBar
-import dev.sorrowrain.maimaidata.components.AppValueBadge
 import dev.sorrowrain.maimaidata.components.CapsuleStyle
 import dev.sorrowrain.maimaidata.components.RatingTierTable
 import dev.sorrowrain.maimaidata.models.RatingCalculator
@@ -56,12 +51,9 @@ import dev.sorrowrain.maimaidata.theme.AppPageBackground
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RatingCalculatorScreen(
-    onBack: () -> Unit,
-    @Suppress("UNUSED_PARAMETER")
-    onNavigateFinaleToDx: () -> Unit
+    onBack: () -> Unit
 ) {
     val store = LocalDataStore.current
     val focusManager = LocalFocusManager.current
@@ -135,30 +127,14 @@ fun RatingCalculatorScreen(
                     .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.m),
                 verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
             ) {
-                val modes = listOf("单曲算分", "目标反推")
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    modes.forEachIndexed { index, label ->
-                        SegmentedButton(
-                            selected = selectedMode == index,
-                            onClick = {
-                                focusManager.clearFocus()
-                                selectedMode = index
-                            },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = modes.size
-                            ),
-                            label = {
-                                Text(
-                                    text = label,
-                                    style = AppTheme.AppTypography.inlineAction,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        )
+                AppSegmentedControl(
+                    options = listOf("单曲算分", "目标反推"),
+                    selectedIndex = selectedMode,
+                    onSelect = { index ->
+                        focusManager.clearFocus()
+                        selectedMode = index
                     }
-                }
+                )
 
                 if (selectedMode == 0) {
                     // Mode 1: Dual-Slider Constant Picker + Tier Reference Table
@@ -185,51 +161,23 @@ fun RatingCalculatorScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
-                                    ) {
-                                        Text(
-                                            text = "整数",
-                                            style = AppTheme.AppTypography.inlineAction,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.width(30.dp)
-                                        )
-                                        AppValueBadge(
-                                            text = "$intPart",
-                                            isActive = true
-                                        )
-                                        AppSlider(
-                                            value = intPart,
-                                            onValueChange = { intPart = it },
-                                            valueRange = 1..15,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
+                                    AppLabeledSliderRow(
+                                        label = "整数",
+                                        valueText = "$intPart",
+                                        value = intPart,
+                                        onValueChange = { intPart = it },
+                                        valueRange = 1..15,
+                                        accessibilityLabel = "定数整数部分"
+                                    )
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
-                                    ) {
-                                        Text(
-                                            text = "小数",
-                                            style = AppTheme.AppTypography.inlineAction,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.width(30.dp)
-                                        )
-                                        AppValueBadge(
-                                            text = ".$decPart",
-                                            isActive = true
-                                        )
-                                        AppSlider(
-                                            value = decPart,
-                                            onValueChange = { decPart = it },
-                                            valueRange = 0..9,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
+                                    AppLabeledSliderRow(
+                                        label = "小数",
+                                        valueText = ".$decPart",
+                                        value = decPart,
+                                        onValueChange = { decPart = it },
+                                        valueRange = 0..9,
+                                        accessibilityLabel = "定数小数部分"
+                                    )
                                 }
                             }
 

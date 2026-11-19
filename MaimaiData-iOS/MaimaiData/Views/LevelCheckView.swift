@@ -26,7 +26,7 @@ struct LevelCheckView: View {
     }
 
     private struct DSGroup: Identifiable {
-        var id: Double { ds }
+        var id: Int { Int((ds * 10.0).rounded()) }
         let ds: Double
         let items: [ChartItem]
     }
@@ -42,8 +42,10 @@ struct LevelCheckView: View {
             }
             .sorted { $0.chart.ds > $1.chart.ds }
 
-        let grouped = Dictionary(grouping: items) { $0.chart.ds }
-        dsGroups = grouped.keys.sorted(by: >).map { DSGroup(ds: $0, items: grouped[$0] ?? []) }
+        let grouped = Dictionary(grouping: items) { Int(($0.chart.ds * 10.0).rounded()) }
+        dsGroups = grouped.keys.sorted(by: >).map { tenths in
+            DSGroup(ds: Double(tenths) / 10.0, items: grouped[tenths] ?? [])
+        }
         totalChartCount = items.count
     }
 
@@ -76,8 +78,8 @@ struct LevelCheckView: View {
                                 accessibilityLabel: "上一个等级",
                                 isDisabled: currentLevelIndex == 0
                             ) {
-                                if store.lastLevelCheckIndex > 0 {
-                                    store.lastLevelCheckIndex -= 1
+                                if currentLevelIndex > 0 {
+                                    store.lastLevelCheckIndex = currentLevelIndex - 1
                                 }
                             }
 
@@ -98,8 +100,8 @@ struct LevelCheckView: View {
                                 accessibilityLabel: "下一个等级",
                                 isDisabled: currentLevelIndex == levels.count - 1
                             ) {
-                                if store.lastLevelCheckIndex < levels.count - 1 {
-                                    store.lastLevelCheckIndex += 1
+                                if currentLevelIndex < levels.count - 1 {
+                                    store.lastLevelCheckIndex = currentLevelIndex + 1
                                 }
                             }
                         }
@@ -122,7 +124,19 @@ struct LevelCheckView: View {
                     onlyUnfinished: $onlyUnfinished
                 )
 
-                if visibleGroups.isEmpty && totalChartCount > 0 {
+                if store.isSyncingSongs && store.songs.isEmpty {
+                    ProgressView("正在同步\(store.serverRegion.shortName)曲库…")
+                        .font(AppTheme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, AppTheme.Space.xl)
+                } else if store.songs.isEmpty {
+                    ContentUnavailableView(
+                        "暂无\(store.serverRegion.shortName)曲库数据",
+                        systemImage: "arrow.triangle.2.circlepath",
+                        description: Text("请前往「设置与数据 → 数据同步与存储」点击检查更新")
+                    )
+                    .padding(.top, AppTheme.Space.xl)
+                } else if visibleGroups.isEmpty && totalChartCount > 0 {
                     ContentUnavailableView(
                         "已全部达成 \(displayMode.title)",
                         systemImage: "checkmark.seal.fill",
@@ -163,9 +177,7 @@ struct LevelCheckView: View {
         .navigationTitle("等级进度表")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            if dsGroups.isEmpty && !store.songs.isEmpty {
-                rebuildGroups()
-            }
+            rebuildGroups()
         }
         .onChange(of: store.lastLevelCheckIndex) { _, _ in rebuildGroups() }
         .onChange(of: store.serverRegion) { _, _ in rebuildGroups() }

@@ -19,7 +19,7 @@ struct MainTabView: View {
 
             RatingToolsView()
                 .tabItem {
-                    Label("Rating与查分", systemImage: "chart.bar.doc.horizontal")
+                    Label("Rating 与查分", systemImage: "chart.bar.doc.horizontal")
                 }
                 .tag(1)
 
@@ -45,11 +45,23 @@ struct MainTabView: View {
                     openURL(tfURL)
                     store.availableAppUpdate = nil
                 }
+                Button("忽略此版本") {
+                    store.ignoreAppUpdate(version: release.version)
+                }
                 Button("稍后", role: .cancel) {
                     store.availableAppUpdate = nil
                 }
             } else {
-                Button("知道了", role: .cancel) {
+                if let url = URL(string: release.htmlURL) {
+                    Button("前往下载") {
+                        openURL(url)
+                        store.availableAppUpdate = nil
+                    }
+                }
+                Button("忽略此版本") {
+                    store.ignoreAppUpdate(version: release.version)
+                }
+                Button("稍后", role: .cancel) {
                     store.availableAppUpdate = nil
                 }
             }
