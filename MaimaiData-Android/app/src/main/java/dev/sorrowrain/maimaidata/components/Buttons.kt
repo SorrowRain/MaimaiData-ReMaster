@@ -20,10 +20,14 @@ import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,8 +59,8 @@ fun AppPrimaryButton(
     onClick: () -> Unit
 ) {
     val isInteractive = enabled && !isLoading
-    val minHeight = if (companionHeight) 52.dp else 48.dp
-    val shape = RoundedCornerShape(AppTheme.Radius.button)
+    val minHeight = if (companionHeight) AppTheme.rowMinHeight else 48.dp
+    val shape = RoundedCornerShape(if (companionHeight) AppTheme.Radius.input else AppTheme.Radius.button)
 
     Button(
         onClick = onClick,
@@ -340,6 +344,50 @@ fun AppCircleIconButton(
                 contentDescription = contentDescription,
                 modifier = Modifier.size(18.dp)
             )
+        }
+    }
+}
+
+/**
+ * Unified single-choice segmented control with consistent brand container, adaptive border,
+ * and `inlineAction` typography across all screens and bottom sheets.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppSegmentedControl(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val activeBorder = AppTheme.accentText.copy(alpha = 0.55f)
+    val colors = SegmentedButtonDefaults.colors(
+        activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+        activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        activeBorderColor = activeBorder,
+        inactiveContainerColor = MaterialTheme.colorScheme.surface,
+        inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant
+    )
+
+    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, label ->
+            SegmentedButton(
+                selected = selectedIndex == index,
+                onClick = { onSelect(index) },
+                enabled = enabled,
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                colors = colors,
+                icon = {}
+            ) {
+                Text(
+                    text = label,
+                    style = AppTheme.AppTypography.inlineAction,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
         }
     }
 }

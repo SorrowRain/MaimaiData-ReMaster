@@ -1,18 +1,22 @@
 package dev.sorrowrain.maimaidata.bridges
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -35,6 +39,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Share
@@ -49,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,6 +67,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -70,12 +77,16 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import dev.sorrowrain.maimaidata.components.StatusToastHost
+import dev.sorrowrain.maimaidata.components.rememberToastState
 import dev.sorrowrain.maimaidata.models.SongData
 import dev.sorrowrain.maimaidata.services.CoverImageManager
-import dev.sorrowrain.maimaidata.services.CoverImageView
 import dev.sorrowrain.maimaidata.theme.AppTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -117,12 +128,18 @@ object MediaStoreSaver {
 
             try {
                 val exportBitmap = ensureSoftwareBitmap(bitmap)
-                resolver.openOutputStream(uri)?.use { out ->
-                    if (!exportBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
-                        throw IOException("PNG 图片写入失败")
+                try {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        if (!exportBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                            throw IOException("PNG 图片写入失败")
+                        }
+                        out.flush()
+                    } ?: throw IOException("无法打开系统相册写入流")
+                } finally {
+                    if (exportBitmap !== bitmap) {
+                        exportBitmap.recycle()
                     }
-                    out.flush()
-                } ?: throw IOException("无法打开系统相册写入流")
+                }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val completeValues = ContentValues().apply {
@@ -132,8 +149,11 @@ object MediaStoreSaver {
                 }
             } catch (e: Throwable) {
                 runCatching { resolver.delete(uri, null, null) }
+                if (e is CancellationException) throw e
                 throw e
             }
+        }.onFailure { err ->
+            if (err is CancellationException) throw err
         }
     }
 }
@@ -142,15 +162,6 @@ object MediaStoreSaver {
  * Shares a PNG [Bitmap] via [FileProvider] (`cacheDir/shared_images`) and Android's system Sharesheet.
  */
 object ShareBridge {
-    fun shareBitmap(
-        context: Context,
-        bitmap: Bitmap,
-        fileNamePrefix: String = "MaimaiData_B50"
-    ) {
-        val uri = writeSharedBitmapUri(context, bitmap, fileNamePrefix)
-        launchShareChooser(context, uri, fileNamePrefix)
-    }
-
     suspend fun shareBitmapAsync(
         context: Context,
         bitmap: Bitmap,
@@ -162,6 +173,8 @@ object ShareBridge {
         withContext(Dispatchers.Main) {
             launchShareChooser(context, uri, fileNamePrefix)
         }
+    }.onFailure { err ->
+        if (err is CancellationException) throw err
     }
 
     private fun writeSharedBitmapUri(
@@ -180,11 +193,17 @@ object ShareBridge {
         val safePrefix = sanitizeFilePrefix(fileNamePrefix)
         val outFile = File(sharedDir, "${safePrefix}_$now.png")
         val exportBitmap = ensureSoftwareBitmap(bitmap)
-        FileOutputStream(outFile).use { out ->
-            if (!exportBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
-                throw IOException("生成分享图片失败")
+        try {
+            FileOutputStream(outFile).use { out ->
+                if (!exportBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                    throw IOException("生成分享图片失败")
+                }
+                out.flush()
             }
-            out.flush()
+        } finally {
+            if (exportBitmap !== bitmap) {
+                exportBitmap.recycle()
+            }
         }
 
         return FileProvider.getUriForFile(
@@ -216,16 +235,28 @@ object ShareBridge {
 }
 
 /**
- * Launches Chrome Custom Tabs with brand toolbar color `#1668DC`, falling back to `ACTION_VIEW`.
+ * Centralized external browser link opener used by `MainTabView`, `AboutScreen`, and `AcknowledgmentsScreen`.
+ */
+object ExternalLinkLauncher {
+    fun open(context: Context, url: String): Boolean {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            if (context !is Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+        return runCatching { context.startActivity(intent) }.isSuccess
+    }
+}
+
+/**
+ * Launches Chrome Custom Tabs with brand toolbar color, falling back to `ACTION_VIEW`.
  */
 object CustomTabOAuthLauncher {
-    private const val BRAND_TOOLBAR_COLOR = 0xFF1668DC.toInt()
-
-    fun launch(context: Context, url: String) {
+    fun launch(context: Context, url: String): Boolean {
         val uri = Uri.parse(url)
-        try {
+        return try {
             val colorParams = CustomTabColorSchemeParams.Builder()
-                .setToolbarColor(BRAND_TOOLBAR_COLOR)
+                .setToolbarColor(AppTheme.accent.toArgb())
                 .build()
             val customTabsIntent = CustomTabsIntent.Builder()
                 .setDefaultColorSchemeParams(colorParams)
@@ -235,33 +266,38 @@ object CustomTabOAuthLauncher {
                 customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             customTabsIntent.launchUrl(context, uri)
+            true
         } catch (_: Exception) {
-            val fallback = Intent(Intent.ACTION_VIEW, uri).apply {
-                if (context !is Activity) {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            }
-            runCatching { context.startActivity(fallback) }
+            ExternalLinkLauncher.open(context, url)
         }
     }
 }
 
 /**
- * Interactive pinch-to-zoom (`1.0x`–`4.5x`), bounded pan, and double-tap (`1.0x` / `2.5x`) container.
+ * Interactive pinch-to-zoom (`1.0x`–`4.5x`) around pinch centroid, bounded pan, and double-tap (`1.0x` / `2.5x`).
  */
 @Composable
 fun ZoomableImageBox(
     modifier: Modifier = Modifier,
+    resetKey: Any? = null,
     minScale: Float = 1.0f,
     maxScale: Float = 4.5f,
     doubleTapScale: Float = 2.5f,
     content: @Composable BoxScope.() -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val scaleAnim = remember { Animatable(1f) }
-    val offsetXAnim = remember { Animatable(0f) }
-    val offsetYAnim = remember { Animatable(0f) }
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    var animJob by remember { mutableStateOf<Job?>(null) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    LaunchedEffect(resetKey) {
+        animJob?.cancel()
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
 
     Box(
         modifier = modifier
@@ -270,39 +306,59 @@ fun ZoomableImageBox(
             .pointerInput(minScale, maxScale, doubleTapScale) {
                 detectTapGestures(
                     onDoubleTap = { tapOffset ->
-                        if (scaleAnim.value > 1.05f) {
-                            scope.launch {
-                                launch { scaleAnim.animateTo(1f, tween(220)) }
-                                launch { offsetXAnim.animateTo(0f, tween(220)) }
-                                launch { offsetYAnim.animateTo(0f, tween(220)) }
-                            }
+                        animJob?.cancel()
+                        val startScale = scale
+                        val startX = offsetX
+                        val startY = offsetY
+                        val targetScale: Float
+                        val targetOffset: Offset
+                        if (startScale > 1.05f) {
+                            targetScale = 1f
+                            targetOffset = Offset.Zero
                         } else {
-                            val targetScale = doubleTapScale.coerceIn(minScale, maxScale)
+                            targetScale = doubleTapScale.coerceIn(minScale, maxScale)
                             val centerX = containerSize.width / 2f
                             val centerY = containerSize.height / 2f
                             val rawX = (centerX - tapOffset.x) * (targetScale - 1f)
                             val rawY = (centerY - tapOffset.y) * (targetScale - 1f)
-                            val clamped = clampPanOffset(rawX, rawY, targetScale, containerSize)
-                            scope.launch {
-                                launch { scaleAnim.animateTo(targetScale, tween(220)) }
-                                launch { offsetXAnim.animateTo(clamped.x, tween(220)) }
-                                launch { offsetYAnim.animateTo(clamped.y, tween(220)) }
+                            targetOffset = clampPanOffset(rawX, rawY, targetScale, containerSize)
+                        }
+                        animJob = scope.launch {
+                            animate(
+                                initialValue = 0f,
+                                targetValue = 1f,
+                                animationSpec = tween(220)
+                            ) { progress, _ ->
+                                scale = startScale + (targetScale - startScale) * progress
+                                offsetX = startX + (targetOffset.x - startX) * progress
+                                offsetY = startY + (targetOffset.y - startY) * progress
                             }
                         }
                     }
                 )
             }
             .pointerInput(minScale, maxScale) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    val newScale = (scaleAnim.value * zoom).coerceIn(minScale, maxScale)
-                    val rawX = if (newScale > 1.001f) offsetXAnim.value + pan.x else 0f
-                    val rawY = if (newScale > 1.001f) offsetYAnim.value + pan.y else 0f
-                    val clamped = clampPanOffset(rawX, rawY, newScale, containerSize)
-                    scope.launch {
-                        scaleAnim.snapTo(newScale)
-                        offsetXAnim.snapTo(clamped.x)
-                        offsetYAnim.snapTo(clamped.y)
+                detectTransformGestures { centroid, pan, zoom, _ ->
+                    animJob?.cancel()
+                    val oldScale = scale
+                    val newScale = (oldScale * zoom).coerceIn(minScale, maxScale)
+                    val scaleRatio = if (oldScale > 0f) newScale / oldScale else 1f
+                    val centerX = containerSize.width / 2f
+                    val centerY = containerSize.height / 2f
+                    val rawX = if (newScale > 1.001f) {
+                        (offsetX + centerX - centroid.x) * scaleRatio - (centerX - centroid.x) + pan.x
+                    } else {
+                        0f
                     }
+                    val rawY = if (newScale > 1.001f) {
+                        (offsetY + centerY - centroid.y) * scaleRatio - (centerY - centroid.y) + pan.y
+                    } else {
+                        0f
+                    }
+                    val clamped = clampPanOffset(rawX, rawY, newScale, containerSize)
+                    scale = newScale
+                    offsetX = clamped.x
+                    offsetY = clamped.y
                 }
             },
         contentAlignment = Alignment.Center
@@ -311,10 +367,10 @@ fun ZoomableImageBox(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    scaleX = scaleAnim.value
-                    scaleY = scaleAnim.value
-                    translationX = offsetXAnim.value
-                    translationY = offsetYAnim.value
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offsetX
+                    translationY = offsetY
                 },
             contentAlignment = Alignment.Center,
             content = content
@@ -332,7 +388,7 @@ fun ZoomableBitmapPreview(
     modifier: Modifier = Modifier
 ) {
     val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
-    ZoomableImageBox(modifier = modifier) {
+    ZoomableImageBox(modifier = modifier, resetKey = bitmap) {
         Image(
             bitmap = imageBitmap,
             contentDescription = contentDescription,
@@ -346,7 +402,8 @@ fun ZoomableBitmapPreview(
 
 /**
  * Full-screen edge-to-edge black photo preview dialog supporting `1.0x`–`4.5x` pinch-to-zoom,
- * pan, double-tap `1x`/`2.5x` toggle, top bar close button, and bottom **保存相册** / **分享** actions.
+ * pan, double-tap `1x`/`2.5x` toggle, top bar close button, bottom **保存相册** / **分享** actions,
+ * and an internal overlay [StatusToastHost] so save/error toasts remain visible above the dialog.
  */
 @Composable
 fun PhotoPreviewDialog(
@@ -359,19 +416,70 @@ fun PhotoPreviewDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val dialogToast = rememberToastState()
     var fallbackBitmap by remember(songForCover?.id) { mutableStateOf<Bitmap?>(null) }
+    var isLoadingCover by remember(songForCover?.id) { mutableStateOf(bitmap == null && songForCover != null) }
     var isSaving by remember { mutableStateOf(false) }
     var isSharing by remember { mutableStateOf(false) }
 
     val effectiveBitmap = bitmap ?: fallbackBitmap
 
+    fun performSave(target: Bitmap) {
+        if (isSaving) return
+        isSaving = true
+        scope.launch {
+            try {
+                MediaStoreSaver.saveBitmapToGallery(
+                    context = context,
+                    bitmap = target,
+                    displayNamePrefix = if (songForCover != null) {
+                        "MaimaiData_Cover_${songForCover.id}"
+                    } else {
+                        "MaimaiData_B50"
+                    }
+                ).fold(
+                    onSuccess = {
+                        dialogToast.show("已保存到系统相册", durationMs = 2200L)
+                        onSavedToast("已保存到系统相册")
+                    },
+                    onFailure = { err ->
+                        val msg = err.message ?: "保存相册失败"
+                        dialogToast.show(msg, isError = true, durationMs = 2500L)
+                        onError(msg)
+                    }
+                )
+            } finally {
+                isSaving = false
+            }
+        }
+    }
+
+    val legacyWritePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            effectiveBitmap?.let(::performSave)
+        } else {
+            val msg = "请在系统设置中允许存储权限以保存图片"
+            dialogToast.show(msg, isError = true, durationMs = 2500L)
+            onError(msg)
+        }
+    }
+
     LaunchedEffect(bitmap, songForCover?.id) {
         if (bitmap == null && songForCover != null && fallbackBitmap == null) {
-            fallbackBitmap = CoverImageManager.loadCoverBitmap(
-                context = context,
-                song = songForCover,
-                targetPx = 0
-            )
+            isLoadingCover = true
+            try {
+                fallbackBitmap = CoverImageManager.loadCoverBitmap(
+                    context = context,
+                    song = songForCover,
+                    targetPx = 0
+                )
+            } finally {
+                isLoadingCover = false
+            }
+        } else {
+            isLoadingCover = false
         }
     }
 
@@ -396,18 +504,7 @@ fun PhotoPreviewDialog(
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                songForCover != null -> {
-                    ZoomableImageBox(modifier = Modifier.fillMaxSize()) {
-                        CoverImageView(
-                            song = songForCover,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(AppTheme.Space.l),
-                            contentScale = ContentScale.Fit
-                        )
-                    }
-                }
-                else -> {
+                isLoadingCover || songForCover == null -> {
                     Column(
                         modifier = Modifier.align(Alignment.Center),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -419,7 +516,26 @@ fun PhotoPreviewDialog(
                             modifier = Modifier.size(32.dp)
                         )
                         Text(
-                            text = "正在加载图片…",
+                            text = if (songForCover != null) "正在加载曲绘…" else "正在加载图片…",
+                            style = AppTheme.AppTypography.caption,
+                            color = Color.White.copy(alpha = 0.75f)
+                        )
+                    }
+                }
+                else -> {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.BrokenImage,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.55f),
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Text(
+                            text = "曲绘加载失败，请检查网络连接",
                             style = AppTheme.AppTypography.caption,
                             color = Color.White.copy(alpha = 0.75f)
                         )
@@ -490,18 +606,23 @@ fun PhotoPreviewDialog(
                         val target = effectiveBitmap ?: return@OutlinedButton
                         isSharing = true
                         scope.launch {
-                            ShareBridge.shareBitmapAsync(
-                                context = context,
-                                bitmap = target,
-                                fileNamePrefix = if (songForCover != null) {
-                                    "MaimaiData_Cover_${songForCover.id}"
-                                } else {
-                                    "MaimaiData_B50"
+                            try {
+                                ShareBridge.shareBitmapAsync(
+                                    context = context,
+                                    bitmap = target,
+                                    fileNamePrefix = if (songForCover != null) {
+                                        "MaimaiData_Cover_${songForCover.id}"
+                                    } else {
+                                        "MaimaiData_B50"
+                                    }
+                                ).onFailure { err ->
+                                    val msg = err.message ?: "分享失败"
+                                    dialogToast.show(msg, isError = true, durationMs = 2500L)
+                                    onError(msg)
                                 }
-                            ).onFailure { err ->
-                                onError(err.message ?: "分享失败")
+                            } finally {
+                                isSharing = false
                             }
-                            isSharing = false
                         }
                     },
                     enabled = effectiveBitmap != null && !isSharing,
@@ -513,7 +634,7 @@ fun PhotoPreviewDialog(
                         disabledContentColor = Color.White.copy(alpha = 0.40f)
                     ),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = AppTheme.Space.l, vertical = 0.dp),
                     modifier = Modifier
                         .weight(1f)
                         .defaultMinSize(minHeight = 48.dp)
@@ -537,21 +658,15 @@ fun PhotoPreviewDialog(
                 Button(
                     onClick = {
                         val target = effectiveBitmap ?: return@Button
-                        isSaving = true
-                        scope.launch {
-                            MediaStoreSaver.saveBitmapToGallery(
-                                context = context,
-                                bitmap = target,
-                                displayNamePrefix = if (songForCover != null) {
-                                    "MaimaiData_Cover_${songForCover.id}"
-                                } else {
-                                    "MaimaiData_B50"
-                                }
-                            ).fold(
-                                onSuccess = { onSavedToast("已保存到系统相册") },
-                                onFailure = { err -> onError(err.message ?: "保存相册失败") }
-                            )
-                            isSaving = false
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.WRITE_EXTERNAL_STORAGE
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            legacyWritePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        } else {
+                            performSave(target)
                         }
                     },
                     enabled = effectiveBitmap != null && !isSaving,
@@ -562,7 +677,7 @@ fun PhotoPreviewDialog(
                         disabledContainerColor = AppTheme.accent.copy(alpha = 0.45f),
                         disabledContentColor = Color.White.copy(alpha = 0.70f)
                     ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = AppTheme.Space.l, vertical = 0.dp),
                     modifier = Modifier
                         .weight(1f)
                         .defaultMinSize(minHeight = 48.dp)
@@ -591,6 +706,15 @@ fun PhotoPreviewDialog(
                     }
                 }
             }
+
+            // Internal overlay toast above the bottom action bar so feedback is visible inside the Dialog window
+            StatusToastHost(
+                toastState = dialogToast,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 72.dp)
+            )
         }
     }
 }

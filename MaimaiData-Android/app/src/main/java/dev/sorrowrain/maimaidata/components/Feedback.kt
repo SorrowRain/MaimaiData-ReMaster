@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
@@ -33,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +43,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,20 +61,17 @@ import kotlinx.coroutines.launch
 @Stable
 class ToastState(private val scope: CoroutineScope) {
     var message by mutableStateOf<String?>(null)
+    var isError by mutableStateOf(false)
     private var timerJob: Job? = null
 
-    fun show(text: String, durationMs: Long = 1800L) {
+    fun show(text: String, isError: Boolean = false, durationMs: Long = 1800L) {
         timerJob?.cancel()
+        this.isError = isError
         message = text
         timerJob = scope.launch {
             delay(durationMs)
             message = null
         }
-    }
-
-    fun dismiss() {
-        timerJob?.cancel()
-        message = null
     }
 }
 
@@ -88,11 +89,20 @@ fun StatusToastHost(
     toastState: ToastState,
     modifier: Modifier = Modifier
 ) {
-    var displayedText by remember { mutableStateOf("") }
+    var lastMessage by remember { mutableStateOf("") }
+    var lastIsError by remember { mutableStateOf(false) }
     val activeMessage = toastState.message
-    if (activeMessage != null) {
-        displayedText = activeMessage
+    val activeIsError = toastState.isError
+
+    SideEffect {
+        if (activeMessage != null) {
+            lastMessage = activeMessage
+            lastIsError = activeIsError
+        }
     }
+
+    val displayedText = activeMessage ?: lastMessage
+    val displayedIsError = if (activeMessage != null) activeIsError else lastIsError
 
     Box(
         modifier = modifier
@@ -114,14 +124,14 @@ fun StatusToastHost(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = AppTheme.Space.l, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = AppTheme.Space.l, vertical = AppTheme.itemSpacing),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.CheckCircle,
+                        imageVector = if (displayedIsError) Icons.Rounded.ErrorOutline else Icons.Rounded.CheckCircle,
                         contentDescription = null,
-                        tint = AppTheme.accentText,
+                        tint = if (displayedIsError) AppTheme.warningText else AppTheme.accentText,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
@@ -247,6 +257,147 @@ fun AppErrorDialog(
             shape = RoundedCornerShape(AppTheme.Radius.card),
             containerColor = MaterialTheme.colorScheme.surface
         )
+    }
+}
+
+/**
+ * Standard Material 3 confirmation dialog with consistent card corner radius and typography.
+ */
+@Composable
+fun AppConfirmDialog(
+    title: String,
+    message: String,
+    confirmText: String,
+    dismissText: String = "取消",
+    isDestructive: Boolean = false,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    extraActionText: String? = null,
+    onExtraAction: (() -> Unit)? = null
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = title,
+                style = AppTheme.AppTypography.cardTitle,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        text = {
+            Text(
+                text = message,
+                style = AppTheme.AppTypography.body,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    text = confirmText,
+                    style = AppTheme.AppTypography.subheadlineBold,
+                    color = if (isDestructive) AppTheme.destructiveText else AppTheme.accentText
+                )
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)) {
+                if (extraActionText != null && onExtraAction != null) {
+                    TextButton(onClick = onExtraAction) {
+                        Text(
+                            text = extraActionText,
+                            style = AppTheme.AppTypography.rowTitle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(
+                        text = dismissText,
+                        style = AppTheme.AppTypography.rowTitle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        shape = RoundedCornerShape(AppTheme.Radius.card),
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+/**
+ * Standard centered loading placeholder (counterpart to iOS `ProgressView` state).
+ */
+@Composable
+fun AppLoadingState(
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppTheme.Space.l, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(28.dp),
+            strokeWidth = 2.5.dp,
+            color = AppTheme.accentText
+        )
+        Text(
+            text = message,
+            style = AppTheme.AppTypography.caption,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/**
+ * Standard centered empty/completed state placeholder (counterpart to iOS `ContentUnavailableView`).
+ */
+@Composable
+fun AppEmptyState(
+    icon: ImageVector,
+    title: String,
+    description: String? = null,
+    iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+    modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppTheme.Space.l, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconTint,
+            modifier = Modifier.size(38.dp)
+        )
+        Text(
+            text = title,
+            style = AppTheme.AppTypography.cardTitle,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+        if (!description.isNullOrEmpty()) {
+            Text(
+                text = description,
+                style = AppTheme.AppTypography.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
+        if (action != null) {
+            Box(modifier = Modifier.padding(top = AppTheme.Space.xs)) {
+                action()
+            }
+        }
     }
 }
 

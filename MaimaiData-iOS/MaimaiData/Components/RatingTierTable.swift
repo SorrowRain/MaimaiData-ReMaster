@@ -12,15 +12,15 @@ struct RatingTierTable: View {
         AppInsetGroup {
             VStack(spacing: 0) {
                 HStack(spacing: AppTheme.Space.s) {
-                    Text("分段档位")
+                    Text("达成率 / 等级")
                         .frame(maxWidth: .infinity, alignment: .center)
                     if showB50Column {
-                        Text("单曲 Ra")
-                            .frame(width: 76, alignment: .center)
+                        Text("单曲分")
+                            .frame(width: 72, alignment: .center)
                         Text("B50 可加")
-                            .frame(width: 76, alignment: .center)
+                            .frame(width: 72, alignment: .center)
                     } else {
-                        Text("单曲 Ra")
+                        Text("单曲分")
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -39,7 +39,7 @@ struct RatingTierTable: View {
 
     private func tierRowView(_ row: RatingCalculator.TierRow) -> some View {
         HStack(spacing: AppTheme.Space.s) {
-            HStack(spacing: 4) {
+            HStack(spacing: AppTheme.Space.xs) {
                 if row.isAPRow {
                     Image(row.badgeAssetName(for: region))
                         .resizable()
@@ -47,6 +47,7 @@ struct RatingTierTable: View {
                         .frame(width: 20, height: 20)
                         .frame(width: 38.4, height: 18, alignment: .center)
                         .frame(width: 46, height: 18, alignment: .leading)
+                        .accessibilityLabel("AP")
                 } else {
                     // All PRiSM & CiRCLE rank PNGs share a 256x120 canvas (38.4x18pt at height 18).
                     // `+` variants shift base letters slightly left to center the trailing `+`;
@@ -57,12 +58,13 @@ struct RatingTierTable: View {
                         .frame(height: 18)
                         .offset(x: opticalLetterOffset(for: row.rate))
                         .frame(width: 46, height: 18, alignment: .leading)
+                        .accessibilityLabel(row.rate.uppercased().replacingOccurrences(of: "P", with: "+"))
                 }
 
                 Text(row.achievementText)
                     .font(AppTheme.Typography.captionMono)
                     .foregroundStyle(.primary)
-                    .frame(minWidth: 72, alignment: .trailing)
+                    .frame(minWidth: 74, alignment: .trailing)
                     .fixedSize(horizontal: true, vertical: false)
                     .lineLimit(1)
             }
@@ -73,7 +75,7 @@ struct RatingTierTable: View {
                     .font(AppTheme.Typography.captionMeta)
                     .foregroundStyle(.primary)
                     .contentTransition(.numericText())
-                    .frame(width: 76, alignment: .center)
+                    .frame(width: 72, alignment: .center)
 
                 let gain = row.b50Gain ?? 0
                 Group {
@@ -83,12 +85,12 @@ struct RatingTierTable: View {
                             .foregroundStyle(AppTheme.accentText)
                             .contentTransition(.numericText())
                     } else {
-                        Text("+0")
+                        Text("—")
                             .font(AppTheme.Typography.captionMono)
                             .foregroundStyle(.tertiary)
                     }
                 }
-                .frame(width: 76, alignment: .center)
+                .frame(width: 72, alignment: .center)
             } else {
                 Text("\(row.singleRating)")
                     .font(AppTheme.Typography.captionMeta)

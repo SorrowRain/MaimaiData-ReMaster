@@ -6,7 +6,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -153,6 +157,46 @@ private fun StatModeTile(
         },
         onClick = onSelect
     )
+}
+
+/**
+ * Responsive 72dp tile grid for checklist groups (1:1 counterpart of iOS `ChecklistSongGrid`),
+ * avoiding nested scrollable grids inside `LazyColumn`.
+ */
+@Composable
+fun <T> ChecklistSongGrid(
+    items: List<T>,
+    itemKey: (T) -> Any,
+    modifier: Modifier = Modifier,
+    tileContent: @Composable (T) -> Unit
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val tileSize = 72.dp
+        val spacing = AppTheme.itemSpacing
+        val columns = ((maxWidth + spacing) / (tileSize + spacing)).toInt().coerceAtLeast(3)
+        val rows = items.chunked(columns)
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            rows.forEach { rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    rowItems.forEach { item ->
+                        key(itemKey(item)) {
+                            tileContent(item)
+                        }
+                    }
+                    repeat(columns - rowItems.size) {
+                        Spacer(modifier = Modifier.size(tileSize))
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**

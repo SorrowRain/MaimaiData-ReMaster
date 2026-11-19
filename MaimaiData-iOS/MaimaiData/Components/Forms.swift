@@ -118,3 +118,29 @@ struct AppSecureField: View {
         }
     }
 }
+
+/// Standard labeled discrete integer slider row (`label` + `AppValueBadge` + `Slider`).
+/// Shared by `SearchFilterSheet` and `RatingCalculatorView`.
+struct AppLabeledSliderRow: View {
+    let label: String
+    let valueText: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step: Double = 1
+    var badgeTint: Color = AppTheme.accent
+    var accessibilityLabel: String? = nil
+
+    var body: some View {
+        HStack(spacing: AppTheme.Space.m) {
+            Text(label)
+                .font(AppTheme.Typography.captionBold)
+                .foregroundStyle(.secondary)
+                .frame(width: 30, alignment: .leading)
+            AppValueBadge(text: valueText, tint: badgeTint)
+            Slider(value: $value, in: range, step: step)
+                .tint(AppTheme.accent)
+                .accessibilityLabel(accessibilityLabel ?? label)
+                .accessibilityValue(valueText)
+        }
+    }
+}

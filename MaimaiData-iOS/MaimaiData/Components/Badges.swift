@@ -46,6 +46,7 @@ struct AppCapsuleLabel: View {
             }
             Text(text)
                 .font(spec.font)
+                .lineLimit(1)
                 .contentTransition(.numericText())
             if onRemove != nil {
                 Image(systemName: "xmark")
@@ -218,21 +219,31 @@ struct DifficultyLevelBadge: View {
         let isRemaster = difficulty == .remaster
         let isDark = colorScheme == .dark
         let shape = RoundedRectangle(cornerRadius: AppTheme.Radius.badge, style: .continuous)
+        let fgColor: Color = if isRemaster {
+            isDark ? AppTheme.Palette.boardMainRemaster : AppTheme.Palette.chartRemaster
+        } else {
+            difficulty.readableForeground
+        }
+        let bgColor: Color = if isRemaster {
+            isDark ? difficulty.color.opacity(0.24) : Color.white
+        } else {
+            difficulty.solidFill(isDark: isDark)
+        }
+        let strokeColor: Color = if isRemaster {
+            isDark ? AppTheme.Palette.boardMainRemaster.opacity(0.65) : difficulty.color
+        } else {
+            Color.black.opacity(0.08)
+        }
+
         Text(text)
             .font(AppTheme.Typography.badge)
-            .foregroundStyle(isRemaster ? AppTheme.Palette.chartRemaster : difficulty.readableForeground)
+            .foregroundStyle(fgColor)
             .frame(minWidth: 36, minHeight: 22)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(
-                isRemaster ? Color.white : difficulty.solidFill(isDark: isDark),
-                in: shape
-            )
+            .background(bgColor, in: shape)
             .overlay(
-                shape.strokeBorder(
-                    isRemaster ? difficulty.color : Color.black.opacity(0.08),
-                    lineWidth: isRemaster ? 1.5 : 0.5
-                )
+                shape.strokeBorder(strokeColor, lineWidth: isRemaster ? 1.5 : 0.5)
             )
     }
 }
@@ -266,8 +277,10 @@ struct GenreCapsuleTag: View {
 
     var body: some View {
         let isRegular = style == .regular
-        Text(text ?? genre)
+        let displayText = text ?? MaimaiConstants.shortGenreDisplayName(for: genre)
+        Text(displayText)
             .font(isRegular ? AppTheme.Typography.tag : AppTheme.Typography.caption2Semibold)
+            .lineLimit(1)
             .padding(.horizontal, isRegular ? AppTheme.itemSpacing : AppTheme.Space.s)
             .padding(.vertical, isRegular ? 5 : 3)
             .modifier(GenreTagChrome(genre: genre))
@@ -289,26 +302,28 @@ struct RecordStatusBadges: View {
         let rankHeight: CGFloat = size == .regular ? 20 : 16
         let markHeight: CGFloat = size == .regular ? 22 : 18
 
-        Image(record.rankAssetName(for: region))
-            .resizable()
-            .scaledToFit()
-            .frame(height: rankHeight)
-            .accessibilityLabel(record.rankAccessibilityLabel)
-
-        if let fc = record.fcAssetName {
-            Image(fc)
+        HStack(spacing: AppTheme.Space.xs) {
+            Image(record.rankAssetName(for: region))
                 .resizable()
                 .scaledToFit()
-                .frame(height: markHeight)
-                .accessibilityLabel(record.fcAccessibilityLabel)
-        }
+                .frame(height: rankHeight)
+                .accessibilityLabel(record.rankAccessibilityLabel)
 
-        if let fs = record.fsAssetName {
-            Image(fs)
-                .resizable()
-                .scaledToFit()
-                .frame(height: markHeight)
-                .accessibilityLabel(record.fsAccessibilityLabel)
+            if let fc = record.fcAssetName {
+                Image(fc)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: markHeight)
+                    .accessibilityLabel(record.fcAccessibilityLabel)
+            }
+
+            if let fs = record.fsAssetName {
+                Image(fs)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: markHeight)
+                    .accessibilityLabel(record.fsAccessibilityLabel)
+            }
         }
     }
 }
@@ -409,7 +424,9 @@ struct FilterCapsuleChip: View {
                     Capsule().strokeBorder(
                         isSelected
                             ? Color.white.opacity(0.28)
-                            : AppTheme.Palette.hairline.opacity(colorScheme == .dark ? 0.15 : 0.08),
+                            : (colorScheme == .dark
+                                ? Color.white.opacity(0.14)
+                                : AppTheme.Palette.hairline.opacity(0.08)),
                         lineWidth: 1
                     )
                 )

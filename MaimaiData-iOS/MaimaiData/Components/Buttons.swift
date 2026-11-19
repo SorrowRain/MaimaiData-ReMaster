@@ -35,6 +35,7 @@ struct AppPrimaryButton: View {
                 }
                 Text(title)
                     .font(AppTheme.Typography.songTitle)
+                    .lineLimit(1)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 18)
@@ -54,6 +55,7 @@ struct AppInlineButton: View {
     var icon: String? = nil
     var tint: Color = AppTheme.accent
     var isLoading: Bool = false
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -72,21 +74,27 @@ struct AppInlineButton: View {
             .modifier(TintedActionCapsuleChrome(tint: tint))
         }
         .buttonStyle(.plain)
-        .disabled(isLoading)
+        .opacity(isDisabled ? 0.45 : 1)
+        .disabled(isLoading || isDisabled)
     }
 }
 
 /// Secondary glass button (e.g. "重置选项").
 struct AppSecondaryButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     var tint: Color = AppTheme.accent
     let action: () -> Void
 
     var body: some View {
+        let fgColor = colorScheme == .dark
+            ? tint.brightened(toAtLeast: 0.90, maxSaturation: 0.65)
+            : tint
         Button(action: action) {
             Text(title)
                 .font(AppTheme.Typography.songTitle)
-                .foregroundStyle(tint)
+                .foregroundStyle(fgColor)
+                .lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 46)
                 .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.button, style: .continuous))
         }

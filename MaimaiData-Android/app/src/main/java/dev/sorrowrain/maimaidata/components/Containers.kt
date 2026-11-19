@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -33,6 +36,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -278,7 +282,7 @@ fun AppInsetRow(
     trailing: (@Composable () -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
-    val iconShape = RoundedCornerShape(8.dp)
+    val iconShape = RoundedCornerShape(AppTheme.Radius.tile)
 
     Row(
         modifier = modifier
@@ -291,7 +295,7 @@ fun AppInsetRow(
                     Modifier
                 }
             )
-            .padding(horizontal = AppTheme.Space.m, vertical = 10.dp),
+            .padding(horizontal = AppTheme.Space.m, vertical = AppTheme.itemSpacing),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
     ) {
@@ -356,6 +360,46 @@ fun AppInsetRow(
                 modifier = Modifier.size(20.dp)
             )
         }
+    }
+}
+
+/**
+ * Standard toggle switch row inside [AppInsetGroup] with full-row toggleable semantics and adaptive accent track.
+ */
+@Composable
+fun AppInsetToggleRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = AppTheme.rowMinHeight)
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
+            .padding(horizontal = AppTheme.Space.m, vertical = AppTheme.Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+    ) {
+        Text(
+            text = title,
+            style = AppTheme.AppTypography.rowTitle,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = AppTheme.accentText
+            )
+        )
     }
 }
 

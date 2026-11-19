@@ -31,6 +31,7 @@ enum CheckDisplayMode: Int, CaseIterable {
 }
 
 private let checklistGridColumns = [GridItem(.adaptive(minimum: 72), spacing: AppTheme.itemSpacing)]
+private let checklistStatColumns = Array(repeating: GridItem(.flexible(), spacing: AppTheme.Space.s), count: 4)
 
 struct ChecklistStatsHeader<LeadingAccessory: View>: View {
     let stats: ChecklistStats
@@ -65,7 +66,7 @@ struct ChecklistStatsHeader<LeadingAccessory: View>: View {
                 }
             }
         } content: {
-            LazyVGrid(columns: checklistGridColumns, spacing: AppTheme.itemSpacing) {
+            LazyVGrid(columns: checklistStatColumns, spacing: AppTheme.Space.s) {
                 statButton(mode: .sss, title: "SSS", count: stats.sssCount, tint: AppTheme.Palette.statSSS)
                 statButton(mode: .fc, title: "FC", count: stats.fcCount, tint: AppTheme.Palette.statFC)
                 statButton(mode: .ap, title: "AP", count: stats.apCount, tint: AppTheme.Palette.statAP)
@@ -155,6 +156,20 @@ struct ChecklistSongTile: View {
                 ChartTypeBadge(isDX: song.isDX, compact: true)
                     .padding(3)
             }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tileAccessibilityLabel)
+    }
+
+    private var tileAccessibilityLabel: String {
+        guard let record else { return song.title }
+        switch displayMode {
+        case .sss:
+            return "\(song.title)，\(record.rankAccessibilityLabel)"
+        case .fc, .ap:
+            return record.fcAssetName != nil ? "\(song.title)，\(record.fcAccessibilityLabel)" : song.title
+        case .fsd:
+            return record.fsAssetName != nil ? "\(song.title)，\(record.fsAccessibilityLabel)" : song.title
         }
     }
 

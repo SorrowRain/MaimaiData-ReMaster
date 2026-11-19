@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +32,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -477,7 +477,7 @@ fun RecordStatusBadges(
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)
     ) {
         MaimaiConstants.drawableResId(record.rankAssetName(region))?.let { rankRes ->
             Image(
@@ -524,26 +524,14 @@ fun SongCoverBadgeView(
     val strokeWidth = if (sizeDp >= 90.dp) 3.dp else 2.dp
 
     Box(modifier = modifier.size(sizeDp)) {
-        if (song != null) {
-            CoverImageView(
-                song = song,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(shape)
-                    .border(strokeWidth, borderColor, shape),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Image(
-                painter = painterResource(R.drawable.mmd_song_jacket_placeholder),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(shape)
-                    .border(strokeWidth, borderColor, shape)
-            )
-        }
+        CoverImageView(
+            song = song,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .border(strokeWidth, borderColor, shape),
+            contentScale = ContentScale.Crop
+        )
 
         if (showCornerTypeBadge && song != null) {
             Box(
@@ -604,8 +592,11 @@ fun FilterCapsuleChip(
                 }
             )
             .border(1.dp, borderColor, CircleShape)
-            .semantics { selected = isSelected }
-            .clickable(role = Role.Checkbox, onClick = onClick)
+            .toggleable(
+                value = isSelected,
+                role = Role.Checkbox,
+                onValueChange = { onClick() }
+            )
             .padding(horizontal = AppTheme.Space.m, vertical = 7.dp),
         contentAlignment = Alignment.Center
     ) {

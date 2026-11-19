@@ -129,7 +129,7 @@ struct AppSectionHeader<Trailing: View>: View {
                 }
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: AppTheme.Space.s)
             trailing()
         }
     }
@@ -292,7 +292,7 @@ struct AppInsetRow<Leading: View, Trailing: View>: View {
                 }
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: AppTheme.Space.s)
             trailing()
 
             if showsChevron {
@@ -302,9 +302,23 @@ struct AppInsetRow<Leading: View, Trailing: View>: View {
             }
         }
         .padding(.horizontal, AppTheme.Space.m)
-        .padding(.vertical, 10)
+        .padding(.vertical, AppTheme.itemSpacing)
         .frame(minHeight: AppTheme.rowMinHeight)
         .contentShape(Rectangle())
+    }
+}
+
+/// Standard toggle switch row inside `AppInsetGroup`.
+struct AppInsetToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(title, isOn: $isOn)
+            .font(AppTheme.Typography.rowTitle)
+            .tint(AppTheme.accent)
+            .padding(.horizontal, AppTheme.Space.m)
+            .frame(minHeight: AppTheme.rowMinHeight)
     }
 }
 
@@ -324,6 +338,7 @@ struct PhotoPreviewScaffold<Placeholder: View>: View {
 
     @State private var saveToast = ToastState()
     @State private var showShare = false
+    @State private var isSaving = false
     @State private var didSaveTrigger = 0
 
     init(
@@ -376,10 +391,12 @@ struct PhotoPreviewScaffold<Placeholder: View>: View {
                         .accessibilityLabel(shareAccessibilityLabel)
 
                         Button("保存") {
+                            guard !isSaving else { return }
                             Task { await saveToPhotos(image) }
                         }
                         .fontWeight(.semibold)
                         .foregroundStyle(.white)
+                        .disabled(isSaving)
                         .accessibilityLabel(saveAccessibilityLabel ?? "保存")
                     }
                 }
@@ -395,15 +412,15 @@ struct PhotoPreviewScaffold<Placeholder: View>: View {
     }
 
     private func saveToPhotos(_ image: UIImage) async {
-        let message: String
+        isSaving = true
+        defer { isSaving = false }
         do {
             try await PhotoLibrarySaver.save(image)
-            message = "已保存到系统相册"
             didSaveTrigger += 1
+            saveToast.show("已保存到系统相册", duration: 2.2)
         } catch {
-            message = error.localizedDescription
+            saveToast.show(error.localizedDescription, isError: true, duration: 2.5)
         }
-        saveToast.show(message, duration: 2.2)
     }
 }
 

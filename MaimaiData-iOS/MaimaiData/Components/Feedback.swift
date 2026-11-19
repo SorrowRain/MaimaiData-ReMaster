@@ -55,7 +55,7 @@ extension View {
     func statusToast(_ toast: ToastState) -> some View {
         overlay(alignment: .bottom) {
             if let message = toast.text {
-                StatusToast(text: message)
+                StatusToast(text: message, isError: toast.isError)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -68,12 +68,14 @@ extension View {
 @Observable
 final class ToastState {
     private(set) var text: String?
+    private(set) var isError: Bool = false
     @ObservationIgnored private var dismissTask: Task<Void, Never>?
 
-    func show(_ message: String, duration: Double = 1.8) {
+    func show(_ message: String, isError: Bool = false, duration: Double = 1.8) {
         dismissTask?.cancel()
         withAnimation(.snappy(duration: 0.22)) {
-            text = message
+            self.isError = isError
+            self.text = message
         }
         dismissTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(duration))
@@ -87,18 +89,19 @@ final class ToastState {
 
 struct StatusToast: View {
     let text: String
+    var isError: Bool = false
 
     var body: some View {
         HStack(spacing: AppTheme.Space.s) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(AppTheme.accentBright)
+            Image(systemName: isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(isError ? AppTheme.warning : AppTheme.accentText)
             Text(text)
                 .font(AppTheme.Typography.inlineAction)
                 .multilineTextAlignment(.center)
                 .transaction { $0.animation = nil }
         }
         .padding(.horizontal, AppTheme.Space.l)
-        .padding(.vertical, 10)
+        .padding(.vertical, AppTheme.itemSpacing)
         .appGlass(in: Capsule(), interactive: false)
         .padding(.bottom, AppTheme.Space.xl)
         .accessibilityAddTraits(.isStaticText)
@@ -109,11 +112,15 @@ struct SyncStatusBanner: View {
     @Bindable var store: DataStore
 
     var body: some View {
-        if store.isLoadingLocalData || store.isSyncingSongs || store.syncNotice != nil {
-            AppCard(padding: AppTheme.compactCardPadding, tint: AppTheme.accent) {
+        let isLoading = store.isLoadingLocalData || store.isSyncingSongs
+        if isLoading || store.syncNotice != nil {
+            AppCard(
+                padding: AppTheme.compactCardPadding,
+                tint: isLoading ? AppTheme.accent : AppTheme.warning
+            ) {
                 VStack(alignment: .leading, spacing: AppTheme.Space.s) {
                     HStack(alignment: .center, spacing: AppTheme.itemSpacing) {
-                        if store.isLoadingLocalData || store.isSyncingSongs {
+                        if isLoading {
                             ProgressView().controlSize(.small)
                             Text(store.isLoadingLocalData ? "正在读取本地曲库…" : "正在同步曲库与规则…")
                                 .font(AppTheme.Typography.tag)
@@ -129,9 +136,13 @@ struct SyncStatusBanner: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    if let notice = store.syncNotice {
-                        HStack(spacing: 10) {
-                            AppInlineButton(title: "重试", icon: "arrow.clockwise") {
+                    if !isLoading, let notice = store.syncNotice {
+                        HStack(spacing: AppTheme.itemSpacing) {
+                            AppInlineButton(
+                                title: "重试",
+                                icon: "arrow.clockwise",
+                                isDisabled: notice.kind == .songs ? store.isSyncingSongs : store.isSyncingStats
+                            ) {
                                 store.syncNotice = nil
                                 switch notice.kind {
                                 case .songs:
@@ -140,7 +151,6 @@ struct SyncStatusBanner: View {
                                     Task { await store.refreshChartStatsIfStale(force: true) }
                                 }
                             }
-                            .disabled(notice.kind == .songs ? store.isSyncingSongs : store.isSyncingStats)
 
                             AppInlineButton(title: "关闭", tint: .secondary) {
                                 store.syncNotice = nil
