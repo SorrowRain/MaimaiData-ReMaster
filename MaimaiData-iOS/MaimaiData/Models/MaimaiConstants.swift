@@ -21,77 +21,120 @@ enum MaimaiConstants {
         "12", "12+", "13", "13+", "14", "14+", "15"
     ]
 
-    static let cnVersions: [(name: String, asset: String)] = [
-        ("maimai", "maimai"),
-        ("maimai PLUS", "maimai_plus"),
-        ("maimai GreeN", "maimai_green"),
-        ("maimai GreeN PLUS", "maimai_green_plus"),
-        ("maimai ORANGE", "maimai_orange"),
-        ("maimai ORANGE PLUS", "maimai_orange_plus"),
-        ("maimai PiNK", "maimai_pink"),
-        ("maimai PiNK PLUS", "maimai_pink_plus"),
-        ("maimai MURASAKi", "maimai_murasaki"),
-        ("maimai MURASAKi PLUS", "maimai_murasaki_plus"),
-        ("maimai MiLK", "maimai_milk"),
-        ("maimai MiLK PLUS", "maimai_milk_plus"),
-        ("maimai FiNALE", "maimai_finale"),
-        ("舞萌DX", "maimaidx_cn"),
-        ("舞萌DX 2021", "maimaidx_2021"),
-        ("舞萌DX 2022", "maimaidx_2022"),
-        ("舞萌DX 2023", "maimaidx_2023"),
-        ("舞萌DX 2024", "maimaidx_2024"),
-        ("舞萌DX 2025", "maimaidx_2025"),
-        ("舞萌DX 2026", "maimaidx_2026")
+    struct CNVersionSpec {
+        let name: String
+        let asset: String
+        let isClassicEra: Bool
+    }
+
+    struct JPVersionSpec {
+        let name: String
+        let asset: String
+        let codePrefix: String
+        let isClassicEra: Bool
+        let isIntlAvailableByDefault: Bool
+
+        init(
+            name: String,
+            asset: String,
+            codePrefix: String,
+            isClassicEra: Bool,
+            isIntlAvailableByDefault: Bool = true
+        ) {
+            self.name = name
+            self.asset = asset
+            self.codePrefix = codePrefix
+            self.isClassicEra = isClassicEra
+            self.isIntlAvailableByDefault = isIntlAvailableByDefault
+        }
+    }
+
+    /// Single source of truth for CN versions (ordered oldest -> newest).
+    /// When a new CN major version ships, append ONE entry here.
+    static let cnVersionRegistry: [CNVersionSpec] = [
+        CNVersionSpec(name: "maimai", asset: "maimai", isClassicEra: true),
+        CNVersionSpec(name: "maimai PLUS", asset: "maimai_plus", isClassicEra: true),
+        CNVersionSpec(name: "maimai GreeN", asset: "maimai_green", isClassicEra: true),
+        CNVersionSpec(name: "maimai GreeN PLUS", asset: "maimai_green_plus", isClassicEra: true),
+        CNVersionSpec(name: "maimai ORANGE", asset: "maimai_orange", isClassicEra: true),
+        CNVersionSpec(name: "maimai ORANGE PLUS", asset: "maimai_orange_plus", isClassicEra: true),
+        CNVersionSpec(name: "maimai PiNK", asset: "maimai_pink", isClassicEra: true),
+        CNVersionSpec(name: "maimai PiNK PLUS", asset: "maimai_pink_plus", isClassicEra: true),
+        CNVersionSpec(name: "maimai MURASAKi", asset: "maimai_murasaki", isClassicEra: true),
+        CNVersionSpec(name: "maimai MURASAKi PLUS", asset: "maimai_murasaki_plus", isClassicEra: true),
+        CNVersionSpec(name: "maimai MiLK", asset: "maimai_milk", isClassicEra: true),
+        CNVersionSpec(name: "maimai MiLK PLUS", asset: "maimai_milk_plus", isClassicEra: true),
+        CNVersionSpec(name: "maimai FiNALE", asset: "maimai_finale", isClassicEra: true),
+        CNVersionSpec(name: "舞萌DX", asset: "maimaidx_cn", isClassicEra: false),
+        CNVersionSpec(name: "舞萌DX 2021", asset: "maimaidx_2021", isClassicEra: false),
+        CNVersionSpec(name: "舞萌DX 2022", asset: "maimaidx_2022", isClassicEra: false),
+        CNVersionSpec(name: "舞萌DX 2023", asset: "maimaidx_2023", isClassicEra: false),
+        CNVersionSpec(name: "舞萌DX 2024", asset: "maimaidx_2024", isClassicEra: false),
+        CNVersionSpec(name: "舞萌DX 2025", asset: "maimaidx_2025", isClassicEra: false),
+        CNVersionSpec(name: "舞萌DX 2026", asset: "maimaidx_2026", isClassicEra: false)
     ]
 
-    /// Complete SEGA arcade version table matching Zetaraku `data.json` version strings.
-    static let jpVersions: [(name: String, asset: String)] = [
-        ("maimai", "maimai"),
-        ("maimai PLUS", "maimai_plus"),
-        ("GreeN", "maimai_green"),
-        ("GreeN PLUS", "maimai_green_plus"),
-        ("ORANGE", "maimai_orange"),
-        ("ORANGE PLUS", "maimai_orange_plus"),
-        ("PiNK", "maimai_pink"),
-        ("PiNK PLUS", "maimai_pink_plus"),
-        ("MURASAKi", "maimai_murasaki"),
-        ("MURASAKi PLUS", "maimai_murasaki_plus"),
-        ("MiLK", "maimai_milk"),
-        ("MiLK PLUS", "maimai_milk_plus"),
-        ("FiNALE", "maimai_finale"),
-        ("maimaiでらっくす", "maimaidx"),
-        ("maimaiでらっくす PLUS", "maimaidx_plus"),
-        ("Splash", "maimaidx_splash"),
-        ("Splash PLUS", "maimaidx_splash_plus"),
-        ("UNiVERSE", "maimaidx_universe"),
-        ("UNiVERSE PLUS", "maimaidx_universe_plus"),
-        ("FESTiVAL", "maimaidx_festival"),
-        ("FESTiVAL PLUS", "maimaidx_festival_plus"),
-        ("BUDDiES", "maimaidx_buddies"),
-        ("BUDDiES PLUS", "maimaidx_buddies_plus"),
-        ("PRiSM", "maimaidx_prism"),
-        ("PRiSM PLUS", "maimaidx_prism_plus"),
-        ("CiRCLE", "maimaidx_circle"),
-        ("CiRCLE PLUS", "maimaidx_circle_plus"),
-        ("MAGiCAL", "maimaidx_magical")
+    /// Single source of truth for SEGA JP/INTL arcade versions matching Zetaraku `data.json`.
+    /// When a new arcade version ships, append ONE entry here (and add its drawable asset).
+    static let jpVersionRegistry: [JPVersionSpec] = [
+        JPVersionSpec(name: "maimai", asset: "maimai", codePrefix: "100", isClassicEra: true),
+        JPVersionSpec(name: "maimai PLUS", asset: "maimai_plus", codePrefix: "110", isClassicEra: true),
+        JPVersionSpec(name: "GreeN", asset: "maimai_green", codePrefix: "120", isClassicEra: true),
+        JPVersionSpec(name: "GreeN PLUS", asset: "maimai_green_plus", codePrefix: "130", isClassicEra: true),
+        JPVersionSpec(name: "ORANGE", asset: "maimai_orange", codePrefix: "140", isClassicEra: true),
+        JPVersionSpec(name: "ORANGE PLUS", asset: "maimai_orange_plus", codePrefix: "150", isClassicEra: true),
+        JPVersionSpec(name: "PiNK", asset: "maimai_pink", codePrefix: "160", isClassicEra: true),
+        JPVersionSpec(name: "PiNK PLUS", asset: "maimai_pink_plus", codePrefix: "170", isClassicEra: true),
+        JPVersionSpec(name: "MURASAKi", asset: "maimai_murasaki", codePrefix: "180", isClassicEra: true),
+        JPVersionSpec(name: "MURASAKi PLUS", asset: "maimai_murasaki_plus", codePrefix: "185", isClassicEra: true),
+        JPVersionSpec(name: "MiLK", asset: "maimai_milk", codePrefix: "190", isClassicEra: true),
+        JPVersionSpec(name: "MiLK PLUS", asset: "maimai_milk_plus", codePrefix: "195", isClassicEra: true),
+        JPVersionSpec(name: "FiNALE", asset: "maimai_finale", codePrefix: "199", isClassicEra: true),
+        JPVersionSpec(name: "maimaiでらっくす", asset: "maimaidx", codePrefix: "200", isClassicEra: false),
+        JPVersionSpec(name: "maimaiでらっくす PLUS", asset: "maimaidx_plus", codePrefix: "205", isClassicEra: false),
+        JPVersionSpec(name: "Splash", asset: "maimaidx_splash", codePrefix: "210", isClassicEra: false),
+        JPVersionSpec(name: "Splash PLUS", asset: "maimaidx_splash_plus", codePrefix: "215", isClassicEra: false),
+        JPVersionSpec(name: "UNiVERSE", asset: "maimaidx_universe", codePrefix: "220", isClassicEra: false),
+        JPVersionSpec(name: "UNiVERSE PLUS", asset: "maimaidx_universe_plus", codePrefix: "225", isClassicEra: false),
+        JPVersionSpec(name: "FESTiVAL", asset: "maimaidx_festival", codePrefix: "230", isClassicEra: false),
+        JPVersionSpec(name: "FESTiVAL PLUS", asset: "maimaidx_festival_plus", codePrefix: "235", isClassicEra: false),
+        JPVersionSpec(name: "BUDDiES", asset: "maimaidx_buddies", codePrefix: "240", isClassicEra: false),
+        JPVersionSpec(name: "BUDDiES PLUS", asset: "maimaidx_buddies_plus", codePrefix: "245", isClassicEra: false),
+        JPVersionSpec(name: "PRiSM", asset: "maimaidx_prism", codePrefix: "250", isClassicEra: false),
+        JPVersionSpec(name: "PRiSM PLUS", asset: "maimaidx_prism_plus", codePrefix: "255", isClassicEra: false),
+        JPVersionSpec(name: "CiRCLE", asset: "maimaidx_circle", codePrefix: "260", isClassicEra: false),
+        JPVersionSpec(name: "CiRCLE PLUS", asset: "maimaidx_circle_plus", codePrefix: "265", isClassicEra: false),
+        JPVersionSpec(name: "MAGiCAL", asset: "maimaidx_magical", codePrefix: "270", isClassicEra: false, isIntlAvailableByDefault: false)
     ]
+
+    static let latestCNVersion: CNVersionSpec = cnVersionRegistry.last!
+    static let latestJPVersion: JPVersionSpec = jpVersionRegistry.last!
+
+    static let cnVersions: [(name: String, asset: String)] = cnVersionRegistry.map { ($0.name, $0.asset) }
+    static let jpVersions: [(name: String, asset: String)] = jpVersionRegistry.map { ($0.name, $0.asset) }
+    static let overseasClassicVersions: Set<String> = Set(jpVersionRegistry.filter(\.isClassicEra).map(\.name))
+    static let knownJPVersionNames: Set<String> = Set(jpVersionRegistry.map(\.name))
+
+    private static let cnAssetByName: [String: String] = Dictionary(
+        uniqueKeysWithValues: cnVersionRegistry.map { ($0.name, $0.asset) }
+    )
+    private static let jpAssetByName: [String: String] = Dictionary(
+        uniqueKeysWithValues: jpVersionRegistry.map { ($0.name, $0.asset) }
+    )
 
     private static let classicEraChips: [String] = [
         "maimai", "GreeN", "ORANGE", "PiNK", "MURASAKi", "MiLK", "FiNALE"
     ]
 
-    /// Filter chips mirror Android SearchLayout's grouped version chips for CN.
-    static let searchVersions: [String] = classicEraChips + [
-        "舞萌DX", "舞萌DX 2021", "舞萌DX 2022", "舞萌DX 2023",
-        "舞萌DX 2024", "舞萌DX 2025", "舞萌DX 2026"
-    ]
+    /// Filter chips mirror grouped version chips for CN (derived from `cnVersionRegistry`).
+    static let searchVersions: [String] = classicEraChips + cnVersionRegistry.filter { !$0.isClassicEra }.map(\.name)
 
     static func checklistVersions(for region: ServerRegion) -> [(name: String, asset: String)] {
         switch region {
         case .cn:
             return cnVersions
         case .intl:
-            return jpVersions.filter { $0.name != "MAGiCAL" }
+            return jpVersionRegistry.filter(\.isIntlAvailableByDefault).map { ($0.name, $0.asset) }
         case .jp:
             return jpVersions
         }
@@ -101,10 +144,26 @@ enum MaimaiConstants {
         switch region {
         case .cn:
             return searchVersions
-        case .intl, .jp:
-            let dxNames = checklistVersions(for: region).dropFirst(13).map(\.name)
+        case .intl:
+            let dxNames = jpVersionRegistry
+                .filter { !$0.isClassicEra && $0.isIntlAvailableByDefault }
+                .map(\.name)
+            return classicEraChips + dxNames
+        case .jp:
+            let dxNames = jpVersionRegistry
+                .filter { !$0.isClassicEra }
+                .map(\.name)
             return classicEraChips + dxNames
         }
+    }
+
+    /// Parses level string (`"14+"` -> `14.5`, `"13"` -> `13.0`) for consistent sorting.
+    static func levelSortOrder(_ level: String) -> Double {
+        let cleaned = level.replacingOccurrences(of: "?", with: "").trimmingCharacters(in: .whitespaces)
+        if cleaned.hasSuffix("+") {
+            return (Double(cleaned.dropLast()) ?? 0) + 0.5
+        }
+        return Double(cleaned) ?? 0
     }
 
     static func expandVersionFilter(_ selected: [String], region: ServerRegion = .cn) -> Set<String> {
@@ -182,44 +241,24 @@ enum MaimaiConstants {
     }
 
     static func jpVersionAsset(for versionCode: String) -> String? {
-        let map: [(String, String)] = [
-            ("100", "maimai"), ("110", "maimai_plus"),
-            ("120", "maimai_green"), ("130", "maimai_green_plus"),
-            ("140", "maimai_orange"), ("150", "maimai_orange_plus"),
-            ("160", "maimai_pink"), ("170", "maimai_pink_plus"),
-            ("180", "maimai_murasaki"), ("185", "maimai_murasaki_plus"),
-            ("190", "maimai_milk"), ("195", "maimai_milk_plus"),
-            ("199", "maimai_finale"),
-            ("200", "maimaidx"), ("205", "maimaidx_plus"),
-            ("210", "maimaidx_splash"), ("215", "maimaidx_splash_plus"),
-            ("220", "maimaidx_universe"), ("225", "maimaidx_universe_plus"),
-            ("230", "maimaidx_festival"), ("235", "maimaidx_festival_plus"),
-            ("240", "maimaidx_buddies"), ("245", "maimaidx_buddies_plus"),
-            ("250", "maimaidx_prism"), ("255", "maimaidx_prism_plus"),
-            ("260", "maimaidx_circle"), ("265", "maimaidx_circle_plus"),
-            ("270", "maimaidx_magical")
-        ]
-        return map.first { versionCode.hasPrefix($0.0) }?.1
+        jpVersionRegistry.first { versionCode.hasPrefix($0.codePrefix) }?.asset
     }
 
     static func jpVersionFallbackTitle(for versionCode: String) -> String {
         let trimmed = versionCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "暂无数据" }
-        if trimmed.hasPrefix("265") {
-            return "maimai でらっくす CiRCLE PLUS"
-        }
-        if trimmed.hasPrefix("270") {
-            return "maimai でらっくす MAGiCAL"
+        if let matched = jpVersionRegistry.first(where: { trimmed.hasPrefix($0.codePrefix) }) {
+            return matched.isClassicEra ? matched.name : "maimai でらっくす \(matched.name)"
         }
         return "Ver. \(trimmed)"
     }
 
     static func cnVersionAsset(for fromName: String) -> String? {
-        cnVersions.first { $0.name == fromName }?.asset
+        cnAssetByName[fromName]
     }
 
     static func jpVersionAssetByName(_ fromName: String) -> String? {
-        jpVersions.first { $0.name == fromName }?.asset
+        jpAssetByName[fromName]
     }
 
     enum ServerRegion: String, Codable, CaseIterable, Identifiable {

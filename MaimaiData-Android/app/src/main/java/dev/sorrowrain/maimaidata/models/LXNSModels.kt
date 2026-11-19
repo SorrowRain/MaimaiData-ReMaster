@@ -312,4 +312,13 @@ data class PlateCheckScope(
             }
         }
     }
+
+    companion object {
+        val fallback = PlateCheckScope(
+            id = "default",
+            title = "真 · maimai ~ PLUS",
+            versionAsset = "maimai",
+            rule = Rule.ExplicitIds(basicToMaster = emptySet(), remaster = emptySet())
+        )
+    }
 }

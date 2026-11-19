@@ -76,7 +76,7 @@ object LXNSCatalogConverter {
     ): CatalogConversionResult {
         val sortedVersions = songResponse.versions.sortedBy { it.version }
         val latestMajor = sortedVersions.lastOrNull()?.version ?: 25_500
-        val latestTitle = sortedVersions.lastOrNull()?.title ?: "舞萌DX 2026"
+        val latestTitle = sortedVersions.lastOrNull()?.title ?: MaimaiConstants.latestCNVersion.name
 
         val aliasByBaseId = HashMap<Int, List<String>>(aliasResponse?.aliases?.size ?: 0)
         aliasResponse?.aliases?.forEach { item ->
@@ -369,7 +369,7 @@ object LXNSCatalogConverter {
                 } else {
                     draft.description.substringBefore("/").ifEmpty { gid }
                 }
-                val asset = MaimaiConstants.cnVersionAsset(versionLabel) ?: "maimaidx_2026"
+                val asset = MaimaiConstants.cnVersionAsset(versionLabel) ?: MaimaiConstants.latestCNVersion.asset
                 CNPlateRuleGroup(
                     id = gid,
                     title = "${draft.prefixes.joinToString(" / ")} · $versionLabel",
@@ -445,11 +445,6 @@ object LXNSCatalogConverter {
         "39", "ようこそジャパリパークへ", "妄想感傷代償連盟", "ヒバナ", "キミとボクのミライ", "Lost Princess"
     )
 
-    private val overseasSdVersions: Set<String> = setOf(
-        "maimai", "maimai PLUS", "GreeN", "GreeN PLUS", "ORANGE", "ORANGE PLUS",
-        "PiNK", "PiNK PLUS", "MURASAKi", "MURASAKi PLUS", "MiLK", "MiLK PLUS", "FiNALE"
-    )
-
     fun buildPlateScopes(
         region: MaimaiConstants.ServerRegion,
         cnPlateGroups: List<CNPlateRuleGroup>,
@@ -509,7 +504,7 @@ object LXNSCatalogConverter {
                 title = "舞 / 覇者 · 旧框全曲",
                 versionAsset = "maimai_finale",
                 rule = PlateCheckScope.Rule.Versions(
-                    includedVersions = overseasSdVersions,
+                    includedVersions = MaimaiConstants.overseasClassicVersions,
                     excludedIds = setOf(853),
                     excludedStandardTitles = setOf("前前前世"),
                     sdRemasterIds = sdRemasterIds,
@@ -574,17 +569,11 @@ object LXNSCatalogConverter {
             }
         }
 
-        val coveredVersions = overseasSdVersions union setOf(
-            "maimaiでらっくす", "maimaiでらっくす PLUS", "Splash", "Splash PLUS",
-            "UNiVERSE", "UNiVERSE PLUS", "FESTiVAL", "FESTiVAL PLUS",
-            "BUDDiES", "BUDDiES PLUS", "PRiSM", "PRiSM PLUS",
-            "CiRCLE", "CiRCLE PLUS", "MAGiCAL"
-        )
         zetarakuVersions?.forEach { entry ->
-            if (entry.version in coveredVersions) return@forEach
+            if (entry.version in MaimaiConstants.knownJPVersionNames) return@forEach
             if (region != MaimaiConstants.ServerRegion.JP && entry.version !in presentVersions) return@forEach
             val kanji = extractTrailingKanji(entry.abbr)
-            val asset = MaimaiConstants.jpVersionAssetByName(entry.version) ?: "maimaidx_magical"
+            val asset = MaimaiConstants.jpVersionAssetByName(entry.version) ?: MaimaiConstants.latestJPVersion.asset
             scopes += PlateCheckScope(
                 id = kanji ?: entry.version,
                 title = kanji?.let { "$it · ${entry.version}" } ?: entry.version,

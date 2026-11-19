@@ -182,11 +182,46 @@ object ZetarakuCatalogConverter {
         else -> category
     }
 
-    /** Post-`CiRCLE` SEGA rule: `B15` covers the active version plus 1 immediately preceding half-version. */
-    fun isB15NewVersion(version: String, region: MaimaiConstants.ServerRegion): Boolean = when (region) {
-        MaimaiConstants.ServerRegion.CN -> false
-        MaimaiConstants.ServerRegion.JP -> version == "MAGiCAL" || version == "CiRCLE PLUS"
-        MaimaiConstants.ServerRegion.INTL -> version == "CiRCLE PLUS" || version == "CiRCLE" || version == "MAGiCAL"
+    /**
+     * Post-`CiRCLE` SEGA rule: `B15` covers the active version plus 1 immediately preceding half-version.
+     * Dynamically advances when newer versions appear in `catalog.versions` or INTL sheets, with static registry fallback.
+     */
+    fun activeB15Versions(
+        region: MaimaiConstants.ServerRegion,
+        orderedVersions: List<String>,
+        presentVersions: Set<String> = emptySet()
+    ): Set<String> = when (region) {
+        MaimaiConstants.ServerRegion.CN -> emptySet()
+        MaimaiConstants.ServerRegion.JP -> orderedVersions.takeLast(2).toSet()
+        MaimaiConstants.ServerRegion.INTL -> {
+            val defaultMaxIdx = MaimaiConstants.jpVersionRegistry.indexOfLast { it.isIntlAvailableByDefault }
+                .coerceAtLeast(0)
+            val presentMaxIdx = orderedVersions.indexOfLast { it in presentVersions }
+                .takeIf { it >= 0 } ?: defaultMaxIdx
+            val latestIdx = maxOf(defaultMaxIdx, presentMaxIdx)
+            if (latestIdx < orderedVersions.size) {
+                val startIdx = (latestIdx - 1).coerceAtLeast(0)
+                orderedVersions.subList(startIdx, latestIdx + 1).toSet()
+            } else {
+                orderedVersions.takeLast(2).toSet()
+            }
+        }
+    }
+
+    fun isB15NewVersion(version: String, region: MaimaiConstants.ServerRegion): Boolean {
+        val ordered = MaimaiConstants.jpVersionRegistry.map { it.name }
+        return version in activeB15Versions(region, ordered)
+    }
+
+    private fun buildOrderedVersionNames(catalog: ZetarakuCatalog): List<String> {
+        val ordered = MaimaiConstants.jpVersionRegistry.mapTo(ArrayList()) { it.name }
+        val seen = ordered.toHashSet()
+        catalog.versions.orEmpty().forEach { entry ->
+            if (entry.version.isNotEmpty() && seen.add(entry.version)) {
+                ordered += entry.version
+            }
+        }
+        return ordered
     }
 
     /** Backfills Utage `comment` ("谱面说明") and `kanji` badges onto CN Utage songs using cached Zetaraku metadata. */
@@ -223,18 +258,6 @@ object ZetarakuCatalogConverter {
             )
         }
     }
-
-    fun convert(
-        catalog: ZetarakuCatalog,
-        region: MaimaiConstants.ServerRegion,
-        cnReference: List<SongData>,
-        dxIdMap: DXDataIdMap? = null
-    ): List<SongData> = convertWithMigrations(
-        catalog = catalog,
-        region = region,
-        cnReference = cnReference,
-        dxIdMap = dxIdMap
-    ).songs
 
     fun convertWithMigrations(
         catalog: ZetarakuCatalog,
@@ -274,10 +297,7 @@ object ZetarakuCatalogConverter {
                 val aliases = cnSong.alias
                 if (!aliases.isNullOrEmpty()) {
                     val songGroupKey = "${cnSong.title}|${cnSong.basicInfo.genre}"
-                    val filtered = aliases.filter { raw ->
-                        val lower = raw.trim().lowercase(Locale.ROOT)
-                        !lower.startsWith("标") && !lower.startsWith("sd") && !lower.startsWith("dx")
-                    }
+                    val filtered = aliases.filterNot { SongData.isChartTypeScopedAlias(it) }
                     if (filtered.isNotEmpty() && !cnShareableAliasesBySong.containsKey(songGroupKey)) {
                         cnShareableAliasesBySong[songGroupKey] = filtered
                     }
@@ -307,10 +327,24 @@ object ZetarakuCatalogConverter {
             }
         }
 
-        val versionRank = HashMap<String, Int>(MaimaiConstants.jpVersions.size)
-        MaimaiConstants.jpVersions.forEachIndexed { idx, item ->
-            versionRank[item.name] = idx
+        val orderedVersions = buildOrderedVersionNames(catalog)
+        val versionRank = HashMap<String, Int>(orderedVersions.size)
+        orderedVersions.forEachIndexed { idx, name ->
+            versionRank[name] = idx
         }
+
+        val presentVersions = HashSet<String>()
+        if (region == MaimaiConstants.ServerRegion.INTL) {
+            for (zSong in catalog.songs) {
+                if (zSong.category == "宴会場") continue
+                for (sh in zSong.sheets) {
+                    if (sh.type != "utage" && isSheetAvailable(sh, region)) {
+                        presentVersions += effectiveVersion(sh, zSong.version, region)
+                    }
+                }
+            }
+        }
+        val b15Versions = activeB15Versions(region, orderedVersions, presentVersions)
 
         val output = ArrayList<SongData>(catalog.songs.size + 256)
         val migratedPairs = ArrayList<MigratedIdPair>()
@@ -461,7 +495,7 @@ object ZetarakuCatalogConverter {
                         bpm = bpmInt,
                         from = fromVersion,
                         genre = mappedGenre,
-                        isNew = isB15NewVersion(fromVersion, region),
+                        isNew = fromVersion in b15Versions,
                         title = zSong.title,
                         version = fromVersion
                     )

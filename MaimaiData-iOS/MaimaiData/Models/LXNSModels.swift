@@ -314,6 +314,13 @@ struct PlateCheckScope: Identifiable, Equatable, Hashable {
     let versionAsset: String
     let rule: Rule
 
+    static let fallback = PlateCheckScope(
+        id: "default",
+        title: "真 · maimai ~ PLUS",
+        versionAsset: "maimai",
+        rule: .explicitIds(basicToMaster: [], remaster: [])
+    )
+
     var supportsRemaster: Bool {
         switch rule {
         case .explicitIds(_, let rem):

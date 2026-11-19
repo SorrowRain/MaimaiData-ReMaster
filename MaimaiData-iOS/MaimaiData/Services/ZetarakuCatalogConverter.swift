@@ -172,15 +172,41 @@ enum ZetarakuCatalogConverter {
     }
 
     /// Post-`CiRCLE` SEGA rule: `B15` covers the active version plus 1 immediately preceding half-version.
-    static func isB15NewVersion(_ version: String, region: MaimaiConstants.ServerRegion) -> Bool {
+    /// Dynamically advances when newer versions appear in `catalog.versions` or INTL sheets, with static registry fallback.
+    static func activeB15Versions(
+        for region: MaimaiConstants.ServerRegion,
+        orderedVersions: [String],
+        presentVersions: Set<String> = []
+    ) -> Set<String> {
         switch region {
         case .cn:
-            return false
+            return []
         case .jp:
-            return version == "MAGiCAL" || version == "CiRCLE PLUS"
+            return Set(orderedVersions.suffix(2))
         case .intl:
-            return version == "CiRCLE PLUS" || version == "CiRCLE" || version == "MAGiCAL"
+            let defaultMaxIdx = MaimaiConstants.jpVersionRegistry.lastIndex(where: \.isIntlAvailableByDefault) ?? 0
+            let presentMaxIdx = orderedVersions.lastIndex(where: { presentVersions.contains($0) }) ?? defaultMaxIdx
+            let latestIdx = max(defaultMaxIdx, presentMaxIdx)
+            guard latestIdx < orderedVersions.count else { return Set(orderedVersions.suffix(2)) }
+            let startIdx = max(0, latestIdx - 1)
+            return Set(orderedVersions[startIdx...latestIdx])
         }
+    }
+
+    static func isB15NewVersion(_ version: String, region: MaimaiConstants.ServerRegion) -> Bool {
+        let ordered = MaimaiConstants.jpVersionRegistry.map(\.name)
+        return activeB15Versions(for: region, orderedVersions: ordered).contains(version)
+    }
+
+    private static func buildOrderedVersionNames(from catalog: ZetarakuCatalog) -> [String] {
+        var ordered = MaimaiConstants.jpVersionRegistry.map(\.name)
+        var seen = Set(ordered)
+        for entry in catalog.versions ?? [] where !entry.version.isEmpty {
+            if seen.insert(entry.version).inserted {
+                ordered.append(entry.version)
+            }
+        }
+        return ordered
     }
 
     /// Backfills Utage `comment` ("谱面说明") and `kanji` badges onto CN Utage songs using cached Zetaraku metadata.
@@ -225,20 +251,6 @@ enum ZetarakuCatalogConverter {
         }
     }
 
-    static func convert(
-        _ catalog: ZetarakuCatalog,
-        region: MaimaiConstants.ServerRegion,
-        cnReference: [SongData],
-        dxIdMap: DXDataIdMap? = nil
-    ) -> [SongData] {
-        convertWithMigrations(
-            catalog,
-            region: region,
-            cnReference: cnReference,
-            dxIdMap: dxIdMap
-        ).songs
-    }
-
     static func convertWithMigrations(
         _ catalog: ZetarakuCatalog,
         region: MaimaiConstants.ServerRegion,
@@ -280,10 +292,7 @@ enum ZetarakuCatalogConverter {
                 }
                 if let aliases = cnSong.alias, !aliases.isEmpty {
                     let songGroupKey = "\(cnSong.title)|\(cnSong.basicInfo.genre)"
-                    let filtered = aliases.filter { raw in
-                        let lower = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                        return !lower.hasPrefix("标") && !lower.hasPrefix("sd") && !lower.hasPrefix("dx")
-                    }
+                    let filtered = aliases.filter { !SongData.isChartTypeScopedAlias($0) }
                     if !filtered.isEmpty, cnShareableAliasesBySong[songGroupKey] == nil {
                         cnShareableAliasesBySong[songGroupKey] = filtered
                     }
@@ -309,10 +318,26 @@ enum ZetarakuCatalogConverter {
             }
         }
 
+        let orderedVersions = buildOrderedVersionNames(from: catalog)
         var versionRank: [String: Int] = [:]
-        for (idx, item) in MaimaiConstants.jpVersions.enumerated() {
-            versionRank[item.name] = idx
+        versionRank.reserveCapacity(orderedVersions.count)
+        for (idx, name) in orderedVersions.enumerated() {
+            versionRank[name] = idx
         }
+
+        var presentVersions = Set<String>()
+        if region == .intl {
+            for zSong in catalog.songs where zSong.category != "宴会場" {
+                for sh in zSong.sheets where sh.type != "utage" && isSheetAvailable(sh, in: region) {
+                    presentVersions.insert(effectiveVersion(of: sh, songVersion: zSong.version, region: region))
+                }
+            }
+        }
+        let b15Versions = activeB15Versions(
+            for: region,
+            orderedVersions: orderedVersions,
+            presentVersions: presentVersions
+        )
 
         var output: [SongData] = []
         var migratedPairs: [(legacyId: String, resolvedId: String)] = []
@@ -469,7 +494,7 @@ enum ZetarakuCatalogConverter {
                         bpm: bpmInt,
                         from: fromVersion,
                         genre: mappedGenre,
-                        isNew: isB15NewVersion(fromVersion, region: region),
+                        isNew: b15Versions.contains(fromVersion),
                         title: zSong.title,
                         version: fromVersion
                     )

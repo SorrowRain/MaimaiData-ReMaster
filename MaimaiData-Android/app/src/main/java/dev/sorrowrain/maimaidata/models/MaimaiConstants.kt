@@ -29,81 +29,128 @@ object MaimaiConstants {
 
     data class VersionAsset(val name: String, val asset: String)
 
-    val cnVersions: List<VersionAsset> = listOf(
-        VersionAsset("maimai", "maimai"),
-        VersionAsset("maimai PLUS", "maimai_plus"),
-        VersionAsset("maimai GreeN", "maimai_green"),
-        VersionAsset("maimai GreeN PLUS", "maimai_green_plus"),
-        VersionAsset("maimai ORANGE", "maimai_orange"),
-        VersionAsset("maimai ORANGE PLUS", "maimai_orange_plus"),
-        VersionAsset("maimai PiNK", "maimai_pink"),
-        VersionAsset("maimai PiNK PLUS", "maimai_pink_plus"),
-        VersionAsset("maimai MURASAKi", "maimai_murasaki"),
-        VersionAsset("maimai MURASAKi PLUS", "maimai_murasaki_plus"),
-        VersionAsset("maimai MiLK", "maimai_milk"),
-        VersionAsset("maimai MiLK PLUS", "maimai_milk_plus"),
-        VersionAsset("maimai FiNALE", "maimai_finale"),
-        VersionAsset("舞萌DX", "maimaidx_cn"),
-        VersionAsset("舞萌DX 2021", "maimaidx_2021"),
-        VersionAsset("舞萌DX 2022", "maimaidx_2022"),
-        VersionAsset("舞萌DX 2023", "maimaidx_2023"),
-        VersionAsset("舞萌DX 2024", "maimaidx_2024"),
-        VersionAsset("舞萌DX 2025", "maimaidx_2025"),
-        VersionAsset("舞萌DX 2026", "maimaidx_2026")
+    data class CNVersionSpec(
+        val name: String,
+        val asset: String,
+        val isClassicEra: Boolean
     )
 
-    val jpVersions: List<VersionAsset> = listOf(
-        VersionAsset("maimai", "maimai"),
-        VersionAsset("maimai PLUS", "maimai_plus"),
-        VersionAsset("GreeN", "maimai_green"),
-        VersionAsset("GreeN PLUS", "maimai_green_plus"),
-        VersionAsset("ORANGE", "maimai_orange"),
-        VersionAsset("ORANGE PLUS", "maimai_orange_plus"),
-        VersionAsset("PiNK", "maimai_pink"),
-        VersionAsset("PiNK PLUS", "maimai_pink_plus"),
-        VersionAsset("MURASAKi", "maimai_murasaki"),
-        VersionAsset("MURASAKi PLUS", "maimai_murasaki_plus"),
-        VersionAsset("MiLK", "maimai_milk"),
-        VersionAsset("MiLK PLUS", "maimai_milk_plus"),
-        VersionAsset("FiNALE", "maimai_finale"),
-        VersionAsset("maimaiでらっくす", "maimaidx"),
-        VersionAsset("maimaiでらっくす PLUS", "maimaidx_plus"),
-        VersionAsset("Splash", "maimaidx_splash"),
-        VersionAsset("Splash PLUS", "maimaidx_splash_plus"),
-        VersionAsset("UNiVERSE", "maimaidx_universe"),
-        VersionAsset("UNiVERSE PLUS", "maimaidx_universe_plus"),
-        VersionAsset("FESTiVAL", "maimaidx_festival"),
-        VersionAsset("FESTiVAL PLUS", "maimaidx_festival_plus"),
-        VersionAsset("BUDDiES", "maimaidx_buddies"),
-        VersionAsset("BUDDiES PLUS", "maimaidx_buddies_plus"),
-        VersionAsset("PRiSM", "maimaidx_prism"),
-        VersionAsset("PRiSM PLUS", "maimaidx_prism_plus"),
-        VersionAsset("CiRCLE", "maimaidx_circle"),
-        VersionAsset("CiRCLE PLUS", "maimaidx_circle_plus"),
-        VersionAsset("MAGiCAL", "maimaidx_magical")
+    data class JPVersionSpec(
+        val name: String,
+        val asset: String,
+        val codePrefix: String,
+        val isClassicEra: Boolean,
+        val isIntlAvailableByDefault: Boolean = true
     )
+
+    /**
+     * Single source of truth for CN versions (ordered oldest -> newest).
+     * When a new CN major version ships, append ONE entry here.
+     */
+    val cnVersionRegistry: List<CNVersionSpec> = listOf(
+        CNVersionSpec("maimai", "maimai", isClassicEra = true),
+        CNVersionSpec("maimai PLUS", "maimai_plus", isClassicEra = true),
+        CNVersionSpec("maimai GreeN", "maimai_green", isClassicEra = true),
+        CNVersionSpec("maimai GreeN PLUS", "maimai_green_plus", isClassicEra = true),
+        CNVersionSpec("maimai ORANGE", "maimai_orange", isClassicEra = true),
+        CNVersionSpec("maimai ORANGE PLUS", "maimai_orange_plus", isClassicEra = true),
+        CNVersionSpec("maimai PiNK", "maimai_pink", isClassicEra = true),
+        CNVersionSpec("maimai PiNK PLUS", "maimai_pink_plus", isClassicEra = true),
+        CNVersionSpec("maimai MURASAKi", "maimai_murasaki", isClassicEra = true),
+        CNVersionSpec("maimai MURASAKi PLUS", "maimai_murasaki_plus", isClassicEra = true),
+        CNVersionSpec("maimai MiLK", "maimai_milk", isClassicEra = true),
+        CNVersionSpec("maimai MiLK PLUS", "maimai_milk_plus", isClassicEra = true),
+        CNVersionSpec("maimai FiNALE", "maimai_finale", isClassicEra = true),
+        CNVersionSpec("舞萌DX", "maimaidx_cn", isClassicEra = false),
+        CNVersionSpec("舞萌DX 2021", "maimaidx_2021", isClassicEra = false),
+        CNVersionSpec("舞萌DX 2022", "maimaidx_2022", isClassicEra = false),
+        CNVersionSpec("舞萌DX 2023", "maimaidx_2023", isClassicEra = false),
+        CNVersionSpec("舞萌DX 2024", "maimaidx_2024", isClassicEra = false),
+        CNVersionSpec("舞萌DX 2025", "maimaidx_2025", isClassicEra = false),
+        CNVersionSpec("舞萌DX 2026", "maimaidx_2026", isClassicEra = false)
+    )
+
+    /**
+     * Single source of truth for SEGA JP/INTL arcade versions matching Zetaraku `data.json`.
+     * When a new arcade version ships, append ONE entry here (and add its drawable entry below).
+     */
+    val jpVersionRegistry: List<JPVersionSpec> = listOf(
+        JPVersionSpec("maimai", "maimai", "100", isClassicEra = true),
+        JPVersionSpec("maimai PLUS", "maimai_plus", "110", isClassicEra = true),
+        JPVersionSpec("GreeN", "maimai_green", "120", isClassicEra = true),
+        JPVersionSpec("GreeN PLUS", "maimai_green_plus", "130", isClassicEra = true),
+        JPVersionSpec("ORANGE", "maimai_orange", "140", isClassicEra = true),
+        JPVersionSpec("ORANGE PLUS", "maimai_orange_plus", "150", isClassicEra = true),
+        JPVersionSpec("PiNK", "maimai_pink", "160", isClassicEra = true),
+        JPVersionSpec("PiNK PLUS", "maimai_pink_plus", "170", isClassicEra = true),
+        JPVersionSpec("MURASAKi", "maimai_murasaki", "180", isClassicEra = true),
+        JPVersionSpec("MURASAKi PLUS", "maimai_murasaki_plus", "185", isClassicEra = true),
+        JPVersionSpec("MiLK", "maimai_milk", "190", isClassicEra = true),
+        JPVersionSpec("MiLK PLUS", "maimai_milk_plus", "195", isClassicEra = true),
+        JPVersionSpec("FiNALE", "maimai_finale", "199", isClassicEra = true),
+        JPVersionSpec("maimaiでらっくす", "maimaidx", "200", isClassicEra = false),
+        JPVersionSpec("maimaiでらっくす PLUS", "maimaidx_plus", "205", isClassicEra = false),
+        JPVersionSpec("Splash", "maimaidx_splash", "210", isClassicEra = false),
+        JPVersionSpec("Splash PLUS", "maimaidx_splash_plus", "215", isClassicEra = false),
+        JPVersionSpec("UNiVERSE", "maimaidx_universe", "220", isClassicEra = false),
+        JPVersionSpec("UNiVERSE PLUS", "maimaidx_universe_plus", "225", isClassicEra = false),
+        JPVersionSpec("FESTiVAL", "maimaidx_festival", "230", isClassicEra = false),
+        JPVersionSpec("FESTiVAL PLUS", "maimaidx_festival_plus", "235", isClassicEra = false),
+        JPVersionSpec("BUDDiES", "maimaidx_buddies", "240", isClassicEra = false),
+        JPVersionSpec("BUDDiES PLUS", "maimaidx_buddies_plus", "245", isClassicEra = false),
+        JPVersionSpec("PRiSM", "maimaidx_prism", "250", isClassicEra = false),
+        JPVersionSpec("PRiSM PLUS", "maimaidx_prism_plus", "255", isClassicEra = false),
+        JPVersionSpec("CiRCLE", "maimaidx_circle", "260", isClassicEra = false),
+        JPVersionSpec("CiRCLE PLUS", "maimaidx_circle_plus", "265", isClassicEra = false),
+        JPVersionSpec("MAGiCAL", "maimaidx_magical", "270", isClassicEra = false, isIntlAvailableByDefault = false)
+    )
+
+    val latestCNVersion: CNVersionSpec = cnVersionRegistry.last()
+    val latestJPVersion: JPVersionSpec = jpVersionRegistry.last()
+
+    val cnVersions: List<VersionAsset> = cnVersionRegistry.map { VersionAsset(it.name, it.asset) }
+    val jpVersions: List<VersionAsset> = jpVersionRegistry.map { VersionAsset(it.name, it.asset) }
+    val overseasClassicVersions: Set<String> = jpVersionRegistry.filter { it.isClassicEra }.mapTo(LinkedHashSet()) { it.name }
+    val knownJPVersionNames: Set<String> = jpVersionRegistry.mapTo(LinkedHashSet()) { it.name }
+
+    private val cnAssetByName: Map<String, String> = cnVersionRegistry.associate { it.name to it.asset }
+    private val jpAssetByName: Map<String, String> = jpVersionRegistry.associate { it.name to it.asset }
 
     private val classicEraChips = listOf(
         "maimai", "GreeN", "ORANGE", "PiNK", "MURASAKi", "MiLK", "FiNALE"
     )
 
-    val searchVersions: List<String> = classicEraChips + listOf(
-        "舞萌DX", "舞萌DX 2021", "舞萌DX 2022", "舞萌DX 2023",
-        "舞萌DX 2024", "舞萌DX 2025", "舞萌DX 2026"
-    )
+    val searchVersions: List<String> = classicEraChips + cnVersionRegistry.filterNot { it.isClassicEra }.map { it.name }
 
     fun checklistVersions(region: ServerRegion): List<VersionAsset> = when (region) {
         ServerRegion.CN -> cnVersions
-        ServerRegion.INTL -> jpVersions.filter { it.name != "MAGiCAL" }
+        ServerRegion.INTL -> jpVersionRegistry.filter { it.isIntlAvailableByDefault }.map { VersionAsset(it.name, it.asset) }
         ServerRegion.JP -> jpVersions
     }
 
     fun searchVersionChips(region: ServerRegion): List<String> = when (region) {
         ServerRegion.CN -> searchVersions
-        ServerRegion.INTL, ServerRegion.JP -> {
-            val dxNames = checklistVersions(region).drop(13).map { it.name }
+        ServerRegion.INTL -> {
+            val dxNames = jpVersionRegistry
+                .filter { !it.isClassicEra && it.isIntlAvailableByDefault }
+                .map { it.name }
             classicEraChips + dxNames
         }
+        ServerRegion.JP -> {
+            val dxNames = jpVersionRegistry
+                .filterNot { it.isClassicEra }
+                .map { it.name }
+            classicEraChips + dxNames
+        }
+    }
+
+    /** Parses level string (`"14+"` -> `14.5`, `"13"` -> `13.0`) for consistent sorting. */
+    fun levelSortOrder(level: String): Double {
+        val cleaned = level.replace("?", "").trim()
+        if (cleaned.endsWith("+")) {
+            return (cleaned.dropLast(1).toDoubleOrNull() ?: 0.0) + 0.5
+        }
+        return cleaned.toDoubleOrNull() ?: 0.0
     }
 
     fun expandVersionFilter(selected: Collection<String>, region: ServerRegion = ServerRegion.CN): Set<String> {
@@ -178,40 +225,22 @@ object MaimaiConstants {
     fun shortGenreDisplayName(genre: String): String =
         if (genre == "niconico & VOCALOID") "VOCALOID" else genre
 
-    fun jpVersionAsset(versionCode: String): String? {
-        val map = listOf(
-            "100" to "maimai", "110" to "maimai_plus",
-            "120" to "maimai_green", "130" to "maimai_green_plus",
-            "140" to "maimai_orange", "150" to "maimai_orange_plus",
-            "160" to "maimai_pink", "170" to "maimai_pink_plus",
-            "180" to "maimai_murasaki", "185" to "maimai_murasaki_plus",
-            "190" to "maimai_milk", "195" to "maimai_milk_plus",
-            "199" to "maimai_finale",
-            "200" to "maimaidx", "205" to "maimaidx_plus",
-            "210" to "maimaidx_splash", "215" to "maimaidx_splash_plus",
-            "220" to "maimaidx_universe", "225" to "maimaidx_universe_plus",
-            "230" to "maimaidx_festival", "235" to "maimaidx_festival_plus",
-            "240" to "maimaidx_buddies", "245" to "maimaidx_buddies_plus",
-            "250" to "maimaidx_prism", "255" to "maimaidx_prism_plus",
-            "260" to "maimaidx_circle", "265" to "maimaidx_circle_plus",
-            "270" to "maimaidx_magical"
-        )
-        return map.firstOrNull { versionCode.startsWith(it.first) }?.second
-    }
+    fun jpVersionAsset(versionCode: String): String? =
+        jpVersionRegistry.firstOrNull { versionCode.startsWith(it.codePrefix) }?.asset
 
     fun jpVersionFallbackTitle(versionCode: String): String {
         val trimmed = versionCode.trim()
         if (trimmed.isEmpty()) return "暂无数据"
-        if (trimmed.startsWith("265")) return "maimai でらっくす CiRCLE PLUS"
-        if (trimmed.startsWith("270")) return "maimai でらっくす MAGiCAL"
+        val matched = jpVersionRegistry.firstOrNull { trimmed.startsWith(it.codePrefix) }
+        if (matched != null) {
+            return if (matched.isClassicEra) matched.name else "maimai でらっくす ${matched.name}"
+        }
         return "Ver. $trimmed"
     }
 
-    fun cnVersionAsset(fromName: String): String? =
-        cnVersions.firstOrNull { it.name == fromName }?.asset
+    fun cnVersionAsset(fromName: String): String? = cnAssetByName[fromName]
 
-    fun jpVersionAssetByName(fromName: String): String? =
-        jpVersions.firstOrNull { it.name == fromName }?.asset
+    fun jpVersionAssetByName(fromName: String): String? = jpAssetByName[fromName]
 
     @Serializable
     enum class ServerRegion(val rawValue: String) {

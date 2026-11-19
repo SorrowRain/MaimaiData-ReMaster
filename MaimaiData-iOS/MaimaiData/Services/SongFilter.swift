@@ -2,6 +2,19 @@ import Foundation
 
 /// Pure filtering/sorting logic for the song list (no store state), so it can be unit tested.
 enum SongFilter {
+    static func prunedCriteria(
+        _ criteria: SongFilterCriteria,
+        for region: MaimaiConstants.ServerRegion
+    ) -> SongFilterCriteria {
+        guard !criteria.selectedVersions.isEmpty else { return criteria }
+        let allowed = Set(MaimaiConstants.searchVersionChips(for: region))
+        let pruned = criteria.selectedVersions.intersection(allowed)
+        guard pruned != criteria.selectedVersions else { return criteria }
+        var copy = criteria
+        copy.selectedVersions = pruned
+        return copy
+    }
+
     static func apply(
         _ criteria: SongFilterCriteria,
         to songs: [SongData],

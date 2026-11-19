@@ -154,7 +154,7 @@ final class DataStore {
         let sourceSongs = cnSongs.isEmpty ? songs : cnSongs
         let newSongs = sourceSongs.filter { !$0.isUtage && $0.isDisabled != true && $0.basicInfo.isNew && $0.numericId > 0 }
         if !newSongs.isEmpty {
-            let currentTitle = newSongs.first?.basicInfo.from ?? "舞萌DX 2026"
+            let currentTitle = newSongs.first?.basicInfo.from ?? MaimaiConstants.latestCNVersion.name
             let alreadyCovered = list.contains { $0.title.contains(currentTitle) }
             if !alreadyCovered {
                 let ids = newSongs.map(\.numericId)
@@ -162,7 +162,7 @@ final class DataStore {
                     CNPlateRuleGroup(
                         id: "current_\(currentTitle)",
                         title: currentTitle,
-                        versionAsset: MaimaiConstants.cnVersionAsset(for: currentTitle) ?? "maimaidx_2026",
+                        versionAsset: MaimaiConstants.cnVersionAsset(for: currentTitle) ?? MaimaiConstants.latestCNVersion.asset,
                         badges: [],
                         basicToMasterSongIds: ids,
                         remasterSongIds: []

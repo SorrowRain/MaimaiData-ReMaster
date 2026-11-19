@@ -171,6 +171,10 @@ struct SongData: Codable, Identifiable, Hashable {
         return result
     }
 
+    static func isChartTypeScopedAlias(_ raw: String) -> Bool {
+        isStandardOnlyAlias(raw) || isDXOnlyAlias(raw)
+    }
+
     private static func isStandardOnlyAlias(_ raw: String) -> Bool {
         let lower = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return lower.hasPrefix("标") || lower.hasPrefix("sd")
@@ -214,6 +218,59 @@ struct ResolvedChart: Identifiable, Hashable {
 
     var totalWeightedScore: Int {
         (tap + touch) + hold * 2 + slide * 3 + breakCount * 5
+    }
+
+    struct ToleranceMetrics {
+        let tapGreat: Double
+        let tapGood: Double
+        let tapMiss: Double
+        let holdGreat: Double
+        let holdGood: Double
+        let holdMiss: Double
+        let slideGreat: Double
+        let slideGood: Double
+        let slideMiss: Double
+        let breakPerfect50: Double?
+        let breakPerfect100: Double?
+        let breakGreat4x: Double?
+        let breakGreat3x: Double?
+        let breakGreat25x: Double?
+        let breakGood: Double?
+        let breakMiss: Double?
+    }
+
+    var toleranceMetrics: ToleranceMetrics? {
+        guard totalWeightedScore > 0 else { return nil }
+        let total = Double(totalWeightedScore)
+        let brk = Double(breakCount)
+        let hasBreak = breakCount > 0
+        return ToleranceMetrics(
+            tapGreat: 1.0 / total * 0.2,
+            tapGood: 1.0 / total * 0.5,
+            tapMiss: 1.0 / total,
+            holdGreat: 2.0 / total * 0.2,
+            holdGood: 2.0 / total * 0.5,
+            holdMiss: 2.0 / total,
+            slideGreat: 3.0 / total * 0.2,
+            slideGood: 3.0 / total * 0.5,
+            slideMiss: 3.0 / total,
+            breakPerfect50: hasBreak ? (0.01 / brk * 0.25) : nil,
+            breakPerfect100: hasBreak ? (0.01 / brk * 0.5) : nil,
+            breakGreat4x: hasBreak ? (5.0 / total * 0.2 + (0.01 / brk) * 0.6) : nil,
+            breakGreat3x: hasBreak ? (5.0 / total * 0.4 + (0.01 / brk) * 0.6) : nil,
+            breakGreat25x: hasBreak ? (5.0 / total * 0.5 + (0.01 / brk) * 0.6) : nil,
+            breakGood: hasBreak ? (5.0 / total * 0.6 + (0.01 / brk) * 0.7) : nil,
+            breakMiss: hasBreak ? (5.0 / total + 0.01 / brk) : nil
+        )
+    }
+
+    /// FiNALE old-cabinet theoretical max (all 2600 Break), floored to 2 decimal places (`nil` for DX/Utage).
+    func finaleTheoreticalMax(isDX: Bool) -> Double? {
+        guard !isDX, difficulty != .utage, difficulty != .utagePlayer2 else { return nil }
+        let num = Double(tap * 500 + hold * 1000 + slide * 1500 + breakCount * 2600)
+        let den = Double(tap * 500 + hold * 1000 + slide * 1500 + breakCount * 2500)
+        guard den > 0 else { return nil }
+        return floor(num / den * 10000) / 100
     }
 }
 

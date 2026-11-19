@@ -375,13 +375,13 @@ class DataStore(context: Context) {
             !it.isUtage && it.isDisabled != true && it.basicInfo.isNew && it.numericId > 0
         }
         if (newSongs.isNotEmpty()) {
-            val currentTitle = newSongs.first().basicInfo.from.ifEmpty { "舞萌DX 2026" }
+            val currentTitle = newSongs.first().basicInfo.from.ifEmpty { MaimaiConstants.latestCNVersion.name }
             val alreadyCovered = list.any { it.title.contains(currentTitle) }
             if (!alreadyCovered) {
                 list += CNPlateRuleGroup(
                     id = "current_$currentTitle",
                     title = currentTitle,
-                    versionAsset = MaimaiConstants.cnVersionAsset(currentTitle) ?: "maimaidx_2026",
+                    versionAsset = MaimaiConstants.cnVersionAsset(currentTitle) ?: MaimaiConstants.latestCNVersion.asset,
                     badges = emptyList(),
                     basicToMasterSongIds = newSongs.map { it.numericId },
                     remasterSongIds = emptyList()

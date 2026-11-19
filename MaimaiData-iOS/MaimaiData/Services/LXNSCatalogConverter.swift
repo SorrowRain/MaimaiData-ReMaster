@@ -43,7 +43,7 @@ enum LXNSCatalogConverter {
     ) -> (songs: [SongData], latestMajorVersion: Int, latestVersionTitle: String) {
         let sortedVersions = songResponse.versions.sorted { $0.version < $1.version }
         let latestMajor = sortedVersions.last?.version ?? 25500
-        let latestTitle = sortedVersions.last?.title ?? "舞萌DX 2026"
+        let latestTitle = sortedVersions.last?.title ?? MaimaiConstants.latestCNVersion.name
 
         var aliasByBaseId: [Int: [String]] = [:]
         if let aliasResponse {
@@ -336,7 +336,7 @@ enum LXNSCatalogConverter {
                 }
                 return draft.description.components(separatedBy: "/").first ?? gid
             }()
-            let asset = MaimaiConstants.cnVersionAsset(for: versionLabel) ?? "maimaidx_2026"
+            let asset = MaimaiConstants.cnVersionAsset(for: versionLabel) ?? MaimaiConstants.latestCNVersion.asset
             return CNPlateRuleGroup(
                 id: gid,
                 title: "\(draft.prefixes.joined(separator: " / ")) · \(versionLabel)",
@@ -416,11 +416,6 @@ enum LXNSCatalogConverter {
         "39", "ようこそジャパリパークへ", "妄想感傷代償連盟", "ヒバナ", "キミとボクのミライ", "Lost Princess"
     ]
 
-    private static let overseasSdVersions: Set<String> = [
-        "maimai", "maimai PLUS", "GreeN", "GreeN PLUS", "ORANGE", "ORANGE PLUS",
-        "PiNK", "PiNK PLUS", "MURASAKi", "MURASAKi PLUS", "MiLK", "MiLK PLUS", "FiNALE"
-    ]
-
     static func buildPlateScopes(
         for region: MaimaiConstants.ServerRegion,
         cnPlateGroups: [CNPlateRuleGroup],
@@ -481,7 +476,7 @@ enum LXNSCatalogConverter {
                     title: "舞 / 覇者 · 旧框全曲",
                     versionAsset: "maimai_finale",
                     rule: .versions(
-                        includedVersions: overseasSdVersions,
+                        includedVersions: MaimaiConstants.overseasClassicVersions,
                         excludedIds: [853],
                         excludedStandardTitles: ["前前前世"],
                         sdRemasterIds: sdRemasterIds,
@@ -551,18 +546,12 @@ enum LXNSCatalogConverter {
                 }
             }
 
-            // Future-proof: automatically append any newly released versions beyond MAGiCAL from Zetaraku `versions`.
-            let coveredVersions: Set<String> = overseasSdVersions.union([
-                "maimaiでらっくす", "maimaiでらっくす PLUS", "Splash", "Splash PLUS",
-                "UNiVERSE", "UNiVERSE PLUS", "FESTiVAL", "FESTiVAL PLUS",
-                "BUDDiES", "BUDDiES PLUS", "PRiSM", "PRiSM PLUS",
-                "CiRCLE", "CiRCLE PLUS", "MAGiCAL"
-            ])
+            // Future-proof: automatically append any newly released versions beyond the static registry from Zetaraku `versions`.
             if let zetarakuVersions {
-                for entry in zetarakuVersions where !coveredVersions.contains(entry.version) {
+                for entry in zetarakuVersions where !MaimaiConstants.knownJPVersionNames.contains(entry.version) {
                     guard region == .jp || presentVersions.contains(entry.version) else { continue }
                     let kanji = extractTrailingKanji(from: entry.abbr)
-                    let asset = MaimaiConstants.jpVersionAssetByName(entry.version) ?? "maimaidx_magical"
+                    let asset = MaimaiConstants.jpVersionAssetByName(entry.version) ?? MaimaiConstants.latestJPVersion.asset
                     scopes.append(
                         PlateCheckScope(
                             id: kanji ?? entry.version,

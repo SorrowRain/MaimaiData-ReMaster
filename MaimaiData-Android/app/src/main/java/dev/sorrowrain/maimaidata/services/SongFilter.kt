@@ -12,6 +12,20 @@ import kotlin.math.roundToInt
  * Pure stateless filtering and sorting logic for the song catalog (1:1 parity with iOS `SongFilter.swift`).
  */
 object SongFilter {
+    fun prunedCriteria(
+        criteria: SongFilterCriteria,
+        region: MaimaiConstants.ServerRegion
+    ): SongFilterCriteria {
+        if (criteria.selectedVersions.isEmpty()) return criteria
+        val allowed = MaimaiConstants.searchVersionChips(region).toSet()
+        val pruned = criteria.selectedVersions.intersect(allowed)
+        return if (pruned == criteria.selectedVersions) {
+            criteria
+        } else {
+            criteria.copy(selectedVersions = pruned)
+        }
+    }
+
     fun apply(
         songs: List<SongData>,
         criteria: SongFilterCriteria,

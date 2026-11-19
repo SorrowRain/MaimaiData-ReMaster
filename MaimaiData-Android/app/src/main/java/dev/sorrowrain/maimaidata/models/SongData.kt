@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.floor
 
 @Serializable
 data class SongData(
@@ -175,6 +176,9 @@ data class SongData(
             return result
         }
 
+        fun isChartTypeScopedAlias(raw: String): Boolean =
+            isStandardOnlyAlias(raw) || isDXOnlyAlias(raw)
+
         private fun isStandardOnlyAlias(raw: String): Boolean {
             val lower = raw.trim().lowercase(Locale.ROOT)
             return lower.startsWith("标") || lower.startsWith("sd")
@@ -217,4 +221,59 @@ data class ResolvedChart(
 ) {
     val totalWeightedScore: Int
         get() = (tap + touch) + hold * 2 + slide * 3 + breakCount * 5
+
+    data class ToleranceMetrics(
+        val tapGreat: Double,
+        val tapGood: Double,
+        val tapMiss: Double,
+        val holdGreat: Double,
+        val holdGood: Double,
+        val holdMiss: Double,
+        val slideGreat: Double,
+        val slideGood: Double,
+        val slideMiss: Double,
+        val breakPerfect50: Double?,
+        val breakPerfect100: Double?,
+        val breakGreat4x: Double?,
+        val breakGreat3x: Double?,
+        val breakGreat25x: Double?,
+        val breakGood: Double?,
+        val breakMiss: Double?
+    )
+
+    val toleranceMetrics: ToleranceMetrics?
+        get() {
+            if (totalWeightedScore <= 0) return null
+            val total = totalWeightedScore.toDouble()
+            val brk = breakCount.toDouble()
+            val hasBreak = breakCount > 0
+            return ToleranceMetrics(
+                tapGreat = 1.0 / total * 0.2,
+                tapGood = 1.0 / total * 0.5,
+                tapMiss = 1.0 / total,
+                holdGreat = 2.0 / total * 0.2,
+                holdGood = 2.0 / total * 0.5,
+                holdMiss = 2.0 / total,
+                slideGreat = 3.0 / total * 0.2,
+                slideGood = 3.0 / total * 0.5,
+                slideMiss = 3.0 / total,
+                breakPerfect50 = if (hasBreak) 0.01 / brk * 0.25 else null,
+                breakPerfect100 = if (hasBreak) 0.01 / brk * 0.5 else null,
+                breakGreat4x = if (hasBreak) 5.0 / total * 0.2 + (0.01 / brk) * 0.6 else null,
+                breakGreat3x = if (hasBreak) 5.0 / total * 0.4 + (0.01 / brk) * 0.6 else null,
+                breakGreat25x = if (hasBreak) 5.0 / total * 0.5 + (0.01 / brk) * 0.6 else null,
+                breakGood = if (hasBreak) 5.0 / total * 0.6 + (0.01 / brk) * 0.7 else null,
+                breakMiss = if (hasBreak) 5.0 / total + 0.01 / brk else null
+            )
+        }
+
+    fun finaleTheoreticalMax(isDX: Boolean): Double? {
+        if (isDX || difficulty == DifficultyType.UTAGE || difficulty == DifficultyType.UTAGE_PLAYER_2) {
+            return null
+        }
+        val num = (tap * 500 + hold * 1000 + slide * 1500 + breakCount * 2600).toDouble()
+        val den = (tap * 500 + hold * 1000 + slide * 1500 + breakCount * 2500).toDouble()
+        if (den <= 0.0) return null
+        return floor(num / den * 10_000.0) / 100.0
+    }
 }
