@@ -62,9 +62,9 @@ class RatingCalculatorTests {
     fun testReverseCalculateMaxBoundaryAndUnreachableTarget() {
         val maxRows = RatingCalculator.reverseCalculate(targetTotalRating = 16_850)
         assertFalse(maxRows.isEmpty())
-        val ssspRow = maxRows.firstOrNull { it.achi == 1_005_000 }
+        val ssspRow = maxRows.firstOrNull { it.achievementText == "100.5000%" }
         assertNotNull(ssspRow)
-        assertEquals(150, ssspRow!!.minLv)
+        assertEquals(15.0, ssspRow!!.level, 1e-6)
         assertEquals(337, ssspRow.singleRating)
         assertEquals(16_850, ssspRow.totalRating)
 

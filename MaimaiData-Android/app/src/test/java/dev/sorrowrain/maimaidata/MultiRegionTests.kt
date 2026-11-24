@@ -338,6 +338,7 @@ class MultiRegionTests {
         assertEquals(true, intlByTitle["Circle Plus Song"]?.basicInfo?.isNew)
         assertEquals(true, intlByTitle["Magical Song"]?.basicInfo?.isNew)
 
+        // JP has MAGiCAL PLUS active -> B15 window advances to the latest 2 (MAGiCAL + MAGiCAL PLUS), NOT CiRCLE PLUS
         val jpSongs = ZetarakuCatalogConverter.convertWithMigrations(
             catalog = catalog,
             region = MaimaiConstants.ServerRegion.JP,
@@ -345,7 +346,8 @@ class MultiRegionTests {
             dxIdMap = null
         ).songs
         val jpByTitle = jpSongs.associateBy { it.title }
-        assertEquals(false, jpByTitle["Magical Song"]?.basicInfo?.isNew)
+        assertEquals(false, jpByTitle["Circle Plus Song"]?.basicInfo?.isNew)
+        assertEquals(true, jpByTitle["Magical Song"]?.basicInfo?.isNew)
         assertEquals(true, jpByTitle["Magical Plus Song"]?.basicInfo?.isNew)
     }
 

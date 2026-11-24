@@ -44,8 +44,8 @@ final class RatingCalculatorTests: XCTestCase {
         // 15.0 @ 100.5% = 337 -> 337 * 50 = 16850 exact boundary
         let maxRows = RatingCalculator.reverseCalculate(targetTotalRating: 16850)
         XCTAssertFalse(maxRows.isEmpty)
-        let ssspRow = maxRows.first { $0.achi == 1_005_000 }
-        XCTAssertEqual(ssspRow?.minLv, 150)
+        let ssspRow = maxRows.first { $0.achievementText == "100.5000%" }
+        XCTAssertEqual(ssspRow?.level, 15.0)
         XCTAssertEqual(ssspRow?.singleRating, 337)
         XCTAssertEqual(ssspRow?.totalRating, 16850)
 

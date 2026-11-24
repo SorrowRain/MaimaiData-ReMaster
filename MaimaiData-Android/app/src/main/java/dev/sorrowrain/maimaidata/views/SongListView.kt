@@ -80,11 +80,11 @@ import dev.sorrowrain.maimaidata.components.SongCoverBadgeView
 import dev.sorrowrain.maimaidata.components.SyncStatusBanner
 import dev.sorrowrain.maimaidata.models.MaimaiConstants
 import dev.sorrowrain.maimaidata.models.SongData
-import dev.sorrowrain.maimaidata.models.SongFilter
 import dev.sorrowrain.maimaidata.models.SongFilterCriteria
 import dev.sorrowrain.maimaidata.models.SongSortOption
 import dev.sorrowrain.maimaidata.services.DataSyncNotice
 import dev.sorrowrain.maimaidata.services.LocalDataStore
+import dev.sorrowrain.maimaidata.services.SongFilter
 import dev.sorrowrain.maimaidata.theme.AppPageBackground
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import dev.sorrowrain.maimaidata.theme.LocalIsDarkTheme

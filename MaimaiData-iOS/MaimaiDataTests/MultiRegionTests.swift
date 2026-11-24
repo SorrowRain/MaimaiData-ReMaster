@@ -320,7 +320,7 @@ final class MultiRegionTests: XCTestCase {
         XCTAssertEqual(intlByTitle["Circle Plus Song"]?.basicInfo.isNew, true)
         XCTAssertEqual(intlByTitle["Magical Song"]?.basicInfo.isNew, true)
 
-        // JP has MAGiCAL PLUS active -> B15 window advances to the latest 1 (MAGiCAL PLUS)
+        // JP has MAGiCAL PLUS active -> B15 window advances to the latest 2 (MAGiCAL + MAGiCAL PLUS), NOT CiRCLE PLUS
         let jpSongs = ZetarakuCatalogConverter.convertWithMigrations(
             catalog,
             region: .jp,
@@ -328,7 +328,8 @@ final class MultiRegionTests: XCTestCase {
             dxIdMap: nil
         ).songs
         let jpByTitle = Dictionary(uniqueKeysWithValues: jpSongs.map { ($0.title, $0) })
-        XCTAssertEqual(jpByTitle["Magical Song"]?.basicInfo.isNew, false)
+        XCTAssertEqual(jpByTitle["Circle Plus Song"]?.basicInfo.isNew, false)
+        XCTAssertEqual(jpByTitle["Magical Song"]?.basicInfo.isNew, true)
         XCTAssertEqual(jpByTitle["Magical Plus Song"]?.basicInfo.isNew, true)
     }
 
