@@ -26,7 +26,7 @@ MaimaiData/
 前往 **[GitHub Releases](https://github.com/SorrowRain/MaimaiData/releases)** 下载对应平台安装包：
 
 - **Android**：下载已签名的 `.apk` 安装包直接安装。
-- **iOS**：Release 提供未签名的 `-unsigned.ipa`，签名后才能安装。可使用 AltStore 或 SideStore 签名安装，也可用 Xcode 打开 `MaimaiData-iOS/MaimaiData.xcodeproj` 编译到真机。
+- **iOS**：支持 **TestFlight**（加 QQ 交流群 **`1016143695`** 获取）；Release 也提供未签名的 `-unsigned.ipa`，可使用 AltStore 或 SideStore 签名安装，也可用 Xcode 打开 `MaimaiData-iOS/MaimaiData.xcodeproj` 编译到真机。
 
 ## 本地构建与测试
 
