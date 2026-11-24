@@ -195,6 +195,14 @@ struct AppInsetGroup<Content: View>: View {
     }
 }
 
+/// Full-width inset hairline divider with zero leading indentation so highlighted rows never leave asymmetric gaps.
+struct AppInsetDivider: View {
+    var body: some View {
+        Divider()
+            .frame(maxWidth: .infinity)
+    }
+}
+
 /// Standard row inside `AppInsetGroup` (leading optional icon + title/subtitle + trailing control/chevron).
 struct AppInsetRow<Leading: View, Trailing: View>: View {
     let title: String

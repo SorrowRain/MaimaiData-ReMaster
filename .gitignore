@@ -43,3 +43,6 @@ captures/
 *.p12
 *.mobileprovision
 keystore.properties
+
+# Local marketing assets
+marketing/

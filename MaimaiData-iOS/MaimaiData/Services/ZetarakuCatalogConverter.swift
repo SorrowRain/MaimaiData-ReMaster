@@ -245,8 +245,8 @@ enum ZetarakuCatalogConverter {
                 comment: song.comment ?? meta.comment,
                 remoteCoverName: song.remoteCoverName,
                 preferRemoteCover: song.preferRemoteCover,
-                isDisabled: song.isDisabled,
-                sortOrder: song.sortOrder
+                sortOrder: song.sortOrder,
+                isDisabled: song.isDisabled
             )
         }
     }
