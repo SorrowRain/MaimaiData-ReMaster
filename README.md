@@ -1,11 +1,11 @@
-# MaimaiData
+# MaimaiData Re:Master
 
-一款**双端纯原生**的舞萌 DX（maimai DX）曲库检索与查分工具，采用 **SwiftUI（iOS）** 与 **Jetpack Compose（Android）** 1:1 镜像同构开发，提供统一、克制、流畅的多区服曲库与成绩管理体验。
+**Re:MaiData** 是一款**双端纯原生**的舞萌 DX（maimai DX）曲库检索与查分工具，采用 **SwiftUI（iOS）** 与 **Jetpack Compose（Android）** 1:1 镜像同构开发，提供统一、克制、流畅的多区服曲库与成绩管理体验。
 
 ## 仓库结构
 
 ```text
-MaimaiData/
+MaimaiData-ReMaster/
 ├── MaimaiData-iOS/        # iOS 客户端（SwiftUI，iOS 17.0+，支持 iOS 26+ Liquid Glass）
 ├── MaimaiData-Android/    # Android 客户端（Jetpack Compose + Material 3，Android 8.0+ / API 26+）
 ├── SHARED_SPEC.md         # 双端共享数据源、三级节流、多区服算分与牌子规则契约
@@ -23,7 +23,7 @@ MaimaiData/
 
 ## 下载与安装
 
-前往 **[GitHub Releases](https://github.com/SorrowRain/MaimaiData/releases)** 下载对应平台安装包：
+前往 **[GitHub Releases](https://github.com/SorrowRain/MaimaiData-ReMaster/releases)** 下载对应平台安装包：
 
 - **Android**：下载已签名的 `.apk` 安装包直接安装。
 - **iOS**：支持 **TestFlight**（加 QQ 交流群 **`1016143695`** 获取）；Release 也提供未签名的 `-unsigned.ipa`，可使用 AltStore 或 SideStore 签名安装，也可用 Xcode 打开 `MaimaiData-iOS/MaimaiData.xcodeproj` 编译到真机。

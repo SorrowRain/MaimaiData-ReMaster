@@ -48,7 +48,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.0xsr.maimaidata
         PRODUCT_NAME: MaimaiData
         TARGETED_DEVICE_FAMILY: "1"
-        INFOPLIST_KEY_CFBundleDisplayName: MaimaiData
+        INFOPLIST_KEY_CFBundleDisplayName: "Re:MaiData"
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: 需要访问您的相册以保存曲绘封面与 Best50 成绩图
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait"

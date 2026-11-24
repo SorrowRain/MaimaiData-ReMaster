@@ -181,7 +181,7 @@ fun SettingsScreen(
                 AppSectionCard(title = "关于") {
                     AppInsetGroup {
                         AppInsetRow(
-                            title = "关于 MaimaiData",
+                            title = "关于 Re:MaiData",
                             showsChevron = true,
                             onClick = onNavigateAbout,
                             trailing = {
@@ -555,7 +555,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     ) {
                         Image(
                             painter = painterResource(R.drawable.ic_launcher_foreground_art),
-                            contentDescription = "MaimaiData",
+                            contentDescription = "Re:MaiData",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(72.dp)
@@ -568,7 +568,7 @@ fun AboutScreen(onBack: () -> Unit) {
                         )
 
                         Text(
-                            text = "MaimaiData",
+                            text = "Re:MaiData",
                             style = AppTheme.AppTypography.heroTitle,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -611,9 +611,9 @@ fun AboutScreen(onBack: () -> Unit) {
 
                         AppInsetRow(
                             title = "GitHub 开源仓库",
-                            subtitle = "github.com/SorrowRain/MaimaiData",
+                            subtitle = "github.com/SorrowRain/MaimaiData-ReMaster",
                             monospacedSubtitle = true,
-                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData") },
+                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData-ReMaster") },
                             trailing = {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
@@ -630,7 +630,7 @@ fun AboutScreen(onBack: () -> Unit) {
                             title = "版本发布与下载",
                             subtitle = "GitHub Releases",
                             monospacedSubtitle = true,
-                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData/releases") },
+                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData-ReMaster/releases") },
                             trailing = {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
@@ -647,7 +647,7 @@ fun AboutScreen(onBack: () -> Unit) {
                             title = "问题反馈与建议",
                             subtitle = "GitHub Issues",
                             monospacedSubtitle = true,
-                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData/issues") },
+                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData-ReMaster/issues") },
                             trailing = {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
@@ -665,7 +665,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     AppInsetGroup {
                         AppInsetRow(
                             title = "开源协议",
-                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData/blob/main/LICENSE") },
+                            onClick = { openExternalUrl("https://github.com/SorrowRain/MaimaiData-ReMaster/blob/main/LICENSE") },
                             trailing = {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,

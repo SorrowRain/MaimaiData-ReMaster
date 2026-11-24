@@ -568,7 +568,7 @@ object MaimaiAPI {
     // 5. GitHub Latest Release Update Check (short 6s timeout)
 
     private const val GITHUB_LATEST_RELEASE_URL =
-        "https://api.github.com/repos/SorrowRain/MaimaiData/releases/latest"
+        "https://api.github.com/repos/SorrowRain/MaimaiData-ReMaster/releases/latest"
 
     private val shortTimeoutClient: OkHttpClient by lazy {
         httpClient.newBuilder()

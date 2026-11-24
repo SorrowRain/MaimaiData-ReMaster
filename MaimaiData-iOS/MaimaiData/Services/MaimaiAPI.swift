@@ -441,7 +441,7 @@ enum MaimaiAPI {
     // MARK: - 5. GitHub Latest Release Update Check
 
     private static let githubLatestReleaseURL = URL(
-        string: "https://api.github.com/repos/SorrowRain/MaimaiData/releases/latest"
+        string: "https://api.github.com/repos/SorrowRain/MaimaiData-ReMaster/releases/latest"
     )!
 
     static func fetchLatestGitHubRelease(timeout: TimeInterval = 6) async throws -> AppReleaseInfo? {

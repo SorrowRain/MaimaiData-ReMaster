@@ -120,7 +120,7 @@ final class RatingCalculatorTests: XCTestCase {
     }
 
     func testAppReleaseInfoTagParsingAndVersionCheck() throws {
-        let json = #"{"tag_name":"v1.1.0","html_url":"https://github.com/SorrowRain/MaimaiData/releases/tag/v1.1.0","body":"  新增功能与体验优化  "}"#
+        let json = #"{"tag_name":"v1.1.0","html_url":"https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.1.0","body":"  新增功能与体验优化  "}"#
         let payload = try JSONDecoder().decode(GitHubLatestReleasePayload.self, from: Data(json.utf8))
         let info = try XCTUnwrap(AppReleaseInfo.from(payload: payload))
         XCTAssertEqual(info.version, "1.1.0")

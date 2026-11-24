@@ -82,7 +82,7 @@ struct SettingsView: View {
                         AppInsetGroup {
                             VStack(spacing: 0) {
                                 NavigationLink(value: SettingsRoute.about) {
-                                    directoryRow(title: "关于 MaimaiData", value: shortVersionText)
+                                    directoryRow(title: "关于 Re:MaiData", value: shortVersionText)
                                 }
                                 .buttonStyle(.plain)
 
@@ -317,16 +317,16 @@ private struct DataAndStorageSettingsView: View {
     }
 }
 
-// MARK: - Secondary Page 4: 关于 MaimaiData
+// MARK: - Secondary Page 4: 关于 Re:MaiData
 
 private struct AboutView: View {
     @Environment(DataStore.self) private var store
     let versionText: String
 
-    private static let repoURL = URL(string: "https://github.com/SorrowRain/MaimaiData")!
-    private static let releasesURL = URL(string: "https://github.com/SorrowRain/MaimaiData/releases")!
-    private static let issuesURL = URL(string: "https://github.com/SorrowRain/MaimaiData/issues")!
-    private static let licenseURL = URL(string: "https://github.com/SorrowRain/MaimaiData/blob/main/LICENSE")!
+    private static let repoURL = URL(string: "https://github.com/SorrowRain/MaimaiData-ReMaster")!
+    private static let releasesURL = URL(string: "https://github.com/SorrowRain/MaimaiData-ReMaster/releases")!
+    private static let issuesURL = URL(string: "https://github.com/SorrowRain/MaimaiData-ReMaster/issues")!
+    private static let licenseURL = URL(string: "https://github.com/SorrowRain/MaimaiData-ReMaster/blob/main/LICENSE")!
     private static let authorURL = URL(string: "https://github.com/SorrowRain")!
 
     var body: some View {
@@ -346,7 +346,7 @@ private struct AboutView: View {
                                 iconShape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                             )
 
-                        Text("MaimaiData")
+                        Text("Re:MaiData")
                             .font(AppTheme.Typography.heroTitle)
                             .foregroundStyle(.primary)
 
@@ -379,7 +379,7 @@ private struct AboutView: View {
 
                             externalLinkRow(
                                 title: "GitHub 开源仓库",
-                                subtitle: "github.com/SorrowRain/MaimaiData",
+                                subtitle: "github.com/SorrowRain/MaimaiData-ReMaster",
                                 url: Self.repoURL
                             )
 

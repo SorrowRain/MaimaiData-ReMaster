@@ -147,7 +147,7 @@ class RatingCalculatorTests {
     fun testAppReleaseInfoTagParsingAndVersionCheck() {
         val payload = dev.sorrowrain.maimaidata.models.GitHubLatestReleasePayload(
             tagName = "v1.1.0",
-            htmlUrl = "https://github.com/SorrowRain/MaimaiData/releases/tag/v1.1.0",
+            htmlUrl = "https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.1.0",
             body = "  新增功能与体验优化  "
         )
         val info = dev.sorrowrain.maimaidata.models.AppReleaseInfo.from(payload)!!
