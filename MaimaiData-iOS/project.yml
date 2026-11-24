@@ -38,6 +38,7 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: dev.0xsr.maimaidata.oauth
