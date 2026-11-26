@@ -2,6 +2,7 @@ package dev.sorrowrain.maimaidata.services
 
 import dev.sorrowrain.maimaidata.models.AppReleaseInfo
 import dev.sorrowrain.maimaidata.models.ChartStatsResponse
+import dev.sorrowrain.maimaidata.models.DivingFishUploadRecordDTO
 import dev.sorrowrain.maimaidata.models.LXNSAPIEnvelope
 import dev.sorrowrain.maimaidata.models.LXNSAliasListResponse
 import dev.sorrowrain.maimaidata.models.LXNSConfiguration
@@ -11,16 +12,25 @@ import dev.sorrowrain.maimaidata.models.LXNSPlateListResponse
 import dev.sorrowrain.maimaidata.models.LXNSPlayer
 import dev.sorrowrain.maimaidata.models.LXNSScore
 import dev.sorrowrain.maimaidata.models.LXNSSongListResponse
+import dev.sorrowrain.maimaidata.models.LXNSUploadScoreDTO
+import dev.sorrowrain.maimaidata.models.LXNSUploadScoresRequest
 import dev.sorrowrain.maimaidata.models.LXNSUserInfo
 import dev.sorrowrain.maimaidata.models.ProberRecordsResponse
+import dev.sorrowrain.maimaidata.models.SelfHostedEndpointConfig
+import dev.sorrowrain.maimaidata.models.SyncBackendBindRequest
+import dev.sorrowrain.maimaidata.models.SyncBackendErrorEnvelope
+import dev.sorrowrain.maimaidata.models.SyncBackendFullRequest
+import dev.sorrowrain.maimaidata.models.SyncBackendResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
@@ -50,9 +60,38 @@ sealed class MaimaiAPIException(message: String) : Exception(message) {
     class SyncInProgress : MaimaiAPIException("正在同步成绩，请稍后再试。")
     class RecordSyncFailedAfterLogin(val detail: String) :
         MaimaiAPIException("账号已添加成功，但首次成绩同步失败：$detail\n请稍后点击同步重试。")
+    class BackendError(
+        val statusCode: Int,
+        val errorCode: String,
+        val serverMessage: String,
+        val retryAfterSec: Int? = null
+    ) : MaimaiAPIException(localizedBackendMessage(errorCode, serverMessage, retryAfterSec))
 
     val recoveryMessage: String
         get() = message ?: "请求失败，请检查网络后重试。"
+
+    companion object {
+        private fun localizedBackendMessage(code: String, fallback: String, retryAfterSec: Int?): String =
+            when (code) {
+                "INVALID_ACCESS_KEY" -> "同步服务暂时不可用，请更新 App 后重试"
+                "INVALID_SYNC_TOKEN", "MISSING_SYNC_TOKEN" -> "国服直连已失效，请重新绑定"
+                "IP_BANNED", "IP_BLOCKED" -> if (retryAfterSec != null && retryAfterSec > 0) {
+                    "请求过于频繁，请在 $retryAfterSec 秒后再试"
+                } else {
+                    "请求过于频繁，请稍后再试"
+                }
+                "USER_NOT_ALLOWED" -> "该账号暂未开放国服直连"
+                "USER_ID_MISMATCH" -> "二维码对应的玩家与当前档案不一致，请确认微信账号"
+                "INVALID_QR" -> "未能识别的二维码格式，请粘贴完整链接或 SGWCMAID 内容"
+                "QR_EXPIRED", "AIMEDB_REJECTED" -> "二维码已过期或已被使用，请在微信公众号重新生成"
+                "SYNC_IN_PROGRESS" -> "该玩家正在同步中，请稍候"
+                "TITLE_LOGIN_REJECTED" -> "游戏端登录未通过：$fallback"
+                "CLIENT_UPGRADE_REQUIRED" -> "当前客户端版本过低，请更新后再试"
+                "RATE_LIMITED" -> "请求过于频繁，请 ${retryAfterSec ?: 60} 秒后再试"
+                "UPSTREAM_CIRCUIT_OPEN", "UPSTREAM_ERROR" -> "上游服务器暂时不可用，请稍后再试"
+                else -> fallback.ifEmpty { "同步服务请求失败 ($code)" }
+            }
+    }
 }
 
 /**
@@ -191,6 +230,12 @@ object MaimaiAPI {
         else -> false
     }
 
+    fun shouldRetryUploadLogin(error: Throwable): Boolean = when (error) {
+        is MaimaiAPIException.Unauthorized -> true
+        is MaimaiAPIException.HttpError -> error.code == 401 || error.code == 403
+        else -> false
+    }
+
     suspend fun loginDivingFish(username: String, password: String): String {
         val payload = json.encodeToString(mapOf("username" to username, "password" to password))
         val request = Request.Builder()
@@ -202,7 +247,12 @@ object MaimaiAPI {
 
         val (code, headers, bytes) = executeRaw(request)
         if (code != 200) {
-            val errMsg = extractErrorMessage(bytes) ?: "用户名或密码错误 (HTTP $code)"
+            val defaultMsg = if (code >= 500) {
+                "水鱼服务器暂时异常 (HTTP $code)"
+            } else {
+                "用户名或密码错误 (HTTP $code)"
+            }
+            val errMsg = extractErrorMessage(bytes) ?: defaultMsg
             throw MaimaiAPIException.HttpError(code, errMsg)
         }
         val setCookies = headers.values("Set-Cookie")
@@ -224,7 +274,7 @@ object MaimaiAPI {
             .build()
         val (code, bytes) = executeAndRead(request, validate2xx = false)
         if (code == 400 || code == 401 || code == 403) {
-            throw MaimaiAPIException.Unauthorized(extractErrorMessage(bytes) ?: "登录已过期，请重新登录")
+            throw MaimaiAPIException.Unauthorized(extractErrorMessage(bytes) ?: "水鱼登录已过期，请解绑后重新绑定")
         }
         if (code !in 200..299) {
             throw MaimaiAPIException.HttpError(code, extractErrorMessage(bytes))
@@ -233,7 +283,7 @@ object MaimaiAPI {
             json.decodeFromString<ProberRecordsResponse>(bytes.toString(Charsets.UTF_8))
         }
         if (decoded.status == "error") {
-            throw MaimaiAPIException.Unauthorized(decoded.message ?: "登录已过期，请重新登录")
+            throw MaimaiAPIException.Unauthorized(decoded.message ?: "水鱼登录已过期，请解绑后重新绑定")
         }
         return decoded
     }
@@ -432,7 +482,7 @@ object MaimaiAPI {
             if (oauthErr != null && oauthErr.error.isNotEmpty()) {
                 if (oauthErr.error == "invalid_grant" || code == 401) {
                     throw MaimaiAPIException.Unauthorized(
-                        oauthErr.errorDescription ?: "落雪授权已失效，请重新授权登录"
+                        oauthErr.errorDescription ?: "落雪授权已失效，请解绑后重新绑定"
                     )
                 }
                 throw MaimaiAPIException.HttpError(code, oauthErr.errorDescription ?: oauthErr.error)
@@ -606,5 +656,256 @@ object MaimaiAPI {
             )
             dev.sorrowrain.maimaidata.models.AppReleaseInfo.from(payload)
         }
+    }
+
+    // 6. Third-Party Prober Writeback & Diving-Fish Titles
+
+    suspend fun fetchDivingFishMusicTitles(): Map<Int, String> {
+        val request = Request.Builder()
+            .url("$DIVING_FISH_BASE/api/maimaidxprober/music_data")
+            .header("User-Agent", DIVING_FISH_UA)
+            .get()
+            .build()
+        val (_, bytes) = executeAndRead(request, validate2xx = true)
+        return withContext(Dispatchers.Default) {
+            val arr = json.parseToJsonElement(bytes.toString(Charsets.UTF_8)) as? JsonArray
+                ?: return@withContext emptyMap()
+            val result = HashMap<Int, String>(arr.size)
+            for (elem in arr) {
+                val obj = elem.jsonObject
+                val idVal = obj["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: continue
+                val titleVal = obj["title"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() } ?: continue
+                result[idVal] = titleVal
+            }
+            result
+        }
+    }
+
+    suspend fun uploadDivingFishRecordsByCookie(records: List<DivingFishUploadRecordDTO>, cookie: String) {
+        uploadDivingFishRecords(records = records, authHeader = "Cookie", authValue = cookie)
+    }
+
+    suspend fun uploadDivingFishRecordsByImportToken(records: List<DivingFishUploadRecordDTO>, importToken: String) {
+        uploadDivingFishRecords(records = records, authHeader = "Import-Token", authValue = importToken.trim())
+    }
+
+    private suspend fun uploadDivingFishRecords(
+        records: List<DivingFishUploadRecordDTO>,
+        authHeader: String,
+        authValue: String
+    ) {
+        if (records.isEmpty()) return
+        val payload = json.encodeToString(records)
+        val request = Request.Builder()
+            .url("$DIVING_FISH_BASE/api/maimaidxprober/player/update_records")
+            .header("Content-Type", "application/json;charset=UTF-8")
+            .header(authHeader, authValue)
+            .header("User-Agent", DIVING_FISH_UA)
+            .post(payload.toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+        val (code, bytes) = executeAndRead(request, validate2xx = false)
+        if (code == 401 || code == 403) {
+            throw MaimaiAPIException.Unauthorized(extractErrorMessage(bytes) ?: "水鱼登录或导入 Token 已失效")
+        }
+        if (code !in 200..299) {
+            throw MaimaiAPIException.HttpError(code, extractErrorMessage(bytes))
+        }
+    }
+
+    suspend fun uploadLXNSScoresByBearer(scores: List<LXNSUploadScoreDTO>, bearerToken: String) {
+        uploadLXNSScores(scores = scores, headerField = "Authorization", headerValue = "Bearer $bearerToken")
+    }
+
+    suspend fun uploadLXNSScoresByPersonalToken(scores: List<LXNSUploadScoreDTO>, personalToken: String) {
+        uploadLXNSScores(scores = scores, headerField = "X-User-Token", headerValue = personalToken.trim())
+    }
+
+    private suspend fun uploadLXNSScores(
+        scores: List<LXNSUploadScoreDTO>,
+        headerField: String,
+        headerValue: String
+    ) {
+        if (scores.isEmpty()) return
+        val body = json.encodeToString(LXNSUploadScoresRequest(scores = scores))
+        val request = Request.Builder()
+            .url("${LXNSConfiguration.API_BASE}/user/maimai/player/scores")
+            .header("Content-Type", "application/json")
+            .header(headerField, headerValue)
+            .header("User-Agent", APP_USER_AGENT)
+            .post(body.toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+        val (code, bytes) = executeAndRead(request, validate2xx = false)
+        if (code == 401) {
+            throw MaimaiAPIException.Unauthorized(extractErrorMessage(bytes) ?: "落雪凭据已过期，请重新授权")
+        }
+        if (code == 403) {
+            throw MaimaiAPIException.HttpError(
+                403,
+                extractErrorMessage(bytes) ?: "落雪账号缺少成绩写入权限，请重新授权"
+            )
+        }
+        if (code !in 200..299) {
+            throw MaimaiAPIException.HttpError(code, extractErrorMessage(bytes))
+        }
+        val env = runCatching {
+            json.decodeFromString<LXNSAPIEnvelope<String>>(bytes.toString(Charsets.UTF_8))
+        }.getOrNull()
+        if (env != null && !env.success && env.code != 0) {
+            throw MaimaiAPIException.HttpError(env.code, env.message)
+        }
+    }
+
+    // 7. Self-Hosted Sync Backend Client
+
+    private const val BACKEND_CLIENT_VERSION = "2.0.0"
+
+    private val syncBackendClient: OkHttpClient by lazy {
+        httpClient.newBuilder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(45, TimeUnit.SECONDS)
+            .callTimeout(50, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private fun isLoopbackHost(host: String): Boolean {
+        val lower = host.lowercase()
+        return lower == "localhost" || lower == "127.0.0.1" || lower == "::1" || lower == "[::1]"
+    }
+
+    private fun normalizeBackendBaseUrl(raw: String): String {
+        var trimmed = raw.trim()
+        if (trimmed.isEmpty()) throw MaimaiAPIException.InvalidUrl()
+        if (!trimmed.contains("://")) {
+            trimmed = "https://$trimmed"
+        }
+        trimmed = trimmed.trimEnd('/')
+        val uri = try {
+            URI(trimmed)
+        } catch (_: Exception) {
+            throw MaimaiAPIException.InvalidUrl()
+        }
+        val scheme = uri.scheme?.lowercase()
+        val host = uri.host
+        if (host.isNullOrEmpty()) {
+            throw MaimaiAPIException.InvalidUrl()
+        }
+        if (scheme == "http") {
+            if (!isLoopbackHost(host)) {
+                throw MaimaiAPIException.HttpError(400, "同步服务地址必须使用 HTTPS")
+            }
+        } else if (scheme != "https") {
+            throw MaimaiAPIException.InvalidUrl()
+        }
+        return trimmed
+    }
+
+    suspend fun syncBackendBind(
+        config: SelfHostedEndpointConfig,
+        qrContent: String,
+        fullSync: Boolean
+    ): SyncBackendResponse {
+        val body = json.encodeToString(SyncBackendBindRequest(qrContent = qrContent, fullSync = fullSync))
+        return performBackendPost(config = config, path = "/v1/sync/bind", syncToken = null, bodyJson = body)
+    }
+
+    suspend fun syncBackendQuick(
+        config: SelfHostedEndpointConfig,
+        syncToken: String
+    ): SyncBackendResponse {
+        return performBackendPost(config = config, path = "/v1/sync/quick", syncToken = syncToken, bodyJson = null)
+    }
+
+    suspend fun syncBackendFull(
+        config: SelfHostedEndpointConfig,
+        syncToken: String,
+        qrContent: String
+    ): SyncBackendResponse {
+        val body = json.encodeToString(SyncBackendFullRequest(qrContent = qrContent))
+        return performBackendPost(config = config, path = "/v1/sync/full", syncToken = syncToken, bodyJson = body)
+    }
+
+    suspend fun syncBackendUnbind(
+        config: SelfHostedEndpointConfig,
+        syncToken: String
+    ) {
+        val base = normalizeBackendBaseUrl(config.serverBaseURL)
+        val req = buildBackendRequest(
+            url = "$base/v1/sync/unbind",
+            config = config,
+            syncToken = syncToken,
+            bodyJson = null
+        )
+        executeAndReadWithClient(syncBackendClient, req, validateBackend = true)
+    }
+
+    private suspend fun performBackendPost(
+        config: SelfHostedEndpointConfig,
+        path: String,
+        syncToken: String?,
+        bodyJson: String?
+    ): SyncBackendResponse {
+        val base = normalizeBackendBaseUrl(config.serverBaseURL)
+        val req = buildBackendRequest(
+            url = "$base$path",
+            config = config,
+            syncToken = syncToken,
+            bodyJson = bodyJson
+        )
+        val bytes = executeAndReadWithClient(syncBackendClient, req, validateBackend = true)
+        return withContext(Dispatchers.Default) {
+            json.decodeFromString<SyncBackendResponse>(bytes.toString(Charsets.UTF_8))
+        }
+    }
+
+    private fun buildBackendRequest(
+        url: String,
+        config: SelfHostedEndpointConfig,
+        syncToken: String?,
+        bodyJson: String?
+    ): Request {
+        val body = (bodyJson ?: "").toRequestBody(if (bodyJson != null) JSON_MEDIA_TYPE else null)
+        val builder = Request.Builder()
+            .url(url)
+            .header("User-Agent", APP_USER_AGENT)
+            .header("X-Access-Key", config.accessKey.trim())
+            .header("X-Client-Version", BACKEND_CLIENT_VERSION)
+            .header("X-Client-Platform", "android")
+            .post(body)
+        if (!syncToken.isNullOrEmpty()) {
+            builder.header("Authorization", "Bearer $syncToken")
+        }
+        return builder.build()
+    }
+
+    private suspend fun executeAndReadWithClient(
+        client: OkHttpClient,
+        request: Request,
+        validateBackend: Boolean
+    ): ByteArray {
+        val response = client.newCall(request).await()
+        val (code, bytes) = withContext(Dispatchers.IO) {
+            response.use { resp ->
+                resp.code to (resp.body?.bytes() ?: ByteArray(0))
+            }
+        }
+        if (code !in 200..299) {
+            if (validateBackend) {
+                val env = runCatching {
+                    json.decodeFromString<SyncBackendErrorEnvelope>(bytes.toString(Charsets.UTF_8))
+                }.getOrNull()
+                if (env?.error != null) {
+                    throw MaimaiAPIException.BackendError(
+                        statusCode = code,
+                        errorCode = env.error.code,
+                        serverMessage = env.error.message,
+                        retryAfterSec = env.error.retryAfterSec
+                    )
+                }
+            }
+            throw MaimaiAPIException.HttpError(code, extractErrorMessage(bytes))
+        }
+        return bytes
     }
 }

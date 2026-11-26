@@ -96,14 +96,12 @@ struct SongDetailView: View {
             CoverZoomView(song: currentSong)
         }
         .onChange(of: store.catalogRevision) { _, _ in
-            if currentSong.numericId > 0, let refreshed = store.songsById[currentSong.numericId] {
+            if let refreshed = store.song(forId: currentSong.id) {
                 currentSong = refreshed
             } else if let refreshed = store.songs.first(where: {
-                $0.id == currentSong.id || (
-                    $0.title == currentSong.title &&
-                    $0.basicInfo.genre == currentSong.basicInfo.genre &&
-                    $0.type == currentSong.type
-                )
+                $0.title == currentSong.title &&
+                $0.basicInfo.genre == currentSong.basicInfo.genre &&
+                $0.type == currentSong.type
             }) {
                 currentSong = refreshed
             }
@@ -145,6 +143,10 @@ struct SongDetailView: View {
                         .foregroundStyle(.white.opacity(0.92))
                         .fixedSize(horizontal: false, vertical: true)
                         .onLongPressGesture { copyText(currentSong.basicInfo.artist, label: "曲师") }
+
+                    if currentSong.isDisabled == true {
+                        AppCapsuleLabel(text: "已删除", tint: .white, style: .compact)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -324,8 +326,8 @@ struct SongDetailView: View {
     // MARK: - Tab 1: Overview (Chart Info + Notes + Aliases)
 
     private func overviewSection(chart: ResolvedChart) -> some View {
-        let record = store.record(forSongId: currentSong.numericId, difficultyIndex: chart.index)
-        let fitDiff = currentSong.numericId > 0
+        let record = store.record(forSongId: currentSong.numericId, difficultyIndex: chart.recordLevelIndex)
+        let fitDiff = (!currentSong.isUtage && currentSong.numericId > 0)
             ? store.chartStats[currentSong.numericId]?[safe: chart.index]?.fitDiff
             : nil
         let versionInfo = MaimaiConstants.activeServerVersionDisplay(

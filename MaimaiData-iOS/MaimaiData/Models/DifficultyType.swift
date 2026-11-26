@@ -6,15 +6,20 @@ enum DifficultyType: Int, Codable, CaseIterable, Hashable {
     case expert = 2
     case master = 3
     case remaster = 4
-    case utage = 5
-    case utagePlayer2 = 6
+    case utage = 10
+    case utagePlayer2 = 11
     case unknown = -1
+
+    /// Canonical level index used by `ProberRecord.levelIndex` and prober payloads.
+    var recordLevelIndex: Int {
+        rawValue
+    }
 
     static func from(genre: String, index: Int) -> DifficultyType {
         if genre == MaimaiConstants.genreUtage {
             switch index {
-            case 0: return .utage
-            case 1: return .utagePlayer2
+            case 0, 10: return .utage
+            case 1, 11: return .utagePlayer2
             default: return .unknown
             }
         }

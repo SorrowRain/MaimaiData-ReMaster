@@ -59,7 +59,7 @@ object RatingCalculator {
 
     fun reverseCalculate(targetTotalRating: Int): List<TargetRow> {
         if (targetTotalRating <= 0) return emptyList()
-        val perSong = targetTotalRating / 50
+        val perSong = (targetTotalRating + 49) / 50
         var minLv = 0
         for (i in 10..150) {
             if (perSong <= achievementToRating(levelTenths = i, achievementTenThousandths = 1_005_000)) {

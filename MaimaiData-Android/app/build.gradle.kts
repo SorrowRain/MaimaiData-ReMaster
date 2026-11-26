@@ -15,6 +15,25 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+val localPropertiesFile = rootProject.file("local.properties")
+val localProperties = Properties().apply {
+    if (localPropertiesFile.exists()) {
+        FileInputStream(localPropertiesFile).use { load(it) }
+    }
+}
+
+fun resolveBuildProperty(key: String, envKey: String): String {
+    val fromLocal = localProperties.getProperty(key)?.trim().orEmpty()
+    if (fromLocal.isNotEmpty()) return fromLocal
+    return System.getenv(envKey)?.trim().orEmpty()
+}
+
+fun escapeBuildConfigLiteral(value: String): String =
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+
+val syncServiceHost = resolveBuildProperty("syncService.host", "SYNC_SERVICE_HOST")
+val syncServiceAccessKey = resolveBuildProperty("syncService.accessKey", "SYNC_SERVICE_ACCESS_KEY")
+
 android {
     namespace = "dev.sorrowrain.maimaidata"
     compileSdk = 35
@@ -23,8 +42,11 @@ android {
         applicationId = "dev.sorrowrain.maimaidata"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.1.0"
+        versionCode = 6
+        versionName = "1.2.0"
+
+        buildConfigField("String", "SYNC_SERVICE_HOST", "\"${escapeBuildConfigLiteral(syncServiceHost)}\"")
+        buildConfigField("String", "SYNC_SERVICE_ACCESS_KEY", "\"${escapeBuildConfigLiteral(syncServiceAccessKey)}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

@@ -2,11 +2,19 @@ import CryptoKit
 import Foundation
 import Security
 
-/// 成绩档案凭据与令牌统一保存在 Keychain；UserDefaults 仅保存当前激活档案 UUID 与界面偏好。
+/// 玩家身份档案与分渠道凭据统一保存在 Keychain；UserDefaults 仅保存当前激活身份 UUID 与界面偏好。
 enum AccountCredentialStore {
     private static let service = "dev.0xsr.maimaidata.accounts"
-    private static let profilesKey = "score_profiles_v2"
+    private static let identitiesV3Key = "player_identities_v3"
+    private static let profilesV2Key = "score_profiles_v2"
     private static let legacyAccountsKey = "saved_accounts"
+    private static let selfHostedEndpointKey = "self_hosted_endpoint_v1"
+
+    struct LoadedIdentities {
+        let identities: [PlayerIdentity]
+        let activeIdentityId: String?
+        let loadFailed: Bool
+    }
 
     private static func load(_ key: String) -> String {
         guard let data = loadData(key),
@@ -19,61 +27,218 @@ enum AccountCredentialStore {
         SecItemDelete(query as CFDictionary)
     }
 
-    // MARK: - Multi-Provider Score Profiles
+    // MARK: - Self-Hosted Endpoint Configuration
 
-    static func loadSecret(for profileId: UUID) -> ScoreProfileSecret {
-        let key = secretKey(for: profileId)
-        guard let data = loadData(key),
-              let decoded = try? JSONDecoder().decode(ScoreProfileSecret.self, from: data) else {
-            return ScoreProfileSecret()
+    static func deleteSelfHostedEndpointConfig() {
+        delete(selfHostedEndpointKey)
+    }
+
+    // MARK: - Split Per-Channel Secrets
+
+    static func loadSelfHostedSecret(for identityId: String) -> SelfHostedSecret {
+        guard let data = loadData(selfHostedSecretKey(for: identityId)),
+              let decoded = try? JSONDecoder().decode(SelfHostedSecret.self, from: data) else {
+            return SelfHostedSecret()
         }
         return decoded
     }
 
     @discardableResult
-    static func saveSecret(_ secret: ScoreProfileSecret, for profileId: UUID) -> Bool {
+    static func saveSelfHostedSecret(_ secret: SelfHostedSecret, for identityId: String) -> Bool {
         guard let data = try? JSONEncoder().encode(secret) else { return false }
-        return saveData(data, key: secretKey(for: profileId))
+        return saveData(data, key: selfHostedSecretKey(for: identityId))
     }
 
-    static func deleteSecret(for profileId: UUID) {
-        delete(secretKey(for: profileId))
+    static func deleteSelfHostedSecret(for identityId: String) {
+        delete(selfHostedSecretKey(for: identityId))
+    }
+
+    static func loadLXNSSecret(for identityId: String) -> LXNSSecret {
+        guard let data = loadData(lxnsSecretKey(for: identityId)),
+              let decoded = try? JSONDecoder().decode(LXNSSecret.self, from: data) else {
+            return LXNSSecret()
+        }
+        return decoded
     }
 
     @discardableResult
-    static func saveProfiles(_ profiles: [ScoreProfile]) -> Bool {
-        guard let data = try? JSONEncoder().encode(profiles) else { return false }
-        return saveData(data, key: profilesKey)
+    static func saveLXNSSecret(_ secret: LXNSSecret, for identityId: String) -> Bool {
+        guard let data = try? JSONEncoder().encode(secret) else { return false }
+        return saveData(data, key: lxnsSecretKey(for: identityId))
     }
 
-    static func loadOrMigrateProfiles(
+    static func deleteLXNSSecret(for identityId: String) {
+        delete(lxnsSecretKey(for: identityId))
+    }
+
+    static func loadDivingFishSecret(for identityId: String) -> DivingFishSecret {
+        guard let data = loadData(divingFishSecretKey(for: identityId)),
+              let decoded = try? JSONDecoder().decode(DivingFishSecret.self, from: data) else {
+            return DivingFishSecret()
+        }
+        return decoded
+    }
+
+    @discardableResult
+    static func saveDivingFishSecret(_ secret: DivingFishSecret, for identityId: String) -> Bool {
+        guard let data = try? JSONEncoder().encode(secret) else { return false }
+        return saveData(data, key: divingFishSecretKey(for: identityId))
+    }
+
+    static func deleteDivingFishSecret(for identityId: String) {
+        delete(divingFishSecretKey(for: identityId))
+    }
+
+    static func deleteAllChannelSecrets(for identityId: String) {
+        deleteSelfHostedSecret(for: identityId)
+        deleteLXNSSecret(for: identityId)
+        deleteDivingFishSecret(for: identityId)
+    }
+
+    // MARK: - Player Identities v3 (+ Mechanical v2 / Legacy Upgrade)
+
+    @discardableResult
+    static func saveIdentities(_ identities: [PlayerIdentity]) -> Bool {
+        guard let data = try? JSONEncoder().encode(identities) else { return false }
+        return saveData(data, key: identitiesV3Key)
+    }
+
+    static func resetIdentitiesAfterLoadFailure(defaults: UserDefaults = .standard) {
+        delete(identitiesV3Key)
+        defaults.removeObject(forKey: PreferenceKeys.activeIdentityId)
+    }
+
+    static func decodeIdentitiesLossy(from data: Data) -> [PlayerIdentity]? {
+        if let decoded = try? JSONDecoder().decode([PlayerIdentity].self, from: data) {
+            return decoded
+        }
+        guard let rawArray = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else {
+            return nil
+        }
+        if rawArray.isEmpty {
+            return []
+        }
+        var recovered: [PlayerIdentity] = []
+        let decoder = JSONDecoder()
+        for item in rawArray {
+            guard JSONSerialization.isValidJSONObject(item),
+                  let elemData = try? JSONSerialization.data(withJSONObject: item),
+                  let identity = try? decoder.decode(PlayerIdentity.self, from: elemData) else {
+                continue
+            }
+            recovered.append(identity)
+        }
+        return recovered.isEmpty ? nil : recovered
+    }
+
+    static func loadOrMigrateIdentities(
         defaults: UserDefaults = .standard,
         appSupportDir: URL
-    ) -> (profiles: [ScoreProfile], activeProfileId: UUID?) {
-        let storedActiveId = defaults.string(forKey: PreferenceKeys.activeProfileId)
-            .flatMap(UUID.init(uuidString:))
+    ) -> LoadedIdentities {
+        let storedActiveId = defaults.string(forKey: PreferenceKeys.activeIdentityId)?.lowercased()
 
-        switch loadDataResult(profilesKey) {
+        switch loadDataResult(identitiesV3Key) {
         case .found(let existingData):
-            if let existingProfiles = try? JSONDecoder().decode([ScoreProfile].self, from: existingData) {
-                let validActiveId = existingProfiles.contains(where: { $0.id == storedActiveId })
+            if let existingIdentities = decodeIdentitiesLossy(from: existingData) {
+                let validActiveId = existingIdentities.contains(where: { $0.id == storedActiveId })
                     ? storedActiveId
-                    : existingProfiles.first?.id
+                    : existingIdentities.first?.id
                 if validActiveId != storedActiveId {
-                    defaults.set(validActiveId?.uuidString, forKey: PreferenceKeys.activeProfileId)
+                    defaults.set(validActiveId, forKey: PreferenceKeys.activeIdentityId)
                 }
-                return (existingProfiles, validActiveId)
+                return LoadedIdentities(
+                    identities: existingIdentities,
+                    activeIdentityId: validActiveId,
+                    loadFailed: false
+                )
             }
-            // Existing profiles payload could not be decoded — never overwrite or wipe saved data.
-            return ([], nil)
+            // Existing v3 payload failed to decode — engage write-guard latch so we never wipe saved data.
+            return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
         case .failed:
-            // Keychain temporarily unavailable (e.g. locked) — never overwrite or wipe saved data.
-            return ([], nil)
+            // Keychain unavailable (e.g. device locked) — engage write-guard latch.
+            return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
         case .notFound:
             break
         }
 
-        // One-time migration from legacy Diving-Fish single-account storage
+        // Check mechanical 1:1 upgrade from v2 `score_profiles_v2`
+        switch loadDataResult(profilesV2Key) {
+        case .found(let v2Data):
+            guard let v2Profiles = try? JSONDecoder().decode([ScoreProfile].self, from: v2Data) else {
+                return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+            }
+            let v2ActiveId = defaults.string(forKey: PreferenceKeys.activeProfileId)?.lowercased()
+            var secretsById: [UUID: ScoreProfileSecret] = [:]
+            for p in v2Profiles {
+                switch loadLegacyV2SecretResult(for: p.id) {
+                case .found(let secret):
+                    secretsById[p.id] = secret
+                case .notFound:
+                    secretsById[p.id] = ScoreProfileSecret()
+                case .failed:
+                    // Secret existed in Keychain but could not be read/decoded — abort upgrade instead of losing credentials.
+                    return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+                }
+            }
+            let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+            let upgraded = ScoreSyncEngine.upgradeLegacyProfiles(
+                v2Profiles,
+                secretsById: secretsById,
+                nowEpochMs: nowMs
+            )
+
+            for entry in upgraded {
+                let id = entry.identity.id
+                if let lxns = entry.lxns {
+                    guard saveLXNSSecret(lxns, for: id) else {
+                        return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+                    }
+                }
+                if let df = entry.df {
+                    guard saveDivingFishSecret(df, for: id) else {
+                        return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+                    }
+                }
+                if let parsedUUID = UUID(uuidString: id) {
+                    let oldRecordsURL = legacyProfileRecordsFileURL(for: parsedUUID, in: appSupportDir)
+                    let newRecordsURL = recordsFileURL(for: id, in: appSupportDir)
+                    if FileManager.default.fileExists(atPath: oldRecordsURL.path),
+                       !FileManager.default.fileExists(atPath: newRecordsURL.path) {
+                        try? FileManager.default.copyItem(at: oldRecordsURL, to: newRecordsURL)
+                    }
+                }
+            }
+
+            let identities = upgraded.map(\.identity)
+            guard saveIdentities(identities) else {
+                return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+            }
+            let validActiveId = identities.contains(where: { $0.id == v2ActiveId })
+                ? v2ActiveId
+                : identities.first?.id
+            defaults.set(validActiveId, forKey: PreferenceKeys.activeIdentityId)
+
+            // Clean up migrated v2 slots and records files once v3 persistence succeeded.
+            delete(profilesV2Key)
+            defaults.removeObject(forKey: PreferenceKeys.activeProfileId)
+            for p in v2Profiles {
+                delete(legacyProfileSecretKey(for: p.id))
+                let oldRecordsURL = legacyProfileRecordsFileURL(for: p.id, in: appSupportDir)
+                try? FileManager.default.removeItem(at: oldRecordsURL)
+            }
+
+            return LoadedIdentities(
+                identities: identities,
+                activeIdentityId: validActiveId,
+                loadFailed: false
+            )
+        case .failed:
+            return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+        case .notFound:
+            break
+        }
+
+        // One-time migration from v1 single-provider Diving-Fish UserDefaults/Keychain
         let legacyAccountsData = loadData(legacyAccountsKey) ?? defaults.data(forKey: PreferenceKeys.savedAccounts)
         let legacyAccounts = legacyAccountsData
             .flatMap { try? JSONDecoder().decode([SavedAccount].self, from: $0) } ?? []
@@ -89,22 +254,41 @@ enum AccountCredentialStore {
             currentCookie: legacyCookie,
             currentNickname: legacyNickname
         )
-
+        var secretsById: [UUID: ScoreProfileSecret] = [:]
         for item in migrated.entries {
-            saveSecret(item.secret, for: item.profile.id)
-            let oldRecordsURL = appSupportDir.appendingPathComponent("records_\(item.profile.username.sha256Hex).json")
-            let newRecordsURL = recordsFileURL(for: item.profile.id, in: appSupportDir)
-            if FileManager.default.fileExists(atPath: oldRecordsURL.path),
-               !FileManager.default.fileExists(atPath: newRecordsURL.path) {
-                try? FileManager.default.copyItem(at: oldRecordsURL, to: newRecordsURL)
+            secretsById[item.profile.id] = item.secret
+        }
+        let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+        let upgraded = ScoreSyncEngine.upgradeLegacyProfiles(
+            migrated.entries.map(\.profile),
+            secretsById: secretsById,
+            nowEpochMs: nowMs
+        )
+
+        for entry in upgraded {
+            let id = entry.identity.id
+            if let df = entry.df {
+                guard saveDivingFishSecret(df, for: id) else {
+                    return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+                }
+            }
+            if let uname = entry.identity.divingFish?.username, !uname.isEmpty {
+                let oldRecordsURL = appSupportDir.appendingPathComponent("records_\(uname.sha256Hex).json")
+                let newRecordsURL = recordsFileURL(for: id, in: appSupportDir)
+                if FileManager.default.fileExists(atPath: oldRecordsURL.path),
+                   !FileManager.default.fileExists(atPath: newRecordsURL.path) {
+                    try? FileManager.default.copyItem(at: oldRecordsURL, to: newRecordsURL)
+                }
             }
         }
 
-        let profiles = migrated.entries.map(\.profile)
-        saveProfiles(profiles)
-        defaults.set(migrated.activeProfileId?.uuidString, forKey: PreferenceKeys.activeProfileId)
+        let identities = upgraded.map(\.identity)
+        if !saveIdentities(identities) {
+            return LoadedIdentities(identities: [], activeIdentityId: nil, loadFailed: true)
+        }
+        let activeId = migrated.activeProfileId?.uuidString.lowercased()
+        defaults.set(activeId, forKey: PreferenceKeys.activeIdentityId)
 
-        // Clean up legacy UserDefaults & Keychain slots after migration completes
         defaults.removeObject(forKey: PreferenceKeys.savedAccounts)
         defaults.removeObject(forKey: PreferenceKeys.username)
         defaults.removeObject(forKey: PreferenceKeys.password)
@@ -114,14 +298,51 @@ enum AccountCredentialStore {
         delete(PreferenceKeys.password)
         delete(PreferenceKeys.cookie)
 
-        return (profiles, migrated.activeProfileId)
+        return LoadedIdentities(identities: identities, activeIdentityId: activeId, loadFailed: false)
     }
 
-    static func recordsFileURL(for profileId: UUID, in appSupportDir: URL) -> URL {
-        appSupportDir.appendingPathComponent("records_profile_\(profileId.uuidString.lowercased()).json")
+    static func recordsFileURL(for identityId: String, in appSupportDir: URL) -> URL {
+        appSupportDir.appendingPathComponent("records_identity_\(identityId.lowercased()).json")
     }
 
-    /// Pure migration builder exposed for unit testing.
+    static func legacyProfileRecordsFileURL(for identityId: String, in appSupportDir: URL) -> URL {
+        appSupportDir.appendingPathComponent("records_profile_\(identityId.lowercased()).json")
+    }
+
+    static func deleteLegacyProfileSecret(for identityId: String) {
+        delete("profile_secret_\(identityId.lowercased())")
+    }
+
+    private static func legacyProfileRecordsFileURL(for profileId: UUID, in appSupportDir: URL) -> URL {
+        legacyProfileRecordsFileURL(for: profileId.uuidString, in: appSupportDir)
+    }
+
+    private static func legacyProfileSecretKey(for profileId: UUID) -> String {
+        "profile_secret_\(profileId.uuidString.lowercased())"
+    }
+
+    private enum SecretLoadResult {
+        case found(ScoreProfileSecret)
+        case notFound
+        case failed
+    }
+
+    private static func loadLegacyV2SecretResult(for profileId: UUID) -> SecretLoadResult {
+        let key = legacyProfileSecretKey(for: profileId)
+        switch loadDataResult(key) {
+        case .notFound:
+            return .notFound
+        case .failed:
+            return .failed
+        case .found(let data):
+            guard let decoded = try? JSONDecoder().decode(ScoreProfileSecret.self, from: data) else {
+                return .failed
+            }
+            return .found(decoded)
+        }
+    }
+
+    /// Pure migration builder exposed for unit testing (legacy v1 -> v2 compatibility).
     static func buildMigratedProfiles(
         legacyAccounts: [SavedAccount],
         currentUsername: String,
@@ -182,8 +403,16 @@ enum AccountCredentialStore {
         case failed(OSStatus)
     }
 
-    private static func secretKey(for profileId: UUID) -> String {
-        "profile_secret_\(profileId.uuidString.lowercased())"
+    private static func selfHostedSecretKey(for identityId: String) -> String {
+        "identity_sh_\(identityId.lowercased())"
+    }
+
+    private static func lxnsSecretKey(for identityId: String) -> String {
+        "identity_lxns_\(identityId.lowercased())"
+    }
+
+    private static func divingFishSecretKey(for identityId: String) -> String {
+        "identity_df_\(identityId.lowercased())"
     }
 
     private static func loadData(_ key: String) -> Data? {

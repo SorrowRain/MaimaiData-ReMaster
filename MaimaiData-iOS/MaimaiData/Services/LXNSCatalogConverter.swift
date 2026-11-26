@@ -342,19 +342,29 @@ enum LXNSCatalogConverter {
 
         for score in scores {
             let songId = normalizeSongId(id: score.id, type: score.type)
-            let recordType = (score.type.lowercased() == "standard")
-                ? MaimaiConstants.chartTypeSD
-                : MaimaiConstants.chartTypeDX
+            let lowerType = score.type.lowercased()
+            let isUtage = (lowerType == "utage" || songId >= 100_000)
+            let canonicalLevelIndex: Int = {
+                guard isUtage else { return score.levelIndex }
+                return (score.levelIndex == 1 || score.levelIndex == 11) ? 11 : 10
+            }()
+            let recordType: String = {
+                if isUtage { return "utage" }
+                return (lowerType == "standard") ? MaimaiConstants.chartTypeSD : MaimaiConstants.chartTypeDX
+            }()
             let song = songsById[songId]
-            let ds = song?.ds[safe: score.levelIndex] ?? 0
-            let level = song?.level[safe: score.levelIndex] ?? score.level ?? "-"
+            let chartIdx = song?.chartArrayIndex(forRecordLevelIndex: canonicalLevelIndex)
+            let ds = isUtage ? 0 : (chartIdx.flatMap { song?.ds[safe: $0] } ?? 0)
+            let level = chartIdx.flatMap { song?.level[safe: $0] } ?? score.level ?? "-"
             let title = song?.title ?? score.songName ?? "Song #\(songId)"
             let fc = (score.fc ?? "").lowercased()
             let fs = (score.fs ?? "").lowercased()
+            let dxScore = score.dxScore ?? 0
             let rate = (score.rate?.isEmpty == false)
                 ? score.rate!.lowercased()
                 : fallbackRateString(for: score.achievements)
             let computedRa: Int = {
+                if isUtage { return 0 }
                 if ds > 0 {
                     return RatingCalculator.singleSongRating(ds: ds, achievement: score.achievements)
                 }
@@ -370,22 +380,57 @@ enum LXNSCatalogConverter {
                 fc: fc,
                 fs: fs,
                 level: level,
-                levelIndex: score.levelIndex,
+                levelIndex: canonicalLevelIndex,
                 ra: computedRa,
                 rate: rate,
                 songId: songId,
                 title: title,
-                type: recordType
+                type: recordType,
+                dxScore: dxScore
             )
 
-            let key = "\(songId)_\(score.levelIndex)"
-            if let existing = bestByKey[key], existing.achievements >= record.achievements {
+            let key = "\(songId)_\(canonicalLevelIndex)"
+            if let existing = bestByKey[key], !shouldReplaceScore(existing: existing, candidate: record) {
                 continue
             }
             bestByKey[key] = record
         }
 
         return Array(bestByKey.values)
+    }
+
+    private static func shouldReplaceScore(existing: ProberRecord, candidate: ProberRecord) -> Bool {
+        if candidate.achievements != existing.achievements {
+            return candidate.achievements > existing.achievements
+        }
+        let fcC = badgeRankFC(candidate.fc)
+        let fcE = badgeRankFC(existing.fc)
+        if fcC != fcE { return fcC > fcE }
+        let fsC = badgeRankFS(candidate.fs)
+        let fsE = badgeRankFS(existing.fs)
+        if fsC != fsE { return fsC > fsE }
+        return candidate.dxScore > existing.dxScore
+    }
+
+    private static func badgeRankFC(_ value: String) -> Int {
+        switch value.lowercased() {
+        case "fc": return 1
+        case "fcp": return 2
+        case "ap": return 3
+        case "app": return 4
+        default: return 0
+        }
+    }
+
+    private static func badgeRankFS(_ value: String) -> Int {
+        switch value.lowercased() {
+        case "sync": return 1
+        case "fs": return 2
+        case "fsp": return 3
+        case "fsd": return 4
+        case "fsdp": return 5
+        default: return 0
+        }
     }
 
     // MARK: - 4. Multi-Region Unified Plate Scopes (CN / INTL / JP)

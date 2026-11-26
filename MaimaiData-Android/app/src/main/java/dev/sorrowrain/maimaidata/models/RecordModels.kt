@@ -36,6 +36,7 @@ data class ProberRecord(
     @SerialName("song_id") val songId: Int,
     val title: String,
     val type: String,
+    val dxScore: Int = 0,
     @Transient val apBonusEnabled: Boolean = false
 ) {
     val id: String
@@ -44,24 +45,57 @@ data class ProberRecord(
     val difficulty: DifficultyType
         get() = DifficultyType.fromRawValue(levelIndex)
 
+    val isUtage: Boolean
+        get() = songId >= 100_000 || levelIndex >= 10 || type.equals("utage", ignoreCase = true)
+
     val isAllPerfect: Boolean
         get() = fc == "ap" || fc == "app"
 
     val computedRating: Int
-        get() = RatingCalculator.singleSongRating(
-            ds = ds,
-            achievement = achievements,
-            isAP = isAllPerfect,
-            apBonusEnabled = apBonusEnabled
-        )
+        get() {
+            if (isUtage) return 0
+            return RatingCalculator.singleSongRating(
+                ds = ds,
+                achievement = achievements,
+                isAP = isAllPerfect,
+                apBonusEnabled = apBonusEnabled
+            )
+        }
 
     fun projected(onto: SongData, region: MaimaiConstants.ServerRegion): ProberRecord {
-        if (region == MaimaiConstants.ServerRegion.CN) return this
-        val targetDs = onto.ds.getOrNull(levelIndex) ?: ds
-        val targetLevel = onto.level.getOrNull(levelIndex) ?: level
+        val chartIdx = onto.chartArrayIndex(levelIndex)
+        val targetDs: Double
+        val targetLevel: String
+        val targetTitle: String
+
+        if (region == MaimaiConstants.ServerRegion.CN) {
+            targetDs = if (isUtage) {
+                0.0
+            } else if (ds > 0.0) {
+                ds
+            } else {
+                chartIdx?.let { onto.ds.getOrNull(it) } ?: 0.0
+            }
+            targetLevel = if (level != "-" && level.isNotEmpty()) {
+                level
+            } else {
+                chartIdx?.let { onto.level.getOrNull(it) } ?: level
+            }
+            targetTitle = if (title.isNotEmpty() && !title.startsWith("Song #")) {
+                title
+            } else {
+                onto.title.ifEmpty { title }
+            }
+        } else {
+            targetDs = if (isUtage) 0.0 else (chartIdx?.let { onto.ds.getOrNull(it) } ?: ds)
+            targetLevel = chartIdx?.let { onto.level.getOrNull(it) } ?: level
+            targetTitle = onto.title.ifEmpty { title }
+        }
+
         return copy(
             ds = targetDs,
             level = targetLevel,
+            title = targetTitle,
             apBonusEnabled = region.usesAPBonus
         )
     }

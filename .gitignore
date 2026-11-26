@@ -43,6 +43,7 @@ captures/
 *.p12
 *.mobileprovision
 keystore.properties
+MaimaiData-iOS/Config/Local.xcconfig
 
 # Local marketing assets
 marketing/

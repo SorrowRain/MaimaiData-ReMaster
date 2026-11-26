@@ -177,21 +177,13 @@ struct AppInsetGroup<Content: View>: View {
         content()
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .clipShape(shape)
             .background(
                 colorScheme == .dark
                     ? Color.white.opacity(0.045)
                     : AppTheme.Palette.hairline.opacity(0.04),
                 in: shape
             )
-            .overlay(
-                shape.strokeBorder(
-                    colorScheme == .dark
-                        ? Color.white.opacity(0.08)
-                        : AppTheme.Palette.hairline.opacity(0.065),
-                    lineWidth: 1
-                )
-            )
+            .clipShape(shape)
     }
 }
 
@@ -442,38 +434,5 @@ extension View {
     /// while `AppInsetGroup.clipShape` cleanly rounds only the outer corners of the first/last rows.
     func appInsetRowHighlight(_ isHighlighted: Bool, tint: Color = AppTheme.accent) -> some View {
         modifier(InsetRowHighlightModifier(isHighlighted: isHighlighted, tint: tint))
-    }
-}
-
-/// Single-line score profile row content (provider tag on the left + player ID + trailing selection mark).
-struct ScoreProfileRowLabel: View {
-    let profile: ScoreProfile
-    let isSelected: Bool
-
-    var body: some View {
-        let providerTint = profile.provider == .lxns ? AppTheme.Palette.ratingPurple : AppTheme.accent
-
-        HStack(spacing: AppTheme.Space.s) {
-            AppCapsuleLabel(
-                text: profile.provider.shortName,
-                tint: providerTint,
-                style: .compact
-            )
-
-            Text(profile.displayTitle)
-                .font(AppTheme.Typography.rowTitle)
-                .foregroundStyle(isSelected ? AppTheme.accentText : .primary)
-                .lineLimit(1)
-                .transaction { $0.animation = nil }
-
-            Spacer(minLength: AppTheme.Space.s)
-
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(AppTheme.Typography.captionBold)
-                    .foregroundStyle(AppTheme.accentText)
-                    .accessibilityLabel("当前选中")
-            }
-        }
     }
 }

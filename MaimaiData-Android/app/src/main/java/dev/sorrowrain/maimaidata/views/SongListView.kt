@@ -165,6 +165,8 @@ fun SongListScreen(
         store.catalogRevision,
         store.songs,
         store.serverRegion,
+        store.playedSongIds,
+        store.deletedSongsById,
         if (criteria.onlyFavorites) store.favoriteIds else emptySet(),
         store.enableAliasSearch,
         store.enableCharterSearch
@@ -696,12 +698,20 @@ private fun SongRowCard(
 
                 Spacer(modifier = Modifier.height(5.dp))
 
-                // Line 2: ONLY GenreCapsuleTag (NO BPM)
+                // Line 2: GenreCapsuleTag (+ Deleted badge if removed)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     GenreCapsuleTag(genre = song.basicInfo.genre)
+                    if (song.isDisabled == true) {
+                        AppCapsuleLabel(
+                            text = "已删除",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = CapsuleStyle.Compact
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(7.dp))

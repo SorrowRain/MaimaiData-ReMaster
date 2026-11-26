@@ -42,6 +42,21 @@ struct SongData: Codable, Identifiable, Hashable {
     var isUtage: Bool { basicInfo.genre == MaimaiConstants.genreUtage }
     var isDX: Bool { type == MaimaiConstants.chartTypeDX }
 
+    func chartArrayIndex(forRecordLevelIndex recordLevelIndex: Int) -> Int? {
+        let count = max(ds.count, max(level.count, charts.count))
+        if isUtage {
+            switch recordLevelIndex {
+            case 0, 10:
+                return count > 0 ? 0 : nil
+            case 1, 11:
+                return count > 1 ? 1 : (count > 0 ? 0 : nil)
+            default:
+                return nil
+            }
+        }
+        return (recordLevelIndex >= 0 && recordLevelIndex < count) ? recordLevelIndex : nil
+    }
+
     var resolvedCharts: [ResolvedChart] {
         charts.indices.map { idx in
             let raw = charts[idx]
@@ -215,6 +230,15 @@ struct ResolvedChart: Identifiable, Hashable {
     let touch: Int
     let breakCount: Int
     let totalNotes: Int
+
+    /// Canonical level index used to match `ProberRecord.levelIndex` (Utage is 10/11 while array `index` is 0/1).
+    var recordLevelIndex: Int {
+        switch difficulty {
+        case .utage: return 10
+        case .utagePlayer2: return 11
+        default: return index
+        }
+    }
 
     var totalWeightedScore: Int {
         (tap + touch) + hold * 2 + slide * 3 + breakCount * 5

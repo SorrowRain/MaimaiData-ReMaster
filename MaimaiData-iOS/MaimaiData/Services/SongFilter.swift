@@ -21,7 +21,8 @@ enum SongFilter {
         favoriteIds: Set<String>,
         enableAliasSearch: Bool,
         enableCharterSearch: Bool,
-        region: MaimaiConstants.ServerRegion = .cn
+        region: MaimaiConstants.ServerRegion = .cn,
+        playedSongIds: Set<Int> = []
     ) -> [SongData] {
         let query = normalizeSearchText(criteria.keyword)
         let queryNumericId = Int(query).flatMap { $0 > 0 ? $0 : nil }
@@ -34,6 +35,10 @@ enum SongFilter {
         let seqDiff = criteria.sortOption.filterDifficulty
 
         let filtered = songs.filter { song in
+            if song.isDisabled == true && !playedSongIds.contains(song.numericId) {
+                return false
+            }
+
             // 1. Genre (default excludes 宴会場 when no genre selected, matching Android DAO)
             if criteria.selectedGenres.isEmpty {
                 if song.isUtage { return false }

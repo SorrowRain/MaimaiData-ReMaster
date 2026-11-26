@@ -4,7 +4,7 @@ enum LXNSConfiguration {
     static let clientId = "9e67172c-d7b9-4bcf-b8a9-185b8afe1b63"
     static let redirectURI = "maimaidata://oauth/lxns"
     static let callbackScheme = "maimaidata"
-    static let scopes = "read_player openid profile"
+    static let scopes = "read_player write_player openid profile"
     static let authorizeURLString = "https://maimai.lxns.net/oauth/authorize"
     static let apiBase = "https://maimai.lxns.net/api/v0"
 }
@@ -18,7 +18,7 @@ struct LXNSAPIEnvelope<T: Decodable>: Decodable {
     let data: T?
 }
 
-struct LXNSOAuthTokenResponse: Codable, Equatable {
+struct LXNSOAuthTokenResponse: Equatable {
     let accessToken: String
     let tokenType: String
     let expiresIn: Int
@@ -26,6 +26,24 @@ struct LXNSOAuthTokenResponse: Codable, Equatable {
     let scope: String?
     let idToken: String?
 
+    init(
+        accessToken: String,
+        tokenType: String = "Bearer",
+        expiresIn: Int = 3600,
+        refreshToken: String? = nil,
+        scope: String? = nil,
+        idToken: String? = nil
+    ) {
+        self.accessToken = accessToken
+        self.tokenType = tokenType
+        self.expiresIn = expiresIn
+        self.refreshToken = refreshToken
+        self.scope = scope
+        self.idToken = idToken
+    }
+}
+
+extension LXNSOAuthTokenResponse: Codable {
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case tokenType = "token_type"
@@ -33,6 +51,18 @@ struct LXNSOAuthTokenResponse: Codable, Equatable {
         case refreshToken = "refresh_token"
         case scope
         case idToken = "id_token"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            accessToken: try c.decode(String.self, forKey: .accessToken),
+            tokenType: try c.decodeIfPresent(String.self, forKey: .tokenType) ?? "Bearer",
+            expiresIn: try c.decodeIfPresent(Int.self, forKey: .expiresIn) ?? 3600,
+            refreshToken: try c.decodeIfPresent(String.self, forKey: .refreshToken),
+            scope: try c.decodeIfPresent(String.self, forKey: .scope),
+            idToken: try c.decodeIfPresent(String.self, forKey: .idToken)
+        )
     }
 }
 
@@ -332,6 +362,7 @@ struct PlateCheckScope: Identifiable, Equatable, Hashable {
 
     func contains(_ song: SongData, difficulty: DifficultyType) -> Bool {
         guard difficulty.rawValue >= 0,
+              difficulty.rawValue <= 4,
               !song.isUtage,
               song.isDisabled != true,
               song.charts.count > difficulty.rawValue else {

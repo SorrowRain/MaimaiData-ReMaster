@@ -375,20 +375,30 @@ object LXNSCatalogConverter {
 
         for (score in scores) {
             val songId = normalizeSongId(id = score.id, type = score.type)
-            val recordType = if (score.type.equals("standard", ignoreCase = true)) {
-                MaimaiConstants.CHART_TYPE_SD
+            val lowerType = score.type.lowercase(Locale.ROOT)
+            val isUtage = lowerType == "utage" || songId >= 100_000
+            val canonicalLevelIndex = if (isUtage) {
+                if (score.levelIndex == 1 || score.levelIndex == 11) 11 else 10
             } else {
-                MaimaiConstants.CHART_TYPE_DX
+                score.levelIndex
+            }
+            val recordType = when {
+                isUtage -> "utage"
+                lowerType == "standard" -> MaimaiConstants.CHART_TYPE_SD
+                else -> MaimaiConstants.CHART_TYPE_DX
             }
             val song = songsById[songId]
-            val ds = song?.ds?.getOrElse(score.levelIndex) { 0.0 } ?: 0.0
-            val level = song?.level?.getOrNull(score.levelIndex) ?: score.level ?: "-"
+            val chartIdx = song?.chartArrayIndex(canonicalLevelIndex)
+            val ds = if (isUtage) 0.0 else (chartIdx?.let { song.ds.getOrNull(it) } ?: 0.0)
+            val level = chartIdx?.let { song.level.getOrNull(it) } ?: score.level ?: "-"
             val title = song?.title ?: score.songName ?: "Song #$songId"
             val fc = score.fc.orEmpty().lowercase(Locale.ROOT)
             val fs = score.fs.orEmpty().lowercase(Locale.ROOT)
+            val dxScore = score.dxScore ?: 0
             val rate = score.rate?.takeIf { it.isNotEmpty() }?.lowercase(Locale.ROOT)
                 ?: fallbackRateString(score.achievements)
             val computedRa = when {
+                isUtage -> 0
                 ds > 0.0 -> RatingCalculator.singleSongRating(ds = ds, achievement = score.achievements)
                 score.dxRating != null -> floor(score.dxRating).toInt()
                 else -> 0
@@ -400,23 +410,54 @@ object LXNSCatalogConverter {
                 fc = fc,
                 fs = fs,
                 level = level,
-                levelIndex = score.levelIndex,
+                levelIndex = canonicalLevelIndex,
                 ra = computedRa,
                 rate = rate,
                 songId = songId,
                 title = title,
-                type = recordType
+                type = recordType,
+                dxScore = dxScore
             )
 
-            val key = "${songId}_${score.levelIndex}"
+            val key = "${songId}_$canonicalLevelIndex"
             val existing = bestByKey[key]
-            if (existing != null && existing.achievements >= record.achievements) {
+            if (existing != null && !shouldReplaceScore(existing = existing, candidate = record)) {
                 continue
             }
             bestByKey[key] = record
         }
 
         return bestByKey.values.toList()
+    }
+
+    private fun shouldReplaceScore(existing: ProberRecord, candidate: ProberRecord): Boolean {
+        if (candidate.achievements != existing.achievements) {
+            return candidate.achievements > existing.achievements
+        }
+        val fcC = badgeRankFC(candidate.fc)
+        val fcE = badgeRankFC(existing.fc)
+        if (fcC != fcE) return fcC > fcE
+        val fsC = badgeRankFS(candidate.fs)
+        val fsE = badgeRankFS(existing.fs)
+        if (fsC != fsE) return fsC > fsE
+        return candidate.dxScore > existing.dxScore
+    }
+
+    private fun badgeRankFC(value: String): Int = when (value.lowercase(Locale.ROOT)) {
+        "fc" -> 1
+        "fcp" -> 2
+        "ap" -> 3
+        "app" -> 4
+        else -> 0
+    }
+
+    private fun badgeRankFS(value: String): Int = when (value.lowercase(Locale.ROOT)) {
+        "sync" -> 1
+        "fs" -> 2
+        "fsp" -> 3
+        "fsd" -> 4
+        "fsdp" -> 5
+        else -> 0
     }
 
     // 4. Multi-Region Unified Plate Scopes (CN / INTL / JP)

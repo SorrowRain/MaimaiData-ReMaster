@@ -60,7 +60,7 @@ enum RatingCalculator {
 
     static func reverseCalculate(targetTotalRating: Int) -> [TargetRow] {
         guard targetTotalRating > 0 else { return [] }
-        let perSong = targetTotalRating / 50
+        let perSong = (targetTotalRating + 49) / 50
         var minLv = 0
         for i in 10...150 {
             if perSong <= achievementToRating(levelTenths: i, achievementTenThousandths: 1_005_000) {

@@ -115,6 +115,47 @@ struct AppSecureField: View {
     }
 }
 
+/// Single-line URL or token input field with an inline paste-from-clipboard icon button.
+struct AppPasteField: View {
+    var title: String? = nil
+    let placeholder: String
+    @Binding var text: String
+    var keyboardType: UIKeyboardType = .URL
+    var onSubmit: (() -> Void)? = nil
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        AppInputFieldBox(title: title, isFocused: isFocused, onTap: { isFocused = true }) {
+            HStack(spacing: AppTheme.Space.s) {
+                TextField(placeholder, text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(keyboardType)
+                    .submitLabel(.done)
+                    .font(AppTheme.Typography.input)
+                    .focused($isFocused)
+                    .onSubmit {
+                        onSubmit?()
+                    }
+
+                Button {
+                    if let pasted = UIPasteboard.general.string {
+                        text = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(AppTheme.Typography.body)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("粘贴剪贴板内容")
+            }
+        }
+    }
+}
+
 /// Standard labeled discrete integer slider row (`label` + `AppValueBadge` + `Slider`).
 /// Shared by `SearchFilterSheet` and `RatingCalculatorView`.
 struct AppLabeledSliderRow: View {

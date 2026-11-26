@@ -131,10 +131,8 @@ fun SongDetailScreen(
     var lastResolvedSong by remember { mutableStateOf<SongData?>(null) }
     val catalogRevision = store.catalogRevision
 
-    val song: SongData? = remember(activeSongId, catalogRevision, store.songsById, store.songs) {
-        val numeric = activeSongId.toIntOrNull() ?: -1
-        store.songsById[numeric]
-            ?: store.songs.firstOrNull { it.id == activeSongId }
+    val song: SongData? = remember(activeSongId, catalogRevision, store.songsById, store.songs, store.deletedSongsById) {
+        store.songById(activeSongId)
             ?: lastResolvedSong?.let { prev ->
                 store.songs.firstOrNull {
                     it.title == prev.title &&
@@ -431,6 +429,14 @@ private fun SongHeroHeaderCard(
                             onLongClick = { onCopyText(song.basicInfo.artist, "曲师") }
                         )
                     )
+
+                    if (song.isDisabled == true) {
+                        AppCapsuleLabel(
+                            text = "已删除",
+                            tint = Color.White,
+                            style = CapsuleStyle.Compact
+                        )
+                    }
                 }
             }
 
@@ -640,8 +646,8 @@ private fun OverviewSection(
     onCopyText: (String, String) -> Unit
 ) {
     val store = LocalDataStore.current
-    val record = store.record(song.numericId, chart.index)
-    val fitDiff = store.fitDiff(song.numericId, chart.index)
+    val record = store.record(song.numericId, chart.recordLevelIndex)
+    val fitDiff = if (!song.isUtage) store.fitDiff(song.numericId, chart.index) else null
     val (versionAsset, versionFallback) = MaimaiConstants.activeServerVersionDisplay(
         info = song.basicInfo,
         region = store.serverRegion

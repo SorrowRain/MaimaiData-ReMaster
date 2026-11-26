@@ -31,12 +31,19 @@
 		85C6280192531F63F8AEBAB3 /* MaimaiConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36E16343A53457A693078045 /* MaimaiConstants.swift */; };
 		865A00366131488DD75E4E32 /* UIKitBridges.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C1B8D96FC15D419F836716F /* UIKitBridges.swift */; };
 		88C2A7BF21BF1E841DF7B3E3 /* CoverZoomView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFC487253E2E1EFC1633137D /* CoverZoomView.swift */; };
+		A101B203C405D607E809F001 /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A101B203C405D607E809F002 /* SyncModels.swift */; };
+		A101B203C405D607E809F003 /* ScoreSyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A101B203C405D607E809F004 /* ScoreSyncEngine.swift */; };
+		A101B203C405D607E809F005 /* SyncHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A101B203C405D607E809F006 /* SyncHistoryStore.swift */; };
+		A101B203C405D607E809F009 /* SyncServiceConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A101B203C405D607E809F010 /* SyncServiceConfig.swift */; };
+		A101B203C405D607E809F015 /* SyncDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A101B203C405D607E809F016 /* SyncDiagnostics.swift */; };
+		A101B203C405D607E809F011 /* IdentityDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A101B203C405D607E809F012 /* IdentityDetailView.swift */; };
 		96561BC0ADBD4DEF2982F247 /* songdata_seed.json in Resources */ = {isa = PBXBuildFile; fileRef = 2164535E9E690A927B85FC5F /* songdata_seed.json */; };
 		9A8DD69A39024F7DB2C26C38 /* RatingToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE1E37C350837527444B41F /* RatingToolsView.swift */; };
 		9E6A08344AF53BD596B55C2A /* VersionCheckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59B9DE91B34FD5A65D4CB48 /* VersionCheckView.swift */; };
 		A0B254E7C7B914854371D439 /* SongFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9AE3D5AA7E3DF2D9310E9EB /* SongFilterTests.swift */; };
 		A84E0E3FF3A7DB375D78E26A /* SongDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121595B1DF3114C6764E0B90 /* SongDetailView.swift */; };
 		AA488C3E286E54025256694E /* ScoreProfileAndLXNSTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25ECF48FAD4A0CD8913F4D31 /* ScoreProfileAndLXNSTests.swift */; };
+		A101B203C405D607E809F007 /* SyncEngineAndIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A101B203C405D607E809F008 /* SyncEngineAndIdentityTests.swift */; };
 		B92C78500EEF586D05DAA5F2 /* ProberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF21D74D8B1396E1179DFF6 /* ProberView.swift */; };
 		BB79F48D558267E82B105F2B /* Containers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85F2592736A85FCD20FC22CB /* Containers.swift */; };
 		BFD912A4D8BD321F89BDB7F9 /* RatingCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681603465FDC54A748392D7F /* RatingCalculator.swift */; };
@@ -77,6 +84,7 @@
 		1ED553F4D7BE916073E169B4 /* RatingTierTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatingTierTable.swift; sourceTree = "<group>"; };
 		2164535E9E690A927B85FC5F /* songdata_seed.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = songdata_seed.json; sourceTree = "<group>"; };
 		25ECF48FAD4A0CD8913F4D31 /* ScoreProfileAndLXNSTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreProfileAndLXNSTests.swift; sourceTree = "<group>"; };
+		A101B203C405D607E809F008 /* SyncEngineAndIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngineAndIdentityTests.swift; sourceTree = "<group>"; };
 		274876D12FBC875067B77D48 /* DifficultyType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DifficultyType.swift; sourceTree = "<group>"; };
 		2D2AD9585AFC589604E45C71 /* RecordModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordModels.swift; sourceTree = "<group>"; };
 		2F607E11D6A4A9DF629B3351 /* ImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLoader.swift; sourceTree = "<group>"; };
@@ -100,6 +108,13 @@
 		8271F7524C0425C7500C1768 /* FinaleToDxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinaleToDxView.swift; sourceTree = "<group>"; };
 		85F2592736A85FCD20FC22CB /* Containers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Containers.swift; sourceTree = "<group>"; };
 		86EFC3E9914E32D0AC040776 /* MaimaiDataTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MaimaiDataTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A101B203C405D607E809F002 /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
+		A101B203C405D607E809F004 /* ScoreSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreSyncEngine.swift; sourceTree = "<group>"; };
+		A101B203C405D607E809F006 /* SyncHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncHistoryStore.swift; sourceTree = "<group>"; };
+		A101B203C405D607E809F010 /* SyncServiceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncServiceConfig.swift; sourceTree = "<group>"; };
+		A101B203C405D607E809F016 /* SyncDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDiagnostics.swift; sourceTree = "<group>"; };
+		A101B203C405D607E809F012 /* IdentityDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityDetailView.swift; sourceTree = "<group>"; };
+		A101B203C405D607E809F013 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
 		8B746487EEEE2B1F0C7F6F93 /* RatingCalculatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RatingCalculatorView.swift; sourceTree = "<group>"; };
 		966EABA0343D835D3B3D6C7F /* MaimaiData.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MaimaiData.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9ED998B07CF1D367866AFE2E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -137,6 +152,7 @@
 				B4B1DD5EEBBCC06EAB4C8BC8 /* RatingCalculatorTests.swift */,
 				25ECF48FAD4A0CD8913F4D31 /* ScoreProfileAndLXNSTests.swift */,
 				E9AE3D5AA7E3DF2D9310E9EB /* SongFilterTests.swift */,
+				A101B203C405D607E809F008 /* SyncEngineAndIdentityTests.swift */,
 			);
 			path = MaimaiDataTests;
 			sourceTree = "<group>";
@@ -190,6 +206,7 @@
 				681603465FDC54A748392D7F /* RatingCalculator.swift */,
 				2D2AD9585AFC589604E45C71 /* RecordModels.swift */,
 				5B47478D35AED79682486389 /* SongData.swift */,
+				A101B203C405D607E809F002 /* SyncModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -217,6 +234,7 @@
 				EFC487253E2E1EFC1633137D /* CoverZoomView.swift */,
 				8271F7524C0425C7500C1768 /* FinaleToDxView.swift */,
 				C93B227E70AE382A245FE5E6 /* LevelCheckView.swift */,
+				A101B203C405D607E809F012 /* IdentityDetailView.swift */,
 				E54374623C23A45F46C0AC2C /* LoginSheet.swift */,
 				E1519A8BABE8FF45D1E1B15E /* MainTabView.swift */,
 				ADF21D74D8B1396E1179DFF6 /* ProberView.swift */,
@@ -241,7 +259,11 @@
 				D6609F08C477F1B28BF8BFD5 /* LXNSCatalogConverter.swift */,
 				6736A5D4376B2ED85A90D27B /* MaimaiAPI.swift */,
 				503CEAE4469ABEC6DBE660AB /* PreferenceKeys.swift */,
+				A101B203C405D607E809F004 /* ScoreSyncEngine.swift */,
 				BC02C11CEC716B77962D93D2 /* SongFilter.swift */,
+				A101B203C405D607E809F006 /* SyncHistoryStore.swift */,
+				A101B203C405D607E809F016 /* SyncDiagnostics.swift */,
+				A101B203C405D607E809F010 /* SyncServiceConfig.swift */,
 				1186A3E558759F92570B4825 /* ZetarakuCatalogConverter.swift */,
 			);
 			path = Services;
@@ -253,6 +275,7 @@
 				BBCEB52666569E92417EA4F7 /* MaimaiData */,
 				16D32964663BC8EA744A1B3F /* MaimaiDataTests */,
 				3C9314BB4D506D93EBEA0534 /* Products */,
+				A101B203C405D607E809F013 /* Base.xcconfig */,
 			);
 			indentWidth = 4;
 			sourceTree = "<group>";
@@ -359,6 +382,7 @@
 				628158235C34EBFA34FAE563 /* RatingCalculatorTests.swift in Sources */,
 				AA488C3E286E54025256694E /* ScoreProfileAndLXNSTests.swift in Sources */,
 				A0B254E7C7B914854371D439 /* SongFilterTests.swift in Sources */,
+				A101B203C405D607E809F007 /* SyncEngineAndIdentityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -391,6 +415,12 @@
 				D57ABF3CFB8FD0CF746096B8 /* MaimaiDataApp.swift in Sources */,
 				FE41449F1006E1E3B09E7170 /* MainTabView.swift in Sources */,
 				E08A3D4AE66B107564E94F2F /* PreferenceKeys.swift in Sources */,
+				A101B203C405D607E809F003 /* ScoreSyncEngine.swift in Sources */,
+				A101B203C405D607E809F005 /* SyncHistoryStore.swift in Sources */,
+				A101B203C405D607E809F015 /* SyncDiagnostics.swift in Sources */,
+				A101B203C405D607E809F009 /* SyncServiceConfig.swift in Sources */,
+				A101B203C405D607E809F011 /* IdentityDetailView.swift in Sources */,
+				A101B203C405D607E809F001 /* SyncModels.swift in Sources */,
 				B92C78500EEF586D05DAA5F2 /* ProberView.swift in Sources */,
 				BFD912A4D8BD321F89BDB7F9 /* RatingCalculator.swift in Sources */,
 				F4F4743C192E8FE22D5B68B2 /* RatingCalculatorView.swift in Sources */,
@@ -444,6 +474,7 @@
 		};
 		744917CAE263F4D95AE6CE4D /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A101B203C405D607E809F013 /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -477,7 +508,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = D5F492VR43;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -497,7 +528,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.2.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -545,6 +576,7 @@
 		};
 		BD8C2397613BADFC5462E3B2 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A101B203C405D607E809F013 /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -578,7 +610,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = D5F492VR43;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -592,7 +624,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.2.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

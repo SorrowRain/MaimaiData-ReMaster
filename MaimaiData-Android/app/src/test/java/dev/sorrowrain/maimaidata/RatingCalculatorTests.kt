@@ -56,6 +56,14 @@ class RatingCalculatorTests {
             assertTrue(row.singleRating >= 15_000 / 50)
             assertEquals(row.singleRating * 50, row.totalRating)
         }
+
+        // Non-multiple of 50 must use ceiling division so totalRating never falls short of target.
+        val ceilRows = RatingCalculator.reverseCalculate(targetTotalRating = 15_001)
+        assertFalse(ceilRows.isEmpty())
+        for (row in ceilRows) {
+            assertTrue(row.singleRating >= 301)
+            assertTrue(row.totalRating >= 15_001)
+        }
     }
 
     @Test

@@ -1,5 +1,7 @@
 package dev.sorrowrain.maimaidata.components
 
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -20,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,10 +49,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -180,6 +185,92 @@ fun AppSecureField(
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            keyboardActions = keyboardActions,
+            shape = shape,
+            colors = colors
+        )
+    }
+
+    if (!label.isNullOrEmpty()) {
+        Column(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                text = label,
+                style = AppTheme.AppTypography.tag,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            fieldContent(Modifier)
+        }
+    } else {
+        fieldContent(modifier)
+    }
+}
+
+/**
+ * Single-line URL / token input field with an inline paste-from-clipboard icon button.
+ */
+@Composable
+fun AppPasteField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    label: String? = null,
+    keyboardOptions: KeyboardOptions = KeyboardOptions(
+        keyboardType = KeyboardType.Uri,
+        imeAction = ImeAction.Done
+    ),
+    keyboardActions: KeyboardActions = KeyboardActions.Default
+) {
+    val context = LocalContext.current
+    val shape = RoundedCornerShape(AppTheme.Radius.input)
+    val colors = appTextFieldColors()
+
+    val fieldContent: @Composable (Modifier) -> Unit = { fieldModifier ->
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = fieldModifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = AppTheme.rowMinHeight),
+            textStyle = AppTheme.AppTypography.input,
+            placeholder = {
+                Text(
+                    text = placeholder,
+                    style = AppTheme.AppTypography.body,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            trailingIcon = {
+                IconButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                        val clip = clipboard?.primaryClip
+                        val pasted = if (clip != null && clip.itemCount > 0) {
+                            clip.getItemAt(0).coerceToText(context)?.toString()?.trim()
+                        } else {
+                            null
+                        }
+                        if (!pasted.isNullOrEmpty()) {
+                            onValueChange(pasted)
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ContentPaste,
+                        contentDescription = "粘贴剪贴板内容",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            },
+            singleLine = true,
+            keyboardOptions = keyboardOptions,
             keyboardActions = keyboardActions,
             shape = shape,
             colors = colors

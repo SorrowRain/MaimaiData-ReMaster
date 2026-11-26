@@ -1,5 +1,8 @@
 package dev.sorrowrain.maimaidata.views
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.text.format.Formatter
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -83,7 +87,9 @@ fun SettingsScreen(
     onNavigateAcknowledgments: () -> Unit
 ) {
     val store = LocalDataStore.current
-    val activeProfileSummary = store.activeProfile?.displayTitle ?: "未添加"
+    val context = LocalContext.current
+    val toastState = rememberToastState()
+    val activeProfileSummary = store.activeIdentity?.primaryDisplayName ?: "未添加"
     val shortVersionText = "v${BuildConfig.VERSION_NAME}"
 
     AppPageBackground(tint = AppTheme.accent) {
@@ -93,114 +99,142 @@ fun SettingsScreen(
             },
             containerColor = Color.Transparent
         ) { innerPadding ->
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.m),
-                verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
             ) {
-                // 1. 账号与区服
-                AppSectionCard(title = "账号与区服") {
-                    AppInsetGroup {
-                        AppInsetRow(
-                            title = "成绩档案",
-                            showsChevron = true,
-                            onClick = onNavigateAccounts,
-                            trailing = {
-                                Text(
-                                    text = activeProfileSummary,
-                                    style = AppTheme.AppTypography.body,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        )
-                        AppInsetDivider()
-                        AppInsetRow(
-                            title = "游戏区服",
-                            showsChevron = true,
-                            onClick = onNavigateRegion,
-                            trailing = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-                                ) {
-                                    if (store.isSyncingSongs &&
-                                        store.serverRegion != MaimaiConstants.ServerRegion.CN
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.m),
+                    verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
+                ) {
+                    // 1. 账号与区服
+                    AppSectionCard(title = "账号与区服") {
+                        AppInsetGroup {
+                            AppInsetRow(
+                                title = "成绩档案",
+                                showsChevron = true,
+                                onClick = onNavigateAccounts,
+                                trailing = {
+                                    Text(
+                                        text = activeProfileSummary,
+                                        style = AppTheme.AppTypography.body,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            )
+                            AppInsetDivider()
+                            AppInsetRow(
+                                title = "游戏区服",
+                                showsChevron = true,
+                                onClick = onNavigateRegion,
+                                trailing = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
                                     ) {
+                                        if (store.isSyncingSongs &&
+                                            store.serverRegion != MaimaiConstants.ServerRegion.CN
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp,
+                                                color = AppTheme.accentText
+                                            )
+                                        }
+                                        Text(
+                                            text = store.serverRegion.shortName,
+                                            style = AppTheme.AppTypography.body,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    // 2. 偏好与数据
+                    AppSectionCard(title = "偏好与数据") {
+                        AppInsetGroup {
+                            AppInsetRow(
+                                title = "检索与显示偏好",
+                                showsChevron = true,
+                                onClick = onNavigatePreferences
+                            )
+                            AppInsetDivider()
+                            AppInsetRow(
+                                title = "数据同步与存储",
+                                showsChevron = true,
+                                onClick = onNavigateDataStorage,
+                                trailing = if (store.isSyncingSongs || store.isSyncingStats) {
+                                    {
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(14.dp),
                                             strokeWidth = 2.dp,
                                             color = AppTheme.accentText
                                         )
                                     }
+                                } else {
+                                    null
+                                }
+                            )
+                        }
+                    }
+
+                    // 3. 关于
+                    AppSectionCard(title = "关于") {
+                        AppInsetGroup {
+                            AppInsetRow(
+                                title = "关于 Re:MaiData",
+                                showsChevron = true,
+                                onClick = onNavigateAbout,
+                                trailing = {
                                     Text(
-                                        text = store.serverRegion.shortName,
+                                        text = shortVersionText,
                                         style = AppTheme.AppTypography.body,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1
                                     )
                                 }
-                            }
-                        )
-                    }
-                }
-
-                // 2. 偏好与数据
-                AppSectionCard(title = "偏好与数据") {
-                    AppInsetGroup {
-                        AppInsetRow(
-                            title = "检索与显示偏好",
-                            showsChevron = true,
-                            onClick = onNavigatePreferences
-                        )
-                        AppInsetDivider()
-                        AppInsetRow(
-                            title = "数据同步与存储",
-                            showsChevron = true,
-                            onClick = onNavigateDataStorage,
-                            trailing = if (store.isSyncingSongs || store.isSyncingStats) {
-                                {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        strokeWidth = 2.dp,
-                                        color = AppTheme.accentText
+                            )
+                            AppInsetDivider()
+                            AppInsetRow(
+                                title = "致谢与参考",
+                                showsChevron = true,
+                                onClick = onNavigateAcknowledgments
+                            )
+                            AppInsetDivider()
+                            AppInsetRow(
+                                title = "反馈与交流群",
+                                showsChevron = true,
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    cm?.setPrimaryClip(ClipData.newPlainText("QQ 群号", "1016143695"))
+                                    toastState.show("已复制 QQ 群号")
+                                },
+                                trailing = {
+                                    Text(
+                                        text = "1016143695",
+                                        style = AppTheme.AppTypography.body,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
                                     )
                                 }
-                            } else {
-                                null
-                            }
-                        )
+                            )
+                        }
                     }
                 }
 
-                // 3. 关于
-                AppSectionCard(title = "关于") {
-                    AppInsetGroup {
-                        AppInsetRow(
-                            title = "关于 Re:MaiData",
-                            showsChevron = true,
-                            onClick = onNavigateAbout,
-                            trailing = {
-                                Text(
-                                    text = shortVersionText,
-                                    style = AppTheme.AppTypography.body,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
-                                )
-                            }
-                        )
-                        AppInsetDivider()
-                        AppInsetRow(
-                            title = "致谢与参考",
-                            showsChevron = true,
-                            onClick = onNavigateAcknowledgments
-                        )
-                    }
-                }
+                StatusToastHost(
+                    toastState = toastState,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
             }
         }
     }
@@ -428,6 +462,29 @@ fun DataAndStorageSettingsScreen(onBack: () -> Unit) {
                                                     CoverImageManager.cacheSizeBytes(context)
                                                 }
                                                 toastState.show("封面缓存已清除")
+                                            }
+                                        }
+                                    )
+                                }
+                            )
+                            AppInsetDivider()
+                            AppInsetRow(
+                                title = "同步诊断日志",
+                                subtitle = "用于排查成绩同步或上传异常",
+                                trailing = {
+                                    AppInlineButton(
+                                        title = "复制日志",
+                                        icon = Icons.Rounded.ContentCopy,
+                                        onClick = {
+                                            val logText = store.exportSyncDiagnosticLog()
+                                            if (logText.isEmpty()) {
+                                                toastState.show("暂无同步日志")
+                                            } else {
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                                clipboard?.setPrimaryClip(
+                                                    ClipData.newPlainText("MaimaiData Sync Log", logText)
+                                                )
+                                                toastState.show("已复制诊断日志")
                                             }
                                         }
                                     )

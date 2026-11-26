@@ -20,68 +20,75 @@ struct ProberView: View {
         let targetList = store.sortedRecords(isNewVersion: selectedTab == 1)
         let cutoff = selectedTab == 0 ? 35 : 15
 
-        ScrollView {
-            LazyVStack(spacing: AppTheme.itemSpacing) {
-                headerPickerCard(
-                    b35Sum: summary.b35Rating,
-                    b15Sum: summary.b15Rating,
-                    isMatching: summary.isMatching
-                )
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: AppTheme.itemSpacing) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id("prober_top")
 
-                if targetList.isEmpty {
-                    if !store.isLoggedIn {
-                        ContentUnavailableView {
-                            Label("尚未添加成绩档案", systemImage: "person.crop.circle.badge.exclamationmark")
-                        } description: {
-                            Text("连接落雪咖啡屋或水鱼查分器后即可查看 B35 / B15 并生成 Best50 图")
-                        } actions: {
-                            AppInlineButton(title: "添加成绩档案", icon: "person.badge.key.fill") {
-                                showLoginSheet = true
-                            }
-                        }
-                        .padding(.top, 48)
-                    } else {
-                        ContentUnavailableView(
-                            "暂无成绩数据",
-                            systemImage: "tray",
-                            description: Text("下拉刷新从当前查分器拉取最新成绩")
-                        )
-                        .padding(.top, 48)
-                    }
-                } else {
-                    ForEach(Array(targetList.enumerated()), id: \.element.id) { idx, record in
-                        if idx == cutoff {
-                            HStack(spacing: AppTheme.Space.s) {
-                                VStack { Divider() }
-                                Text("以下不计入 Best\(cutoff)")
-                                    .font(AppTheme.Typography.inlineAction)
-                                    .foregroundStyle(.secondary)
-                                VStack { Divider() }
-                            }
-                            .padding(.vertical, 6)
-                        }
+                    headerPickerCard(
+                        b35Sum: summary.b35Rating,
+                        b15Sum: summary.b15Rating,
+                        isMatching: summary.isMatching
+                    )
 
-                        let song = store.songsById[record.songId]
-                        if let song {
-                            NavigationLink(value: SongDetailRoute(song: song, initialDifficulty: record.difficulty)) {
-                                ProberRecordRow(rank: idx + 1, record: record, song: song, region: store.serverRegion)
+                    if targetList.isEmpty {
+                        if !store.isLoggedIn {
+                            ContentUnavailableView {
+                                Label("尚未添加成绩档案", systemImage: "person.crop.circle.badge.exclamationmark")
+                            } description: {
+                                let sources = store.isCNDirectAvailable ? "国服直连、落雪或水鱼" : "落雪或水鱼"
+                                Text("绑定\(sources)后即可查看 B35 / B15 并生成 Best50 图")
+                            } actions: {
+                                AppInlineButton(title: "添加档案", icon: "person.badge.key.fill") {
+                                    showLoginSheet = true
+                                }
                             }
-                            .buttonStyle(.plain)
+                            .padding(.top, 48)
                         } else {
-                            ProberRecordRow(rank: idx + 1, record: record, song: nil, region: store.serverRegion)
+                            ContentUnavailableView(
+                                "暂无成绩数据",
+                                systemImage: "tray",
+                                description: Text("下拉刷新获取最新成绩")
+                            )
+                            .padding(.top, 48)
+                        }
+                    } else {
+                        ForEach(Array(targetList.enumerated()), id: \.element.id) { idx, record in
+                            if idx == cutoff {
+                                HStack(spacing: AppTheme.Space.s) {
+                                    VStack { Divider() }
+                                    Text("以下不计入 Best\(cutoff)")
+                                        .font(AppTheme.Typography.inlineAction)
+                                        .foregroundStyle(.secondary)
+                                    VStack { Divider() }
+                                }
+                                .padding(.vertical, 6)
+                            }
+
+                            let song = store.songsById[record.songId]
+                            if let song {
+                                NavigationLink(value: SongDetailRoute(song: song, initialDifficulty: record.difficulty)) {
+                                    ProberRecordRow(rank: idx + 1, record: record, song: song, region: store.serverRegion)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                ProberRecordRow(rank: idx + 1, record: record, song: nil, region: store.serverRegion)
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, AppTheme.pagePadding)
+                .padding(.vertical, AppTheme.Space.m)
             }
-            .padding(.horizontal, AppTheme.pagePadding)
-            .padding(.vertical, AppTheme.Space.m)
+            .onChange(of: selectedTab) { _, _ in
+                proxy.scrollTo("prober_top", anchor: .top)
+            }
         }
         .refreshable {
-            if !store.isLoggedIn {
-                showLoginSheet = true
-            } else {
-                await refreshRecords(showToastOnSuccess: true)
-            }
+            guard store.isLoggedIn else { return }
+            await refreshRecords(showToastOnSuccess: true)
         }
         .appPageBackground()
         .sensoryFeedback(.selection, trigger: selectedTab)
@@ -108,14 +115,19 @@ struct ProberView: View {
             }
         }
         .sheet(isPresented: $showLoginSheet) {
-            LoginSheet()
+            AddIdentitySheet { summaryText in
+                toast.show(summaryText, duration: 2.0)
+            }
         }
         .sheet(item: $b50PreviewItem) { item in
             B50PreviewSheet(image: item.image)
         }
         .errorAlert("提示", message: $errorMessage)
-        .task {
-            if store.records.isEmpty && store.isLoggedIn {
+        .task(id: "\(store.isLoadingLocalData)_\(store.isRestoringCachedRecords)_\(store.activeIdentityId ?? "")") {
+            if !store.isLoadingLocalData &&
+                !store.isRestoringCachedRecords &&
+                store.records.isEmpty &&
+                store.activeIdentity?.hasAnyChannel == true {
                 await refreshRecords()
             }
         }
@@ -141,17 +153,30 @@ struct ProberView: View {
 
     private func refreshRecords(showToastOnSuccess: Bool = false) async {
         do {
-            try await store.syncActiveProfileRecords()
-            if showToastOnSuccess {
+            let outcome = try await store.syncActiveIdentityDefault()
+            if let warning = outcome.warningMessage {
+                try? await Task.sleep(for: .milliseconds(250))
+                errorMessage = warning
+            } else if showToastOnSuccess {
                 toast.show("成绩已同步")
             }
         } catch is CancellationError {
             return
         } catch let urlError as URLError where urlError.code == .cancelled {
             return
-        } catch MaimaiAPIError.unauthorized {
-            try? await Task.sleep(for: .milliseconds(350))
-            showLoginSheet = true
+        } catch MaimaiAPIError.syncInProgress {
+            return
+        } catch MaimaiAPIError.backendError(_, let code, _, _) where code == "SYNC_IN_PROGRESS" {
+            return
+        } catch MaimaiAPIError.unauthorized(let detail) {
+            if !store.isLoggedIn {
+                try? await Task.sleep(for: .milliseconds(350))
+                showLoginSheet = true
+            } else {
+                let msg = "成绩刷新失败：\(detail)\n已有成绩已保留，请稍后重试。"
+                try? await Task.sleep(for: .milliseconds(350))
+                errorMessage = msg
+            }
         } catch let apiError as MaimaiAPIError {
             let msg = "成绩刷新失败：\(apiError.recoveryMessage)\n已有成绩已保留，请稍后重试。"
             try? await Task.sleep(for: .milliseconds(350))
@@ -167,7 +192,7 @@ struct ProberView: View {
         isRenderingB50 = true
         defer { isRenderingB50 = false }
         if let image = await Best50Renderer.render(
-            playerName: store.displayPlayerName,
+            playerName: store.activeB50PlayerName,
             songsById: store.songsById,
             b35: b35,
             b15: b15,

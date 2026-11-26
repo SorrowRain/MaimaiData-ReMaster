@@ -2,7 +2,6 @@ package dev.sorrowrain.maimaidata.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,7 +19,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,8 +38,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.sorrowrain.maimaidata.models.ScoreProfile
-import dev.sorrowrain.maimaidata.models.ScoreProvider
 import dev.sorrowrain.maimaidata.models.brightened
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import dev.sorrowrain.maimaidata.theme.LocalIsDarkTheme
@@ -215,20 +211,13 @@ fun AppInsetGroup(
     padding: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val isDark = LocalIsDarkTheme.current
     val shape = RoundedCornerShape(AppTheme.Radius.inset)
-    val borderColor = if (isDark) {
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
-    } else {
-        MaterialTheme.colorScheme.outlineVariant
-    }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceVariant, shape)
-            .border(1.dp, borderColor, shape)
             .padding(padding),
         content = content
     )
@@ -397,51 +386,5 @@ fun AppInsetToggleRow(
                 checkedTrackColor = AppTheme.accentText
             )
         )
-    }
-}
-
-/**
- * Single-line score profile row content: provider capsule on the left (`水鱼` blue / `落雪` purple)
- * + single-line `profile.displayTitle` + trailing checkmark when [isSelected].
- */
-@Composable
-fun ScoreProfileRowLabel(
-    profile: ScoreProfile,
-    isSelected: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val providerTint = when (profile.provider) {
-        ScoreProvider.LXNS -> AppTheme.Palette.ratingPurple
-        ScoreProvider.DIVING_FISH -> AppTheme.accent
-    }
-
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-    ) {
-        AppCapsuleLabel(
-            text = profile.provider.shortName,
-            tint = providerTint,
-            style = CapsuleStyle.Compact
-        )
-
-        Text(
-            text = profile.displayTitle,
-            style = AppTheme.AppTypography.rowTitle,
-            color = if (isSelected) AppTheme.accentText else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-
-        if (isSelected) {
-            Icon(
-                imageVector = Icons.Rounded.Check,
-                contentDescription = "当前选中",
-                tint = AppTheme.accentText,
-                modifier = Modifier.size(18.dp)
-            )
-        }
     }
 }

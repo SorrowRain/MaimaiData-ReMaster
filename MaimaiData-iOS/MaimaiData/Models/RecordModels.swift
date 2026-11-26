@@ -20,7 +20,7 @@ struct ProberRecordsResponse: Codable {
     let message: String?
 }
 
-struct ProberRecord: Codable, Identifiable, Hashable {
+struct ProberRecord: Identifiable, Hashable {
     var id: String { "\(songId)_\(levelIndex)_\(type)" }
 
     let achievements: Double
@@ -34,19 +34,45 @@ struct ProberRecord: Codable, Identifiable, Hashable {
     let songId: Int
     let title: String
     let type: String
-    var apBonusEnabled: Bool = false
+    let dxScore: Int
+    var apBonusEnabled: Bool
 
-    enum CodingKeys: String, CodingKey {
-        case achievements, ds
-        case fc, fs, level
-        case levelIndex = "level_index"
-        case ra, rate
-        case songId = "song_id"
-        case title, type
+    init(
+        achievements: Double,
+        ds: Double,
+        fc: String = "",
+        fs: String = "",
+        level: String = "-",
+        levelIndex: Int,
+        ra: Int = 0,
+        rate: String = "d",
+        songId: Int,
+        title: String,
+        type: String,
+        dxScore: Int = 0,
+        apBonusEnabled: Bool = false
+    ) {
+        self.achievements = achievements
+        self.ds = ds
+        self.fc = fc
+        self.fs = fs
+        self.level = level
+        self.levelIndex = levelIndex
+        self.ra = ra
+        self.rate = rate
+        self.songId = songId
+        self.title = title
+        self.type = type
+        self.dxScore = dxScore
+        self.apBonusEnabled = apBonusEnabled
     }
 
     var difficulty: DifficultyType {
         DifficultyType(rawValue: levelIndex) ?? .unknown
+    }
+
+    var isUtage: Bool {
+        songId >= 100_000 || levelIndex >= 10 || type.lowercased() == "utage"
     }
 
     var isAllPerfect: Bool {
@@ -54,7 +80,8 @@ struct ProberRecord: Codable, Identifiable, Hashable {
     }
 
     var computedRating: Int {
-        RatingCalculator.singleSongRating(
+        guard !isUtage else { return 0 }
+        return RatingCalculator.singleSongRating(
             ds: ds,
             achievement: achievements,
             isAP: isAllPerfect,
@@ -62,11 +89,23 @@ struct ProberRecord: Codable, Identifiable, Hashable {
         )
     }
 
-    /// Re-projects a player's CN record onto the active server's chart constants and AP+1 rule.
+    /// Re-projects a player's record onto the active server's chart constants and AP+1 rule.
     func projected(onto song: SongData, region: MaimaiConstants.ServerRegion) -> ProberRecord {
-        guard region != .cn else { return self }
-        let targetDS = song.ds[safe: levelIndex] ?? ds
-        let targetLevel = song.level[safe: levelIndex] ?? level
+        let chartIdx = song.chartArrayIndex(forRecordLevelIndex: levelIndex)
+        let targetDS: Double
+        let targetLevel: String
+        let targetTitle: String
+
+        if region == .cn {
+            targetDS = isUtage ? 0 : (ds > 0 ? ds : (chartIdx.flatMap { song.ds[safe: $0] } ?? 0))
+            targetLevel = (level != "-" && !level.isEmpty) ? level : (chartIdx.flatMap { song.level[safe: $0] } ?? level)
+            targetTitle = (!title.isEmpty && !title.hasPrefix("Song #")) ? title : (song.title.isEmpty ? title : song.title)
+        } else {
+            targetDS = isUtage ? 0 : (chartIdx.flatMap { song.ds[safe: $0] } ?? ds)
+            targetLevel = chartIdx.flatMap { song.level[safe: $0] } ?? level
+            targetTitle = song.title.isEmpty ? title : song.title
+        }
+
         return ProberRecord(
             achievements: achievements,
             ds: targetDS,
@@ -77,8 +116,9 @@ struct ProberRecord: Codable, Identifiable, Hashable {
             ra: ra,
             rate: rate,
             songId: songId,
-            title: title,
+            title: targetTitle,
             type: type,
+            dxScore: dxScore,
             apBonusEnabled: region.usesAPBonus
         )
     }
@@ -156,6 +196,68 @@ struct ProberRecord: Codable, Identifiable, Hashable {
         case 3: return "mmd_rating_diff_master"
         default: return "mmd_rating_diff_remaster"
         }
+    }
+}
+
+extension ProberRecord: Codable {
+    enum CodingKeys: String, CodingKey {
+        case achievements, ds
+        case fc, fs, level
+        case levelIndex = "level_index"
+        case ra, rate
+        case songId = "song_id"
+        case title, type
+        case dxScore
+        case dxScoreSnake = "dx_score"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let achievements = try c.decode(Double.self, forKey: .achievements)
+        let ds = try c.decodeIfPresent(Double.self, forKey: .ds) ?? 0
+        let fc = try c.decodeIfPresent(String.self, forKey: .fc) ?? ""
+        let fs = try c.decodeIfPresent(String.self, forKey: .fs) ?? ""
+        let level = try c.decodeIfPresent(String.self, forKey: .level) ?? "-"
+        let levelIndex = try c.decode(Int.self, forKey: .levelIndex)
+        let ra = try c.decodeIfPresent(Int.self, forKey: .ra) ?? 0
+        let rate = try c.decodeIfPresent(String.self, forKey: .rate) ?? "d"
+        let songId = try c.decode(Int.self, forKey: .songId)
+        let title = try c.decode(String.self, forKey: .title)
+        let type = try c.decode(String.self, forKey: .type)
+        let dx = try c.decodeIfPresent(Int.self, forKey: .dxScore)
+            ?? c.decodeIfPresent(Int.self, forKey: .dxScoreSnake)
+            ?? 0
+        self.init(
+            achievements: achievements,
+            ds: ds,
+            fc: fc,
+            fs: fs,
+            level: level,
+            levelIndex: levelIndex,
+            ra: ra,
+            rate: rate,
+            songId: songId,
+            title: title,
+            type: type,
+            dxScore: dx,
+            apBonusEnabled: false
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(achievements, forKey: .achievements)
+        try c.encode(ds, forKey: .ds)
+        try c.encode(fc, forKey: .fc)
+        try c.encode(fs, forKey: .fs)
+        try c.encode(level, forKey: .level)
+        try c.encode(levelIndex, forKey: .levelIndex)
+        try c.encode(ra, forKey: .ra)
+        try c.encode(rate, forKey: .rate)
+        try c.encode(songId, forKey: .songId)
+        try c.encode(title, forKey: .title)
+        try c.encode(type, forKey: .type)
+        try c.encode(dxScore, forKey: .dxScore)
     }
 }
 

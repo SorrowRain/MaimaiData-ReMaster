@@ -109,6 +109,20 @@ struct DXDataIdMap: Codable, Sendable {
 
         return DXDataIdMap(updatedAt: raw.updatedAt, idsByKey: map)
     }
+
+    func reverseKeysById() -> [Int: String] {
+        var out: [Int: String] = [:]
+        out.reserveCapacity(idsByKey.count)
+        for (key, id) in idsByKey where out[id] == nil {
+            out[id] = key
+        }
+        return out
+    }
+}
+
+struct DeletedCNSongsCache: Codable, Sendable {
+    let songs: [SongData]
+    let unresolvableIds: [Int]
 }
 
 struct DXDataRawCatalog: Decodable, Sendable {
@@ -134,6 +148,11 @@ enum ZetarakuCatalogConverter {
         let songs: [SongData]
         /// Pairs of `(legacySyntheticId, resolvedNumericId)` for migrating user favorites smoothly after online ID updates.
         let migratedIdPairs: [(legacyId: String, resolvedId: String)]
+    }
+
+    struct DeletedSongsResolution: Sendable {
+        let resolved: [SongData]
+        let unresolvableIds: Set<Int>
     }
 
     private struct CNLookupKey: Hashable {
@@ -458,24 +477,6 @@ enum ZetarakuCatalogConverter {
                     let fromVersion = effectiveVersion(of: sortedSheets[0], songVersion: zSong.version, region: region)
                     let vRank = versionRank[fromVersion] ?? 0
                     let sortOrder = vRank * 100_000 + catalogIdx * 2 + (isDX ? 1 : 0)
-                    let bpmInt = Int((zSong.bpm ?? 0).rounded())
-
-                    let charts: [SongData.RawChart] = sortedSheets.map { sh in
-                        let nc = sh.noteCounts
-                        let tap = nc?.tap ?? 0
-                        let hold = nc?.hold ?? 0
-                        let slide = nc?.slide ?? 0
-                        let touch = nc?.touch ?? 0
-                        let brk = nc?.breakCount ?? 0
-                        let notes = isDX ? [tap, hold, slide, touch, brk] : [tap, hold, slide, brk]
-                        return SongData.RawChart(
-                            charter: cleanedCharter(sh.noteDesigner),
-                            notes: notes
-                        )
-                    }
-
-                    let levels = sortedSheets.map { effectiveLevel(of: $0, region: region) }
-                    let dsValues = sortedSheets.map { effectiveDS(of: $0, region: region) }
                     let cnBaselineDs: [Double]? = matchedCN.map { cn in
                         sortedSheets.indices.map { idx in cn.ds[safe: idx] ?? 0 }
                     }
@@ -489,31 +490,22 @@ enum ZetarakuCatalogConverter {
                         resolvedAliases = list
                     }
 
-                    let basic = SongData.BasicInfo(
-                        artist: zSong.artist,
-                        bpm: bpmInt,
-                        from: fromVersion,
-                        genre: mappedGenre,
-                        isNew: b15Versions.contains(fromVersion),
-                        title: zSong.title,
-                        version: fromVersion
-                    )
-
                     output.append(
-                        SongData(
-                            basicInfo: basic,
-                            charts: charts,
-                            ds: dsValues,
+                        buildStandardOrDXSongData(
+                            zSong: zSong,
+                            sortedSheets: sortedSheets,
+                            resolvedId: resolvedId,
+                            mappedGenre: mappedGenre,
+                            mappedType: mappedType,
+                            isDX: isDX,
+                            fromVersion: fromVersion,
+                            isNew: b15Versions.contains(fromVersion),
                             oldDs: cnBaselineDs,
-                            id: resolvedId,
-                            level: levels,
-                            title: zSong.title,
-                            type: mappedType,
-                            alias: resolvedAliases,
-                            comment: nil,
-                            remoteCoverName: zSong.imageName,
+                            aliases: resolvedAliases,
                             preferRemoteCover: matchedCN == nil ? true : nil,
-                            sortOrder: sortOrder
+                            sortOrder: sortOrder,
+                            region: region,
+                            isDisabled: nil
                         )
                     )
                 }
@@ -521,6 +513,202 @@ enum ZetarakuCatalogConverter {
         }
 
         return ConversionOutput(songs: output, migratedIdPairs: migratedPairs)
+    }
+
+    /// Resolves metadata for removed/deleted CN songs present in player records without region filtering.
+    static func resolveDeletedCNSongs(
+        unknownIds: Set<Int>,
+        catalog: ZetarakuCatalog,
+        dxIdMap: DXDataIdMap
+    ) -> DeletedSongsResolution {
+        guard !unknownIds.isEmpty else {
+            return DeletedSongsResolution(resolved: [], unresolvableIds: [])
+        }
+        let reverseKeys = dxIdMap.reverseKeysById()
+        var byTitleGenre: [String: ZetarakuSong] = [:]
+        var byTitleNonUtage: [String: ZetarakuSong] = [:]
+        var utageByTitle: [String: ZetarakuSong] = [:]
+
+        for zSong in catalog.songs {
+            if zSong.category == "宴会場" {
+                utageByTitle[zSong.title] = zSong
+            } else {
+                let genre = mapCategoryToCNGenre(zSong.category)
+                byTitleGenre["\(zSong.title)|\(genre)"] = zSong
+                if byTitleNonUtage[zSong.title] == nil {
+                    byTitleNonUtage[zSong.title] = zSong
+                }
+            }
+        }
+
+        let unremovedCNGuardVersions: Set<String> = ["CiRCLE", "CiRCLE PLUS", "MAGiCAL"]
+        var resolved: [SongData] = []
+        var unresolvable: Set<Int> = []
+
+        for songId in unknownIds.sorted() {
+            guard let key = reverseKeys[songId], let parsed = parseDXKey(key) else {
+                unresolvable.insert(songId)
+                continue
+            }
+
+            if parsed.sheetType == "utage" {
+                guard let zSong = utageByTitle[parsed.title] else {
+                    unresolvable.insert(songId)
+                    continue
+                }
+                let rawGroup = zSong.sheets.filter { $0.type == "utage" }
+                guard !rawGroup.isEmpty else {
+                    unresolvable.insert(songId)
+                    continue
+                }
+                let fromVersion = effectiveVersion(of: rawGroup[0], songVersion: zSong.version, region: .jp)
+                if rawGroup.contains(where: { $0.regions.cn == true }) || unremovedCNGuardVersions.contains(fromVersion) {
+                    continue
+                }
+                let charts: [SongData.RawChart] = rawGroup.map { sh in
+                    let nc = sh.noteCounts
+                    return SongData.RawChart(
+                        charter: cleanedCharter(sh.noteDesigner),
+                        notes: [nc?.tap ?? 0, nc?.hold ?? 0, nc?.slide ?? 0, nc?.touch ?? 0, nc?.breakCount ?? 0],
+                        kanji: cleanedOptionalText(sh.difficulty)
+                    )
+                }
+                let song = SongData(
+                    basicInfo: SongData.BasicInfo(
+                        artist: zSong.artist,
+                        bpm: Int((zSong.bpm ?? 0).rounded()),
+                        from: fromVersion,
+                        genre: MaimaiConstants.genreUtage,
+                        isNew: false,
+                        title: zSong.title,
+                        version: fromVersion
+                    ),
+                    charts: charts,
+                    ds: rawGroup.map { effectiveDS(of: $0, region: .jp) },
+                    oldDs: nil,
+                    id: String(songId),
+                    level: rawGroup.map { effectiveLevel(of: $0, region: .jp) },
+                    title: zSong.title,
+                    type: MaimaiConstants.chartTypeDX,
+                    alias: nil,
+                    comment: cleanedOptionalText(zSong.comment),
+                    remoteCoverName: zSong.imageName,
+                    preferRemoteCover: true,
+                    sortOrder: nil,
+                    isDisabled: true
+                )
+                resolved.append(song)
+            } else {
+                let zSong = byTitleGenre["\(parsed.title)|\(parsed.cnGenre)"] ?? byTitleNonUtage[parsed.title]
+                guard let zSong else {
+                    unresolvable.insert(songId)
+                    continue
+                }
+                let sortedSheets = zSong.sheets
+                    .filter { $0.type == parsed.sheetType }
+                    .sorted { (difficultyOrder[$0.difficulty] ?? 99) < (difficultyOrder[$1.difficulty] ?? 99) }
+                guard !sortedSheets.isEmpty else {
+                    unresolvable.insert(songId)
+                    continue
+                }
+                let isDX = (parsed.sheetType == "dx")
+                let mappedType = isDX ? MaimaiConstants.chartTypeDX : MaimaiConstants.chartTypeSD
+                let fromVersion = effectiveVersion(of: sortedSheets[0], songVersion: zSong.version, region: .jp)
+                if sortedSheets.contains(where: { $0.regions.cn == true }) || unremovedCNGuardVersions.contains(fromVersion) {
+                    continue
+                }
+                resolved.append(
+                    buildStandardOrDXSongData(
+                        zSong: zSong,
+                        sortedSheets: sortedSheets,
+                        resolvedId: String(songId),
+                        mappedGenre: mapCategoryToCNGenre(zSong.category),
+                        mappedType: mappedType,
+                        isDX: isDX,
+                        fromVersion: fromVersion,
+                        isNew: false,
+                        oldDs: nil,
+                        aliases: nil,
+                        preferRemoteCover: true,
+                        sortOrder: nil,
+                        region: .jp,
+                        isDisabled: true
+                    )
+                )
+            }
+        }
+
+        return DeletedSongsResolution(resolved: resolved, unresolvableIds: unresolvable)
+    }
+
+    private static func buildStandardOrDXSongData(
+        zSong: ZetarakuSong,
+        sortedSheets: [ZetarakuSheet],
+        resolvedId: String,
+        mappedGenre: String,
+        mappedType: String,
+        isDX: Bool,
+        fromVersion: String,
+        isNew: Bool,
+        oldDs: [Double]?,
+        aliases: [String]?,
+        preferRemoteCover: Bool?,
+        sortOrder: Int?,
+        region: MaimaiConstants.ServerRegion,
+        isDisabled: Bool?
+    ) -> SongData {
+        let bpmInt = Int((zSong.bpm ?? 0).rounded())
+        let charts: [SongData.RawChart] = sortedSheets.map { sh in
+            let nc = sh.noteCounts
+            let tap = nc?.tap ?? 0
+            let hold = nc?.hold ?? 0
+            let slide = nc?.slide ?? 0
+            let touch = nc?.touch ?? 0
+            let brk = nc?.breakCount ?? 0
+            let notes = isDX ? [tap, hold, slide, touch, brk] : [tap, hold, slide, brk]
+            return SongData.RawChart(
+                charter: cleanedCharter(sh.noteDesigner),
+                notes: notes
+            )
+        }
+        return SongData(
+            basicInfo: SongData.BasicInfo(
+                artist: zSong.artist,
+                bpm: bpmInt,
+                from: fromVersion,
+                genre: mappedGenre,
+                isNew: isNew,
+                title: zSong.title,
+                version: fromVersion
+            ),
+            charts: charts,
+            ds: sortedSheets.map { effectiveDS(of: $0, region: region) },
+            oldDs: oldDs,
+            id: resolvedId,
+            level: sortedSheets.map { effectiveLevel(of: $0, region: region) },
+            title: zSong.title,
+            type: mappedType,
+            alias: aliases,
+            comment: nil,
+            remoteCoverName: zSong.imageName,
+            preferRemoteCover: preferRemoteCover,
+            sortOrder: sortOrder,
+            isDisabled: isDisabled
+        )
+    }
+
+    private static func parseDXKey(_ key: String) -> (title: String, cnGenre: String, sheetType: String)? {
+        if key.hasPrefix("utage|") {
+            return (String(key.dropFirst(6)), MaimaiConstants.genreUtage, "utage")
+        }
+        guard let lastPipe = key.lastIndex(of: "|") else { return nil }
+        let typeStr = String(key[key.index(after: lastPipe)...])
+        let head = String(key[..<lastPipe])
+        guard let prevPipe = head.lastIndex(of: "|") else { return nil }
+        let cnGenre = String(head[head.index(after: prevPipe)...])
+        let title = String(head[..<prevPipe])
+        let sheetType = (typeStr == MaimaiConstants.chartTypeDX) ? "dx" : "std"
+        return (title, cnGenre, sheetType)
     }
 
     // MARK: - Utage Base Song Lookup Helpers

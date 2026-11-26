@@ -42,6 +42,18 @@ data class SongData(
     val isDX: Boolean
         get() = type == MaimaiConstants.CHART_TYPE_DX
 
+    fun chartArrayIndex(recordLevelIndex: Int): Int? {
+        val count = maxOf(ds.size, level.size, charts.size)
+        if (isUtage) {
+            return when (recordLevelIndex) {
+                0, 10 -> if (count > 0) 0 else null
+                1, 11 -> if (count > 1) 1 else if (count > 0) 0 else null
+                else -> null
+            }
+        }
+        return if (recordLevelIndex in 0 until count) recordLevelIndex else null
+    }
+
     val resolvedCharts: List<ResolvedChart>
         get() = charts.indices.map { idx ->
             val raw = charts[idx]
@@ -219,6 +231,14 @@ data class ResolvedChart(
     val breakCount: Int,
     val totalNotes: Int
 ) {
+    /** Canonical level index used to match `ProberRecord.levelIndex` (Utage is 10/11 while array `index` is 0/1). */
+    val recordLevelIndex: Int
+        get() = when (difficulty) {
+            DifficultyType.UTAGE -> 10
+            DifficultyType.UTAGE_PLAYER2 -> 11
+            else -> index
+        }
+
     val totalWeightedScore: Int
         get() = (tap + touch) + hold * 2 + slide * 3 + breakCount * 5
 

@@ -37,6 +37,11 @@ class MainActivity : ComponentActivity() {
         dispatchOAuthCallbackIfPresent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        dataStore.checkAppUpdateOnForeground()
+    }
+
     private fun dispatchOAuthCallbackIfPresent(intent: Intent?) {
         val uri = intent?.data ?: return
         if (uri.scheme == "maimaidata") {

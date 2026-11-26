@@ -18,7 +18,7 @@ object LXNSConfiguration {
     const val CLIENT_ID = "9e67172c-d7b9-4bcf-b8a9-185b8afe1b63"
     const val REDIRECT_URI = "maimaidata://oauth/lxns"
     const val CALLBACK_SCHEME = "maimaidata"
-    const val SCOPES = "read_player openid profile"
+    const val SCOPES = "read_player write_player openid profile"
     const val AUTHORIZE_URL = "https://maimai.lxns.net/oauth/authorize"
     const val API_BASE = "https://maimai.lxns.net/api/v0"
 }
@@ -287,7 +287,7 @@ data class PlateCheckScope(
         }
 
     fun contains(song: SongData, difficulty: DifficultyType): Boolean {
-        if (difficulty.rawValue < 0 || song.isUtage || song.isDisabled == true || song.charts.size <= difficulty.rawValue) {
+        if (difficulty.rawValue !in 0..4 || song.isUtage || song.isDisabled == true || song.charts.size <= difficulty.rawValue) {
             return false
         }
         return when (val r = rule) {

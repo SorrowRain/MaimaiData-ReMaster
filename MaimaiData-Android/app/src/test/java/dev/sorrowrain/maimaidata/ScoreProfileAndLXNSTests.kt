@@ -146,7 +146,9 @@ class ScoreProfileAndLXNSTests {
         assertEquals(RatingCalculator.singleSongRating(ds = 13.7, achievement = 100.5000), dxRec.computedRating)
 
         val utageRec = bySongId[100018]!!
-        assertEquals("DX", utageRec.type)
+        assertEquals("utage", utageRec.type)
+        assertEquals(10, utageRec.levelIndex)
+        assertEquals(0, utageRec.computedRating)
         assertEquals("[協]Love You", utageRec.title)
         assertEquals("ss", utageRec.rate)
     }

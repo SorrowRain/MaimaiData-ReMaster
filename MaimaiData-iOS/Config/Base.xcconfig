@@ -1,0 +1,3 @@
+SYNC_SERVICE_HOST =
+SYNC_SERVICE_ACCESS_KEY =
+#include? "Local.xcconfig"

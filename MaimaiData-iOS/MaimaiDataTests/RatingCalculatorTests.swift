@@ -38,6 +38,14 @@ final class RatingCalculatorTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(row.singleRating, 15000 / 50)
             XCTAssertEqual(row.totalRating, row.singleRating * 50)
         }
+
+        // Non-multiple of 50 must use ceiling division so totalRating never falls short of target.
+        let ceilRows = RatingCalculator.reverseCalculate(targetTotalRating: 15001)
+        XCTAssertFalse(ceilRows.isEmpty)
+        for row in ceilRows {
+            XCTAssertGreaterThanOrEqual(row.singleRating, 301)
+            XCTAssertGreaterThanOrEqual(row.totalRating, 15001)
+        }
     }
 
     func testReverseCalculateMaxBoundaryAndUnreachableTarget() {

@@ -33,5 +33,9 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>SyncServiceHost</key>
+	<string>$(SYNC_SERVICE_HOST)</string>
+	<key>SyncServiceAccessKey</key>
+	<string>$(SYNC_SERVICE_ACCESS_KEY)</string>
 </dict>
 </plist>

@@ -10,6 +10,9 @@ final class DataStore {
     private(set) var catalogRevision = 0
     private var cnSongs: [SongData] = []
     private var cnSongsById: [Int: SongData] = [:]
+    private(set) var deletedSongsById: [Int: SongData] = [:]
+    private var unresolvableDeletedSongIds: Set<Int> = []
+    private(set) var playedSongIds: Set<Int> = []
     private(set) var plateCatalog: CNPlateCatalog?
     private var zetarakuCatalog: ZetarakuCatalog?
     private var dxDataIdMap: DXDataIdMap?
@@ -18,14 +21,21 @@ final class DataStore {
     private(set) var records: [ProberRecord] = [] {
         didSet {
             var map: [String: ProberRecord] = [:]
+            var songIds = Set<Int>()
             map.reserveCapacity(records.count)
+            songIds.reserveCapacity(records.count)
             for rec in records {
                 map["\(rec.songId)_\(rec.levelIndex)"] = rec
+                if rec.songId > 0 {
+                    songIds.insert(rec.songId)
+                }
             }
             recordsByKey = map
+            playedSongIds = songIds
         }
     }
     private var recordsByKey: [String: ProberRecord] = [:]
+    private var recordsOwnerIdentityId: String?
     /// Monotonic token distinguishing network-fetched records from a slower cache backfill.
     private var recordsEpoch = 0
     private(set) var maxNotesStats: MaxNotesStats = .fallback
@@ -34,52 +44,102 @@ final class DataStore {
     private var isFetchingCNSongs = false
     private var isFetchingZetaraku = false
     var isSyncingSongs: Bool { isFetchingCNSongs || isFetchingZetaraku }
-    private(set) var isSyncingRecords = false
+    private(set) var activeSyncTask: ActiveSyncTask?
+    var isSyncingRecords: Bool { activeSyncTask != nil }
     private(set) var isSyncingStats = false
     private(set) var isLoadingLocalData = true
+    private(set) var isRestoringCachedRecords = false
     var statusMessage: String?
     var syncNotice: DataSyncNotice?
     var availableAppUpdate: AppReleaseInfo?
     private(set) var isCheckingAppUpdate = false
 
     // Single-flight guard for rotating LXNS OAuth refresh tokens
-    private var inFlightTokenRefreshTasks: [UUID: Task<String, Error>] = [:]
-    private var suppressNextProfileRestore = false
+    private var inFlightTokenRefreshTasks: [String: Task<String, Error>] = [:]
+    private var suppressNextIdentityRestore = false
+    private var isApplyingIdentityBatch = false
+    private(set) var credentialStoreLoadFailed = false
+    private(set) var selfHostedConfig = SelfHostedEndpointConfig()
+    var isCNDirectAvailable: Bool { selfHostedConfig.isConfigured }
+
+    func isSyncing(identityId: String, operation: SyncOperationKind) -> Bool {
+        activeSyncTask?.identityId == identityId.lowercased() && activeSyncTask?.operation == operation
+    }
+    private let syncHistoryStore: SyncHistoryStore
+    private var divingFishMusicTitles: [Int: String] = [:]
+
+    private var lastUnknownSongCatalogRefreshDate: Date? {
+        get {
+            guard let ts = UserDefaults.standard.object(forKey: Keys.unknownSongCatalogRefresh) as? TimeInterval else { return nil }
+            return Date(timeIntervalSince1970: ts)
+        }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue.timeIntervalSince1970, forKey: Keys.unknownSongCatalogRefresh)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.unknownSongCatalogRefresh)
+            }
+        }
+    }
+
+    private var lastDeletedSongsResolveAttemptDate: Date? {
+        get {
+            guard let ts = UserDefaults.standard.object(forKey: Keys.deletedSongsResolveAttempt) as? TimeInterval else { return nil }
+            return Date(timeIntervalSince1970: ts)
+        }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue.timeIntervalSince1970, forKey: Keys.deletedSongsResolveAttempt)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.deletedSongsResolveAttempt)
+            }
+        }
+    }
 
     private enum SyncPolicy {
         static let catalogAutoRefresh: TimeInterval = 7 * 24 * 3600
         static let catalogManualCooldown: TimeInterval = 10 * 60
+        static let unknownSongCatalogCooldown: TimeInterval = 12 * 3600
+        static let deletedSongsResolveCooldown: TimeInterval = 12 * 3600
         static let statsAutoRefresh: TimeInterval = 5 * 24 * 3600
         static let statsManualCooldown: TimeInterval = 5 * 60
-        static let appUpdateCheckInterval: TimeInterval = 24 * 3600
+        static let appUpdateCheckInterval: TimeInterval = 2 * 3600
         static let bootstrapDelaySeconds: Int = 3
         static let oauthExpiryBufferSeconds: TimeInterval = 30
     }
 
-    // MARK: - User Preferences & Multi-Provider Score Profiles
+    // MARK: - User Preferences & Multi-Channel Player Identities
     var favoriteIds: Set<String> {
         didSet { UserDefaults.standard.set(Array(favoriteIds), forKey: Keys.favorites) }
     }
     var searchHistory: [String] {
         didSet { UserDefaults.standard.set(searchHistory, forKey: Keys.searchHistory) }
     }
-    var profiles: [ScoreProfile] {
-        didSet { AccountCredentialStore.saveProfiles(profiles) }
-    }
-    var activeProfileId: UUID? {
+    var identities: [PlayerIdentity] {
         didSet {
-            guard oldValue != activeProfileId else { return }
-            UserDefaults.standard.set(activeProfileId?.uuidString, forKey: Keys.activeProfileId)
-            if suppressNextProfileRestore {
-                suppressNextProfileRestore = false
+            guard !credentialStoreLoadFailed, !isApplyingIdentityBatch else { return }
+            _ = AccountCredentialStore.saveIdentities(identities)
+        }
+    }
+    var activeIdentityId: String? {
+        didSet {
+            guard oldValue != activeIdentityId else { return }
+            UserDefaults.standard.set(activeIdentityId, forKey: Keys.activeIdentityId)
+            if suppressNextIdentityRestore {
+                suppressNextIdentityRestore = false
             } else {
                 restoreCachedRecords()
             }
         }
     }
-    var activeProfile: ScoreProfile? {
-        guard let activeProfileId else { return nil }
-        return profiles.first(where: { $0.id == activeProfileId })
+    var activeIdentity: PlayerIdentity? {
+        guard let activeIdentityId else { return nil }
+        return identities.first(where: { $0.id == activeIdentityId })
+    }
+
+    private func setRecordsSnapshot(_ list: [ProberRecord], ownerIdentityId: String?) {
+        recordsOwnerIdentityId = ownerIdentityId?.lowercased()
+        records = list
     }
 
     var serverRegion: MaimaiConstants.ServerRegion {
@@ -104,12 +164,6 @@ final class DataStore {
     }
     var enableCharterSearch: Bool {
         didSet { UserDefaults.standard.set(enableCharterSearch, forKey: Keys.charterSearch) }
-    }
-    var useProberNickname: Bool {
-        didSet { UserDefaults.standard.set(useProberNickname, forKey: Keys.useDFNickname) }
-    }
-    var customNickname: String {
-        didSet { UserDefaults.standard.set(customNickname, forKey: Keys.customNickname) }
     }
     var lastVersionCheckIndex: Int {
         didSet { UserDefaults.standard.set(lastVersionCheckIndex, forKey: Keys.lastVersionCheck) }
@@ -207,26 +261,53 @@ final class DataStore {
     private var cachedPlatesURL: URL { appSupportDir.appendingPathComponent("plate_rules.json") }
     private var cachedZetarakuURL: URL { appSupportDir.appendingPathComponent("zetaraku_data.json") }
     private var cachedDXDataIdMapURL: URL { appSupportDir.appendingPathComponent("dxdata_id_map.json") }
+    private var cachedDeletedCNSongsURL: URL { appSupportDir.appendingPathComponent("deleted_cn_songs.json") }
     private var cachedStatsURL: URL { appSupportDir.appendingPathComponent("chart_stats.json") }
     private var cachedRecordsURL: URL? {
-        guard let activeProfileId else { return nil }
-        return AccountCredentialStore.recordsFileURL(for: activeProfileId, in: appSupportDir)
+        guard let activeIdentityId else { return nil }
+        return AccountCredentialStore.recordsFileURL(for: activeIdentityId, in: appSupportDir)
     }
 
     init() {
         let ud = UserDefaults.standard
         PreferenceKeys.registerDefaults(in: ud)
         let supportDir = Self.resolveAppSupportDir()
+        SyncDiagnostics.shared.configure(directoryURL: supportDir)
 
+        self.syncHistoryStore = SyncHistoryStore(directoryURL: supportDir)
         self.favoriteIds = Set(ud.stringArray(forKey: Keys.favorites) ?? [])
         self.searchHistory = ud.stringArray(forKey: Keys.searchHistory) ?? []
 
-        let loadedProfiles = AccountCredentialStore.loadOrMigrateProfiles(
+        let loaded = AccountCredentialStore.loadOrMigrateIdentities(
             defaults: ud,
             appSupportDir: supportDir
         )
-        self.profiles = loadedProfiles.profiles
-        self.activeProfileId = loadedProfiles.activeProfileId
+        var initialIdentities = loaded.identities
+        if !loaded.loadFailed {
+            let legacyUseDF = ud.bool(forKey: Keys.useDFNickname)
+            let legacyCustom = ud.string(forKey: Keys.customNickname) ?? ""
+            let migrated = ScoreSyncEngine.migrateLegacyB50Nickname(
+                identities: initialIdentities,
+                legacyUseProberNickname: legacyUseDF,
+                legacyCustomNickname: legacyCustom
+            )
+            var savedMigrated = true
+            if migrated.didChange {
+                initialIdentities = migrated.identities
+                savedMigrated = AccountCredentialStore.saveIdentities(initialIdentities)
+            }
+            if !migrated.didChange || savedMigrated {
+                ud.removeObject(forKey: Keys.useDFNickname)
+                ud.removeObject(forKey: Keys.customNickname)
+            }
+        }
+        self.isApplyingIdentityBatch = true
+        self.credentialStoreLoadFailed = loaded.loadFailed
+        self.identities = initialIdentities
+        self.activeIdentityId = loaded.activeIdentityId
+        self.isApplyingIdentityBatch = false
+        AccountCredentialStore.deleteSelfHostedEndpointConfig()
+        self.selfHostedConfig = SyncServiceConfig.builtIn()
 
         self.serverRegion = ud.string(forKey: Keys.serverRegion)
             .flatMap(MaimaiConstants.ServerRegion.init(rawValue:)) ?? .cn
@@ -250,8 +331,6 @@ final class DataStore {
         self.enableShowAlias = ud.bool(forKey: Keys.showAlias)
         self.enableAliasSearch = ud.bool(forKey: Keys.aliasSearch)
         self.enableCharterSearch = ud.bool(forKey: Keys.charterSearch)
-        self.useProberNickname = ud.bool(forKey: Keys.useDFNickname)
-        self.customNickname = ud.string(forKey: Keys.customNickname) ?? ""
         self.lastVersionCheckIndex = ud.integer(forKey: Keys.lastVersionCheck)
         self.lastVersionCheckIntlIndex = ud.integer(forKey: Keys.lastVersionCheckIntl)
         self.lastVersionCheckJpIndex = ud.integer(forKey: Keys.lastVersionCheckJp)
@@ -265,6 +344,7 @@ final class DataStore {
         let platesURL = cachedPlatesURL
         let zetarakuURL = cachedZetarakuURL
         let dxIdMapURL = cachedDXDataIdMapURL
+        let deletedURL = cachedDeletedCNSongsURL
         let statsURL = cachedStatsURL
         let recordsURL = cachedRecordsURL
 
@@ -298,19 +378,33 @@ final class DataStore {
             if let idData = try? Data(contentsOf: dxIdMapURL) {
                 cache.dxIdMap = try? JSONDecoder().decode(DXDataIdMap.self, from: idData)
             }
+            if let delData = try? Data(contentsOf: deletedURL) {
+                cache.deletedCache = try? JSONDecoder().decode(DeletedCNSongsCache.self, from: delData)
+            }
             if let data = try? Data(contentsOf: statsURL) {
                 cache.stats = try? JSONDecoder().decode(ChartStatsResponse.self, from: data)
             }
-            if let recordsURL, let data = try? Data(contentsOf: recordsURL) {
-                cache.records = try? JSONDecoder().decode([ProberRecord].self, from: data)
+            if let recordsURL,
+               let data = try? Data(contentsOf: recordsURL),
+               let decoded = try? JSONDecoder().decode([ProberRecord].self, from: data) {
+                cache.records = ScoreSyncEngine.normalizeCachedRecords(decoded)
             }
             return cache
         }.value
 
-        let currentProfileId = activeProfileId
+        let currentIdentityId = activeIdentityId
         plateCatalog = caches.plates
         zetarakuCatalog = caches.zetaraku
         dxDataIdMap = caches.dxIdMap
+        if let deletedCache = caches.deletedCache {
+            var deletedMap: [Int: SongData] = [:]
+            deletedMap.reserveCapacity(deletedCache.songs.count)
+            for song in deletedCache.songs where song.numericId > 0 {
+                deletedMap[song.numericId] = song
+            }
+            deletedSongsById = deletedMap
+            unresolvableDeletedSongIds = Set(deletedCache.unresolvableIds)
+        }
         var cnSnapshot: SongSnapshot?
         if let loadedCNSongs = caches.songs {
             cnSnapshot = await storeCNBaseline(loadedCNSongs)
@@ -330,8 +424,8 @@ final class DataStore {
         rebuildPlateScopeCache()
 
         if let stats = caches.stats { applyChartStats(stats) }
-        if activeProfileId == currentProfileId && recordsEpoch == 0 {
-            records = caches.records ?? []
+        if activeIdentityId == currentIdentityId && recordsEpoch == 0 {
+            setRecordsSnapshot(caches.records ?? [], ownerIdentityId: currentIdentityId)
         }
         isLoadingLocalData = false
         prefetchBest50Covers()
@@ -351,22 +445,24 @@ final class DataStore {
         try? await Task.sleep(for: .seconds(SyncPolicy.bootstrapDelaySeconds))
         async let periodicCatalogCheck: Void = syncAllCatalogsAndRules(force: false)
         async let periodicStatsCheck: Void = refreshChartStatsIfStale(force: false)
-        async let periodicAppUpdateCheck: Void = checkAppUpdateIfNeeded(manual: false)
+        async let periodicAppUpdateCheck: Void = checkAppUpdateIfNeeded(manual: false, ignoreInterval: true)
         _ = await (periodicCatalogCheck, periodicStatsCheck, periodicAppUpdateCheck)
     }
 
-    // MARK: - App Version Update Check (24h Silent Auto-Check for Sideload + Manual Check in About)
+    // MARK: - App Version Update Check (Cold Launch + 2h Foreground Throttled for TestFlight & Sideload + Manual Check in About)
 
-    func checkAppUpdateIfNeeded(manual: Bool) async {
+    func checkAppUpdateIfNeeded(manual: Bool, ignoreInterval: Bool = false) async {
         guard !isCheckingAppUpdate else { return }
         let channel = IOSInstallChannel.current
         if !manual {
-            // App Store and TestFlight have native Apple update notifications; only auto-prompt sideload/dev builds.
-            guard channel == .sideloadOrDev else { return }
-            let ud = UserDefaults.standard
-            if let lastTs = ud.object(forKey: Keys.appUpdateCheck) as? TimeInterval,
-               Date().timeIntervalSince1970 - lastTs < SyncPolicy.appUpdateCheckInterval {
-                return
+            // App Store builds update via the App Store; auto-check TestFlight and sideload/dev builds.
+            guard channel != .appStore else { return }
+            if !ignoreInterval {
+                let ud = UserDefaults.standard
+                if let lastTs = ud.object(forKey: Keys.appUpdateCheck) as? TimeInterval,
+                   Date().timeIntervalSince1970 - lastTs < SyncPolicy.appUpdateCheckInterval {
+                    return
+                }
             }
         }
 
@@ -407,6 +503,14 @@ final class DataStore {
         }.value
         cnSongs = snapshot.songs
         cnSongsById = snapshot.songsById
+        if !deletedSongsById.isEmpty {
+            var remainingDeleted = deletedSongsById
+            for id in snapshot.songsById.keys {
+                remainingDeleted.removeValue(forKey: id)
+            }
+            deletedSongsById = remainingDeleted
+        }
+        unresolvableDeletedSongIds.subtract(snapshot.songsById.keys)
         return snapshot
     }
 
@@ -468,14 +572,21 @@ final class DataStore {
 
     nonisolated private static func buildSnapshotSync(from list: [SongData]) -> SongSnapshot {
         let enriched = SongData.mergingCounterpartAliases(list)
-        let ordered = enriched.sorted {
+        let sorted = enriched.sorted {
             if $0.defaultSortKey != $1.defaultSortKey { return $0.defaultSortKey > $1.defaultSortKey }
             return $0.id > $1.id
         }
+        var seenIds = Set<String>()
+        seenIds.reserveCapacity(sorted.count)
+        var ordered: [SongData] = []
+        ordered.reserveCapacity(sorted.count)
         var map: [Int: SongData] = [:]
-        map.reserveCapacity(ordered.count)
-        for song in ordered where song.numericId > 0 {
-            map[song.numericId] = song
+        map.reserveCapacity(sorted.count)
+        for song in sorted where seenIds.insert(song.id).inserted {
+            ordered.append(song)
+            if song.numericId > 0 {
+                map[song.numericId] = song
+            }
         }
         return SongSnapshot(songs: ordered, songsById: map, maxNotes: MaxNotesStats.compute(from: ordered))
     }
@@ -653,6 +764,19 @@ final class DataStore {
             if let encoded = try? JSONEncoder().encode(fetchedIdMap) {
                 try? encoded.write(to: cachedDXDataIdMapURL, options: .atomic)
             }
+            if !unresolvableDeletedSongIds.isEmpty {
+                unresolvableDeletedSongIds.removeAll()
+                let cachePayload = DeletedCNSongsCache(
+                    songs: Array(deletedSongsById.values).sorted { $0.numericId < $1.numericId },
+                    unresolvableIds: []
+                )
+                let cacheURL = cachedDeletedCNSongsURL
+                Task.detached(priority: .utility) {
+                    if let encoded = try? JSONEncoder().encode(cachePayload) {
+                        try? encoded.write(to: cacheURL, options: .atomic)
+                    }
+                }
+            }
         }
 
         switch zResult {
@@ -734,96 +858,498 @@ final class DataStore {
         }
     }
 
-    // MARK: - Multi-Provider Score Profile Connection & Sync
+    // MARK: - Multi-Channel Identity Connection, Sync & Writeback
 
-    func switchProfile(to profileId: UUID) {
-        guard profiles.contains(where: { $0.id == profileId }), activeProfileId != profileId else { return }
-        activeProfileId = profileId
+    private func runRecordSync<T>(
+        identityId: String?,
+        operation: SyncOperationKind,
+        _ work: () async throws -> T
+    ) async throws -> T {
+        try ensureCredentialStoreWritable()
+        guard activeSyncTask == nil else { throw MaimaiAPIError.syncInProgress }
+        activeSyncTask = ActiveSyncTask(identityId: identityId?.lowercased(), operation: operation)
+        defer { activeSyncTask = nil }
+        do {
+            return try await work()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if operation != .pullMerged && operation != .writeback {
+                recordDiagnosticFailure(operation: String(describing: operation), error: error)
+            }
+            throw error
+        }
     }
 
-    func removeProfile(id profileId: UUID) {
-        let wasActive = (activeProfileId == profileId)
-        inFlightTokenRefreshTasks.removeValue(forKey: profileId)?.cancel()
-        AccountCredentialStore.deleteSecret(for: profileId)
-        let recordFile = AccountCredentialStore.recordsFileURL(for: profileId, in: appSupportDir)
+    func loadHistory(for identityId: String) -> [SyncHistoryEntry] {
+        syncHistoryStore.loadHistory(for: identityId)
+    }
+
+    func switchIdentity(to identityId: String) {
+        let lower = identityId.lowercased()
+        guard identities.contains(where: { $0.id == lower }), activeIdentityId != lower else { return }
+        activeIdentityId = lower
+    }
+
+    func updateCustomNickname(_ raw: String, for identityId: String) {
+        guard !credentialStoreLoadFailed else { return }
+        let lower = identityId.lowercased()
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var list = identities
+        guard let idx = list.firstIndex(where: { $0.id == lower }),
+              list[idx].customNickname != trimmed else {
+            return
+        }
+        list[idx].customNickname = trimmed
+        identities = list
+    }
+
+    func exportSyncDiagnosticLog() -> String {
+        SyncDiagnostics.shared.exportText()
+    }
+
+    func removeIdentity(id identityId: String) {
+        guard !credentialStoreLoadFailed else { return }
+        let lower = identityId.lowercased()
+        let wasActive = (activeIdentityId == lower)
+        inFlightTokenRefreshTasks.removeValue(forKey: lower)?.cancel()
+
+        let shSecret = AccountCredentialStore.loadSelfHostedSecret(for: lower)
+        let endpointCfg = selfHostedConfig
+        if !shSecret.syncToken.isEmpty && endpointCfg.isConfigured {
+            Task.detached(priority: .utility) {
+                try? await MaimaiAPI.syncBackendUnbind(config: endpointCfg, syncToken: shSecret.syncToken)
+            }
+        }
+
+        AccountCredentialStore.deleteAllChannelSecrets(for: lower)
+        AccountCredentialStore.deleteLegacyProfileSecret(for: lower)
+        let recordFile = AccountCredentialStore.recordsFileURL(for: lower, in: appSupportDir)
         try? FileManager.default.removeItem(at: recordFile)
-        profiles.removeAll { $0.id == profileId }
+        let legacyRecordFile = AccountCredentialStore.legacyProfileRecordsFileURL(for: lower, in: appSupportDir)
+        try? FileManager.default.removeItem(at: legacyRecordFile)
+        try? syncHistoryStore.deleteHistory(for: lower)
+
+        var updated = identities
+        updated.removeAll { $0.id == lower }
+        identities = updated
+
         if wasActive {
-            activeProfileId = profiles.first?.id
-            if activeProfileId == nil {
+            activeIdentityId = updated.first?.id
+            if activeIdentityId == nil {
                 recordsEpoch += 1
-                records = []
+                setRecordsSnapshot([], ownerIdentityId: nil)
             }
         }
     }
 
+    func resetCredentialStoreAfterLoadFailure() {
+        guard credentialStoreLoadFailed else { return }
+        AccountCredentialStore.resetIdentitiesAfterLoadFailure()
+        isApplyingIdentityBatch = true
+        credentialStoreLoadFailed = false
+        identities = []
+        suppressNextIdentityRestore = true
+        activeIdentityId = nil
+        isApplyingIdentityBatch = false
+        recordsEpoch += 1
+        setRecordsSnapshot([], ownerIdentityId: nil)
+    }
+
+    func unbindChannel(_ channel: SyncChannelKind, from identityId: String) async throws {
+        try ensureCredentialStoreWritable()
+        let lower = identityId.lowercased()
+        guard let idx = identities.firstIndex(where: { $0.id == lower }) else { return }
+        var updated = identities
+
+        switch channel {
+        case .selfHosted:
+            let shSecret = AccountCredentialStore.loadSelfHostedSecret(for: lower)
+            let endpointCfg = selfHostedConfig
+            if !shSecret.syncToken.isEmpty && endpointCfg.isConfigured {
+                Task.detached(priority: .utility) {
+                    try? await MaimaiAPI.syncBackendUnbind(config: endpointCfg, syncToken: shSecret.syncToken)
+                }
+            }
+            AccountCredentialStore.deleteSelfHostedSecret(for: lower)
+            updated[idx].selfHosted = nil
+
+        case .lxns:
+            inFlightTokenRefreshTasks.removeValue(forKey: lower)?.cancel()
+            AccountCredentialStore.deleteLXNSSecret(for: lower)
+            updated[idx].lxns = nil
+
+        case .divingFish:
+            AccountCredentialStore.deleteDivingFishSecret(for: lower)
+            updated[idx].divingFish = nil
+        }
+
+        updated[idx].hasMixedScoreSources = true
+        identities = updated
+    }
+
+    /// 0A. CN Direct Bind (paste QR text/URL -> initial quick or full sync)
+    @discardableResult
+    func bindSelfHosted(
+        qrContent: String,
+        initialFullSync: Bool,
+        targetIdentityId: String? = nil
+    ) async throws -> (identity: PlayerIdentity, recordCount: Int) {
+        try await runRecordSync(identityId: targetIdentityId, operation: .bind) {
+            guard selfHostedConfig.isConfigured else {
+                throw MaimaiAPIError.unauthorized("当前版本暂不支持国服直连")
+            }
+
+            let endpoint = selfHostedConfig
+            let resp = try await Task {
+                try await MaimaiAPI.syncBackendBind(config: endpoint, qrContent: qrContent, fullSync: initialFullSync)
+            }.value
+            guard let syncToken = resp.syncToken, !syncToken.isEmpty else {
+                throw MaimaiAPIError.httpError(-1, "服务端未返回同步令牌")
+            }
+
+            let explicitLower = targetIdentityId?.lowercased()
+            if let explicitLower,
+               let target = identities.first(where: { $0.id == explicitLower }),
+               let existingUID = target.selfHosted?.externalUserId,
+               existingUID != resp.profile.userId {
+                Task.detached(priority: .utility) {
+                    try? await MaimaiAPI.syncBackendUnbind(config: endpoint, syncToken: syncToken)
+                }
+                throw MaimaiAPIError.backendError(
+                    statusCode: 403,
+                    code: "USER_ID_MISMATCH",
+                    message: "二维码对应的玩家与该档案已绑定的国服账号不一致，请确认微信账号",
+                    retryAfterSec: nil
+                )
+            }
+
+            let resolvedId: String = {
+                if let explicitLower,
+                   identities.contains(where: { $0.id == explicitLower }) {
+                    return explicitLower
+                }
+                if let existing = identities.first(where: { $0.selfHosted?.externalUserId == resp.profile.userId }) {
+                    return existing.id
+                }
+                return UUID().uuidString.lowercased()
+            }()
+
+            let previousToken = AccountCredentialStore.loadSelfHostedSecret(for: resolvedId).syncToken
+            guard AccountCredentialStore.saveSelfHostedSecret(SelfHostedSecret(syncToken: syncToken), for: resolvedId) else {
+                throw MaimaiAPIError.httpError(-1, "保存国服直连凭据失败")
+            }
+            if !previousToken.isEmpty && previousToken != syncToken {
+                Task.detached(priority: .utility) {
+                    try? await MaimaiAPI.syncBackendUnbind(config: endpoint, syncToken: previousToken)
+                }
+            }
+
+            let mode: SyncMode = initialFullSync ? .full : .quick
+            let nowMs = resp.syncedAtUnixMs > 0
+                ? resp.syncedAtUnixMs
+                : Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+            let displayName = (resp.profile.userName?.isEmpty == false) ? resp.profile.userName! : "UID \(resp.profile.userId)"
+            let binding = SelfHostedBinding(
+                externalUserId: resp.profile.userId,
+                displayName: displayName,
+                playerRating: resp.profile.playerRating,
+                boundAtEpochMs: nowMs
+            )
+
+            var list = identities
+            if let idx = list.firstIndex(where: { $0.id == resolvedId }) {
+                list[idx].selfHosted = binding
+                list[idx].lastSyncMode = mode
+                list[idx].lastSyncedAtEpochMs = nowMs
+                if initialFullSync {
+                    list[idx].lastFullSyncAtEpochMs = nowMs
+                    list[idx].hasMixedScoreSources = false
+                }
+            } else {
+                list.append(
+                    PlayerIdentity(
+                        id: resolvedId,
+                        label: displayName,
+                        selfHosted: binding,
+                        lastSyncMode: mode,
+                        lastSyncedAtEpochMs: nowMs,
+                        lastFullSyncAtEpochMs: initialFullSync ? nowMs : nil
+                    )
+                )
+            }
+            identities = list
+
+            let lookup = scoreImportSongLookup()
+            let incoming = await Task.detached(priority: .userInitiated) {
+                ScoreSyncEngine.normalizeBackendRecords(resp.records, songsById: lookup, region: .cn)
+            }.value
+
+            let existingRecords = initialFullSync ? [] : await loadRecordsSnapshot(for: resolvedId)
+            let merged = initialFullSync
+                ? ScoreSyncEngine.applyFullSync(incoming: incoming)
+                : ScoreSyncEngine.mergeQuickSync(existing: existingRecords, incoming: incoming)
+
+            let shouldMakeActive = (activeIdentityId == nil) || (targetIdentityId == nil) || (activeIdentityId == resolvedId)
+            try await installFetchedRecords(merged, for: resolvedId, syncMode: mode, makeActive: shouldMakeActive)
+            await resolveUnknownSongsAfterSync(in: merged, for: resolvedId)
+            SyncDiagnostics.shared.record(operation: "bind_cn", message: "绑定国服直连成功（共 \(merged.count) 条）")
+
+            let updatedIdentity = identities.first(where: { $0.id == resolvedId }) ?? list.last!
+            return (updatedIdentity, merged.count)
+        }
+    }
+
+    /// 0B. CN Direct Quick Sync (uses saved syncToken, preserves local FC/FS badges)
+    @discardableResult
+    func quickSyncSelfHosted(identityId: String? = nil, writeback: Bool = false) async throws -> WritebackSummary? {
+        guard let targetId = (identityId ?? activeIdentityId)?.lowercased(),
+              let identity = identities.first(where: { $0.id == targetId }),
+              identity.selfHosted != nil else {
+            throw MaimaiAPIError.unauthorized("当前档案未绑定国服直连")
+        }
+        return try await runRecordSync(identityId: targetId, operation: .quickSync) {
+            guard selfHostedConfig.isConfigured else {
+                throw MaimaiAPIError.unauthorized("当前版本暂不支持国服直连")
+            }
+            let secret = AccountCredentialStore.loadSelfHostedSecret(for: targetId)
+            guard !secret.syncToken.isEmpty else {
+                throw MaimaiAPIError.unauthorized("国服直连已失效，请重新绑定")
+            }
+
+            let endpoint = selfHostedConfig
+            let resp = try await Task {
+                try await MaimaiAPI.syncBackendQuick(config: endpoint, syncToken: secret.syncToken)
+            }.value
+
+            let nowMs = resp.syncedAtUnixMs > 0
+                ? resp.syncedAtUnixMs
+                : Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+            var list = identities
+            if let idx = list.firstIndex(where: { $0.id == targetId }) {
+                if let uname = resp.profile.userName, !uname.isEmpty {
+                    list[idx].selfHosted?.displayName = uname
+                }
+                if let pr = resp.profile.playerRating {
+                    list[idx].selfHosted?.playerRating = pr
+                }
+                list[idx].lastSyncMode = .quick
+                list[idx].lastSyncedAtEpochMs = nowMs
+                identities = list
+            }
+
+            let lookup = scoreImportSongLookup()
+            let incoming = await Task.detached(priority: .userInitiated) {
+                ScoreSyncEngine.normalizeBackendRecords(resp.records, songsById: lookup, region: .cn)
+            }.value
+            let existing = await loadRecordsSnapshot(for: targetId)
+            let merged = ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: incoming)
+
+            try await installFetchedRecords(merged, for: targetId, syncMode: .quick, makeActive: false)
+            await resolveUnknownSongsAfterSync(in: merged, for: targetId)
+            SyncDiagnostics.shared.record(operation: "quick_sync", message: "快速同步完成（共 \(merged.count) 条）")
+
+            if writeback {
+                return try await performWriteback(for: targetId, localRecords: merged)
+            }
+            return nil
+        }
+    }
+
+    /// 0C. CN Direct Full Sync (requires pasted QR, authoritative badge overwrite)
+    @discardableResult
+    func fullSyncSelfHosted(
+        identityId: String? = nil,
+        qrContent: String,
+        writeback: Bool = false
+    ) async throws -> WritebackSummary? {
+        guard let targetId = (identityId ?? activeIdentityId)?.lowercased(),
+              let identity = identities.first(where: { $0.id == targetId }),
+              identity.selfHosted != nil else {
+            throw MaimaiAPIError.unauthorized("当前档案未绑定国服直连")
+        }
+        return try await runRecordSync(identityId: targetId, operation: .fullSync) {
+            guard selfHostedConfig.isConfigured else {
+                throw MaimaiAPIError.unauthorized("当前版本暂不支持国服直连")
+            }
+            let secret = AccountCredentialStore.loadSelfHostedSecret(for: targetId)
+            guard !secret.syncToken.isEmpty else {
+                throw MaimaiAPIError.unauthorized("国服直连已失效，请重新绑定")
+            }
+
+            let endpoint = selfHostedConfig
+            let resp = try await Task {
+                try await MaimaiAPI.syncBackendFull(config: endpoint, syncToken: secret.syncToken, qrContent: qrContent)
+            }.value
+
+            let nowMs = resp.syncedAtUnixMs > 0
+                ? resp.syncedAtUnixMs
+                : Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+            var list = identities
+            if let idx = list.firstIndex(where: { $0.id == targetId }) {
+                if let uname = resp.profile.userName, !uname.isEmpty {
+                    list[idx].selfHosted?.displayName = uname
+                }
+                if let pr = resp.profile.playerRating {
+                    list[idx].selfHosted?.playerRating = pr
+                }
+                list[idx].lastSyncMode = .full
+                list[idx].lastSyncedAtEpochMs = nowMs
+                list[idx].lastFullSyncAtEpochMs = nowMs
+                list[idx].hasMixedScoreSources = false
+                identities = list
+            }
+
+            let lookup = scoreImportSongLookup()
+            let incoming = await Task.detached(priority: .userInitiated) {
+                ScoreSyncEngine.normalizeBackendRecords(resp.records, songsById: lookup, region: .cn)
+            }.value
+            let replaced = ScoreSyncEngine.applyFullSync(incoming: incoming)
+
+            try await installFetchedRecords(replaced, for: targetId, syncMode: .full, makeActive: false)
+            await resolveUnknownSongsAfterSync(in: replaced, for: targetId)
+            SyncDiagnostics.shared.record(operation: "full_sync", message: "完整同步完成（共 \(replaced.count) 条）")
+
+            if writeback {
+                return try await performWriteback(for: targetId, localRecords: replaced)
+            }
+            return nil
+        }
+    }
+
     /// 1. Diving-Fish Username + Password
-    func connectDivingFishPassword(username: String, password: String) async throws {
-        guard !isSyncingRecords else { throw MaimaiAPIError.syncInProgress }
-        isSyncingRecords = true
-        defer { isSyncingRecords = false }
+    func connectDivingFishPassword(
+        username: String,
+        password: String,
+        targetIdentityId: String? = nil
+    ) async throws {
+        try await runRecordSync(identityId: targetIdentityId, operation: .bind) {
+            let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cookie = try await MaimaiAPI.login(username: trimmedUser, password: password)
 
-        let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cookie = try await MaimaiAPI.login(username: trimmedUser, password: password)
+            let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+            let binding = DivingFishBinding(
+                authMethod: .divingFishPassword,
+                accountKey: trimmedUser,
+                username: trimmedUser,
+                nickname: "",
+                boundAtEpochMs: nowMs
+            )
+            let targetId = resolveOrCreateIdentity(
+                targetIdentityId: targetIdentityId,
+                matchingDFKey: trimmedUser,
+                defaultLabel: trimmedUser
+            ) { identity in
+                if identity.selfHosted != nil || identity.lxns != nil {
+                    identity.hasMixedScoreSources = true
+                }
+                identity.divingFish = binding
+            }
+            guard AccountCredentialStore.saveDivingFishSecret(
+                DivingFishSecret(username: trimmedUser, password: password, cookie: cookie, importToken: ""),
+                for: targetId
+            ) else {
+                throw MaimaiAPIError.httpError(-1, "保存水鱼凭据失败")
+            }
 
-        let profile = upsertProfile(
-            provider: .divingFish,
-            authMethod: .divingFishPassword,
-            accountKey: trimmedUser,
-            username: trimmedUser,
-            nickname: nil
-        )
-        AccountCredentialStore.saveSecret(
-            ScoreProfileSecret(password: password, cookie: cookie),
-            for: profile.id
-        )
-        activeProfileId = profile.id
-
-        do {
-            try await performSyncRecords(for: profile.id)
-        } catch {
-            throw MaimaiAPIError.recordSyncFailedAfterLogin(error.localizedDescription)
+            let makeActive = (activeIdentityId == nil) || (targetIdentityId == nil) || (activeIdentityId == targetId)
+            if identities.first(where: { $0.id == targetId })?.selfHosted != nil {
+                if makeActive && activeIdentityId != targetId {
+                    activeIdentityId = targetId
+                }
+                SyncDiagnostics.shared.record(operation: "bind", channel: "divingFish", message: "绑定水鱼账号（保留国服直连成绩）")
+                return
+            }
+            do {
+                try await performPullDivingFish(for: targetId, mergeExisting: targetIdentityId != nil, makeActive: makeActive)
+            } catch {
+                if makeActive && activeIdentityId != targetId {
+                    activeIdentityId = targetId
+                }
+                throw MaimaiAPIError.recordSyncFailedAfterLogin(error.localizedDescription)
+            }
         }
     }
 
     /// 2. Diving-Fish Import-Token (`Import-Token` header)
-    func connectDivingFishImportToken(_ rawToken: String, remarkName: String = "") async throws {
-        guard !isSyncingRecords else { throw MaimaiAPIError.syncInProgress }
-        isSyncingRecords = true
-        defer { isSyncingRecords = false }
+    func connectDivingFishImportToken(
+        _ rawToken: String,
+        remarkName: String = "",
+        targetIdentityId: String? = nil
+    ) async throws {
+        try await runRecordSync(identityId: targetIdentityId, operation: .bind) {
+            let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resp = try await Task {
+                try await MaimaiAPI.fetchPlayerRecords(importToken: token)
+            }.value
 
-        let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resp = try await Task {
-            try await MaimaiAPI.fetchPlayerRecords(importToken: token)
-        }.value
+            let trimmedRemark = remarkName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedUsername = (resp.username?.isEmpty == false) ? resp.username! : trimmedRemark
+            let accountKey = (resp.username?.isEmpty == false) ? resp.username! : "df_token_\(token.sha256Hex.prefix(16))"
+            let resolvedNickname = (resp.nickname?.isEmpty == false) ? resp.nickname! : trimmedRemark
+            let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
 
-        let resolvedUsername = (resp.username?.isEmpty == false)
-            ? resp.username!
-            : remarkName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let accountKey = (resp.username?.isEmpty == false)
-            ? resp.username!
-            : "df_token_\(token.sha256Hex.prefix(16))"
-        let resolvedNickname = (resp.nickname?.isEmpty == false)
-            ? resp.nickname!
-            : remarkName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let binding = DivingFishBinding(
+                authMethod: .divingFishImportToken,
+                accountKey: accountKey,
+                username: resolvedUsername,
+                nickname: resolvedNickname,
+                boundAtEpochMs: nowMs
+            )
+            let targetId = resolveOrCreateIdentity(
+                targetIdentityId: targetIdentityId,
+                matchingDFKey: accountKey,
+                defaultLabel: resolvedNickname.isEmpty ? resolvedUsername : resolvedNickname
+            ) { identity in
+                if identity.selfHosted != nil || identity.lxns != nil {
+                    identity.hasMixedScoreSources = true
+                }
+                identity.divingFish = binding
+                if identity.selfHosted == nil {
+                    identity.lastSyncMode = .divingFish
+                    identity.lastSyncedAtEpochMs = nowMs
+                }
+            }
+            guard AccountCredentialStore.saveDivingFishSecret(
+                DivingFishSecret(username: resolvedUsername, password: "", cookie: "", importToken: token),
+                for: targetId
+            ) else {
+                throw MaimaiAPIError.httpError(-1, "保存水鱼导入 Token 失败")
+            }
 
-        let profile = upsertProfile(
-            provider: .divingFish,
-            authMethod: .divingFishImportToken,
-            accountKey: accountKey,
-            username: resolvedUsername,
-            nickname: resolvedNickname,
-            syncedAt: Date()
-        )
-        AccountCredentialStore.saveSecret(
-            ScoreProfileSecret(importToken: token),
-            for: profile.id
-        )
-        installFetchedRecords(resp.records ?? [], for: profile.id)
+            let makeActive = (activeIdentityId == nil) || (targetIdentityId == nil) || (activeIdentityId == targetId)
+            if identities.first(where: { $0.id == targetId })?.selfHosted != nil {
+                if makeActive && activeIdentityId != targetId {
+                    activeIdentityId = targetId
+                }
+                SyncDiagnostics.shared.record(operation: "bind", channel: "divingFish", message: "绑定水鱼导入密钥（保留国服直连成绩）")
+                return
+            }
+            let fetched = resp.records ?? []
+            let finalRecords: [ProberRecord]
+            if targetIdentityId != nil {
+                let existing = await loadRecordsSnapshot(for: targetId)
+                if !existing.isEmpty, let listIdx = identities.firstIndex(where: { $0.id == targetId }) {
+                    var list = identities
+                    list[listIdx].hasMixedScoreSources = true
+                    identities = list
+                }
+                finalRecords = existing.isEmpty ? ScoreSyncEngine.applyFullSync(incoming: fetched)
+                    : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: fetched)
+            } else {
+                finalRecords = ScoreSyncEngine.applyFullSync(incoming: fetched)
+            }
+            try await installFetchedRecords(finalRecords, for: targetId, syncMode: .divingFish, makeActive: makeActive)
+            await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+        }
     }
 
     /// 3. LXNS OAuth 2.0 + PKCE (`ASWebAuthenticationSession`)
-    func connectLXNSOAuth(using webAuthRunner: WebAuthSessionRunner) async throws {
+    func connectLXNSOAuth(
+        using webAuthRunner: WebAuthSessionRunner,
+        targetIdentityId: String? = nil
+    ) async throws {
+        try ensureCredentialStoreWritable()
         guard !isSyncingRecords else { throw MaimaiAPIError.syncInProgress }
 
         let verifier = PKCEHelper.generateCodeVerifier()
@@ -838,128 +1364,451 @@ final class DataStore {
             throw MaimaiAPIError.invalidURL
         }
 
-        // Present system Safari authorization sheet before marking `isSyncingRecords = true`
         let callbackURL = try await webAuthRunner.authenticate(
             url: authorizeURL,
             callbackScheme: LXNSConfiguration.callbackScheme
         )
         let code = try MaimaiAPI.parseOAuthCallback(url: callbackURL, expectedState: state)
 
-        isSyncingRecords = true
-        defer { isSyncingRecords = false }
+        try await runRecordSync(identityId: targetIdentityId, operation: .bind) {
+            let tokenResp = try await MaimaiAPI.exchangeLXNSCode(code: code, codeVerifier: verifier)
+            let expiresAt = Int64((Date().timeIntervalSince1970 + Double(tokenResp.expiresIn)).rounded())
+            let userInfo = try? await MaimaiAPI.fetchLXNSUserInfo(accessToken: tokenResp.accessToken)
 
-        let tokenResp = try await MaimaiAPI.exchangeLXNSCode(code: code, codeVerifier: verifier)
-        let expiresAt = Date().timeIntervalSince1970 + Double(tokenResp.expiresIn)
-        let userInfo = try? await MaimaiAPI.fetchLXNSUserInfo(accessToken: tokenResp.accessToken)
+            let accountKey: String = {
+                if let sub = userInfo?.sub, !sub.isEmpty { return "oidc_\(sub)" }
+                return "lxns_oauth_\(UUID().uuidString.lowercased())"
+            }()
+            let lxUsername = userInfo?.displayUsername ?? ""
+            let grantedScopes = tokenResp.scope
+            let hasWriteScope = grantedScopes?.split(whereSeparator: \.isWhitespace).contains("write_player") ?? true
+            let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
 
-        let accountKey: String = {
-            if let sub = userInfo?.sub, !sub.isEmpty {
-                return "oidc_\(sub)"
-            }
-            return "lxns_oauth_\(UUID().uuidString)"
-        }()
-        let lxUsername = userInfo?.displayUsername ?? ""
-
-        // Persist OAuth tokens immediately to Keychain before fetching large score payload
-        let initialProfile = upsertProfile(
-            provider: .lxns,
-            authMethod: .lxnsOAuth,
-            accountKey: accountKey,
-            username: lxUsername,
-            nickname: nil
-        )
-        AccountCredentialStore.saveSecret(
-            ScoreProfileSecret(
-                accessToken: tokenResp.accessToken,
-                refreshToken: tokenResp.refreshToken ?? "",
-                accessTokenExpiresAt: expiresAt
-            ),
-            for: initialProfile.id
-        )
-        activeProfileId = initialProfile.id
-
-        do {
-            let (player, lxScores) = try await Task {
-                try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: tokenResp.accessToken)
-            }.value
-            let lookup = mergedSongLookupForScoreImport()
-            let converted = await Task.detached(priority: .userInitiated) {
-                LXNSCatalogConverter.convertScores(lxScores, songsById: lookup)
-            }.value
-            updateProfileMetadata(
-                id: initialProfile.id,
-                username: lxUsername,
-                nickname: player?.name ?? lxUsername,
-                syncedAt: Date()
+            let binding = LXNSBinding(
+                authMethod: .lxnsOAuth,
+                accountKey: accountKey,
+                displayName: lxUsername.isEmpty ? "落雪用户" : lxUsername,
+                friendCode: nil,
+                hasWriteScope: hasWriteScope,
+                boundAtEpochMs: nowMs
             )
-            installFetchedRecords(converted, for: initialProfile.id)
-        } catch {
-            throw MaimaiAPIError.recordSyncFailedAfterLogin(error.localizedDescription)
+            let targetId = resolveOrCreateIdentity(
+                targetIdentityId: targetIdentityId,
+                matchingLXNSKey: accountKey,
+                defaultLabel: binding.displayName
+            ) { identity in
+                if identity.selfHosted != nil || identity.divingFish != nil {
+                    identity.hasMixedScoreSources = true
+                }
+                identity.lxns = binding
+            }
+
+            guard AccountCredentialStore.saveLXNSSecret(
+                LXNSSecret(
+                    personalToken: "",
+                    accessToken: tokenResp.accessToken,
+                    refreshToken: tokenResp.refreshToken ?? "",
+                    accessTokenExpiresAtEpochSec: expiresAt,
+                    grantedScopes: grantedScopes
+                ),
+                for: targetId
+            ) else {
+                throw MaimaiAPIError.httpError(-1, "保存落雪令牌失败")
+            }
+
+            let makeActive = (activeIdentityId == nil) || (targetIdentityId == nil) || (activeIdentityId == targetId)
+            if identities.first(where: { $0.id == targetId })?.selfHosted != nil {
+                if makeActive && activeIdentityId != targetId {
+                    activeIdentityId = targetId
+                }
+                SyncDiagnostics.shared.record(operation: "bind", channel: "lxns", message: "绑定落雪账号（保留国服直连成绩）")
+                return
+            }
+            do {
+                try await performPullLXNS(for: targetId, mergeExisting: targetIdentityId != nil, makeActive: makeActive)
+            } catch {
+                if makeActive && activeIdentityId != targetId {
+                    activeIdentityId = targetId
+                }
+                throw MaimaiAPIError.recordSyncFailedAfterLogin(error.localizedDescription)
+            }
         }
     }
 
     /// 4. LXNS Personal API Key (`X-User-Token`)
-    func connectLXNSPersonalToken(_ rawToken: String, remarkName: String = "") async throws {
-        guard !isSyncingRecords else { throw MaimaiAPIError.syncInProgress }
-        isSyncingRecords = true
-        defer { isSyncingRecords = false }
+    func connectLXNSPersonalToken(
+        _ rawToken: String,
+        remarkName: String = "",
+        targetIdentityId: String? = nil
+    ) async throws {
+        try await runRecordSync(identityId: targetIdentityId, operation: .bind) {
+            let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let (player, lxScores) = try await Task {
+                try await MaimaiAPI.fetchLXNSPlayerAndScores(personalToken: token)
+            }.value
 
-        let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        let (player, lxScores) = try await Task {
-            try await MaimaiAPI.fetchLXNSPlayerAndScores(personalToken: token)
-        }.value
+            let trimmedRemark = remarkName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let accountKey = player?.friendCode.map { "fc_\($0)" } ?? "lxns_pt_\(token.sha256Hex.prefix(16))"
+            let nickname = (player?.name.isEmpty == false) ? player!.name : (trimmedRemark.isEmpty ? "落雪用户" : trimmedRemark)
+            let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
 
-        let trimmedRemark = remarkName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let accountKey = player?.friendCode.map { "fc_\($0)" } ?? "lxns_pt_\(token.sha256Hex.prefix(16))"
-        let nickname = (player?.name.isEmpty == false) ? player!.name : trimmedRemark
+            let binding = LXNSBinding(
+                authMethod: .lxnsPersonalToken,
+                accountKey: accountKey,
+                displayName: nickname,
+                friendCode: player?.friendCode,
+                hasWriteScope: true,
+                boundAtEpochMs: nowMs
+            )
+            let targetId = resolveOrCreateIdentity(
+                targetIdentityId: targetIdentityId,
+                matchingLXNSKey: accountKey,
+                defaultLabel: nickname
+            ) { identity in
+                if identity.selfHosted != nil || identity.divingFish != nil {
+                    identity.hasMixedScoreSources = true
+                }
+                identity.lxns = binding
+                if identity.selfHosted == nil {
+                    identity.lastSyncMode = .lxns
+                    identity.lastSyncedAtEpochMs = nowMs
+                }
+            }
 
-        let lookup = mergedSongLookupForScoreImport()
-        let converted = await Task.detached(priority: .userInitiated) {
-            LXNSCatalogConverter.convertScores(lxScores, songsById: lookup)
-        }.value
+            guard AccountCredentialStore.saveLXNSSecret(
+                LXNSSecret(personalToken: token, grantedScopes: LXNSConfiguration.scopes),
+                for: targetId
+            ) else {
+                throw MaimaiAPIError.httpError(-1, "保存落雪密钥失败")
+            }
 
-        let profile = upsertProfile(
-            provider: .lxns,
-            authMethod: .lxnsPersonalToken,
-            accountKey: accountKey,
-            username: trimmedRemark,
-            nickname: nickname,
-            syncedAt: Date()
-        )
-        AccountCredentialStore.saveSecret(
-            ScoreProfileSecret(personalToken: token),
-            for: profile.id
-        )
-        installFetchedRecords(converted, for: profile.id)
-    }
+            let makeActive = (activeIdentityId == nil) || (targetIdentityId == nil) || (activeIdentityId == targetId)
+            if identities.first(where: { $0.id == targetId })?.selfHosted != nil {
+                if makeActive && activeIdentityId != targetId {
+                    activeIdentityId = targetId
+                }
+                SyncDiagnostics.shared.record(operation: "bind", channel: "lxns", message: "绑定落雪个人密钥（保留国服直连成绩）")
+                return
+            }
 
-    /// Syncs fresh scores from the active profile's provider (Diving-Fish or LXNS).
-    func syncActiveProfileRecords() async throws {
-        guard !isSyncingRecords else { return }
-        guard let profile = activeProfile else {
-            throw MaimaiAPIError.unauthorized("请先添加查分器成绩档案")
+            let lookup = scoreImportSongLookup()
+            let converted = await Task.detached(priority: .userInitiated) {
+                LXNSCatalogConverter.convertScores(lxScores, songsById: lookup)
+            }.value
+            let finalRecords: [ProberRecord]
+            if targetIdentityId != nil {
+                let existing = await loadRecordsSnapshot(for: targetId)
+                if !existing.isEmpty, let listIdx = identities.firstIndex(where: { $0.id == targetId }) {
+                    var list = identities
+                    list[listIdx].hasMixedScoreSources = true
+                    identities = list
+                }
+                finalRecords = existing.isEmpty ? ScoreSyncEngine.applyFullSync(incoming: converted)
+                    : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: converted)
+            } else {
+                finalRecords = ScoreSyncEngine.applyFullSync(incoming: converted)
+            }
+            try await installFetchedRecords(finalRecords, for: targetId, syncMode: .lxns, makeActive: makeActive)
+            await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
         }
-        isSyncingRecords = true
-        defer { isSyncingRecords = false }
-
-        try await performSyncRecords(for: profile.id)
     }
 
-    private func performSyncRecords(for profileId: UUID) async throws {
-        guard let profile = profiles.first(where: { $0.id == profileId }) else { return }
-        var secret = AccountCredentialStore.loadSecret(for: profileId)
+    func pullFromLXNS(identityId: String? = nil) async throws {
+        guard let targetId = (identityId ?? activeIdentityId)?.lowercased(),
+              let identity = identities.first(where: { $0.id == targetId }),
+              identity.lxns != nil else {
+            throw MaimaiAPIError.unauthorized("当前档案未绑定落雪咖啡屋")
+        }
+        if identity.selfHosted != nil {
+            throw MaimaiAPIError.unauthorized("已绑定国服直连，请使用快速同步或完整同步")
+        }
+        let mergeExisting = identity.hasMixedScoreSources ||
+            (identity.boundChannelCount > 1) ||
+            (identity.lastSyncMode != nil && identity.lastSyncMode != .lxns)
+        try await runRecordSync(identityId: targetId, operation: .pullLXNS) {
+            try await performPullLXNS(for: targetId, mergeExisting: mergeExisting, makeActive: false)
+        }
+    }
 
-        switch profile.authMethod {
+    func pullFromDivingFish(identityId: String? = nil) async throws {
+        guard let targetId = (identityId ?? activeIdentityId)?.lowercased(),
+              let identity = identities.first(where: { $0.id == targetId }),
+              identity.divingFish != nil else {
+            throw MaimaiAPIError.unauthorized("当前档案未绑定水鱼查分器")
+        }
+        if identity.selfHosted != nil {
+            throw MaimaiAPIError.unauthorized("已绑定国服直连，请使用快速同步或完整同步")
+        }
+        let mergeExisting = identity.hasMixedScoreSources ||
+            (identity.boundChannelCount > 1) ||
+            (identity.lastSyncMode != nil && identity.lastSyncMode != .divingFish)
+        try await runRecordSync(identityId: targetId, operation: .pullDivingFish) {
+            try await performPullDivingFish(for: targetId, mergeExisting: mergeExisting, makeActive: false)
+        }
+    }
+
+    @discardableResult
+    func pullMergedProbers(identityId: String? = nil) async throws -> SyncOutcome {
+        guard let targetId = (identityId ?? activeIdentityId)?.lowercased(),
+              let identity = identities.first(where: { $0.id == targetId }),
+              identity.lxns != nil,
+              identity.divingFish != nil else {
+            throw MaimaiAPIError.unauthorized("当前档案未同时绑定落雪咖啡屋和水鱼查分器")
+        }
+        if identity.selfHosted != nil {
+            throw MaimaiAPIError.unauthorized("已绑定国服直连，请使用快速同步或完整同步")
+        }
+        return try await runRecordSync(identityId: targetId, operation: .pullMerged) {
+            async let lxnsResult: Result<(playerName: String?, friendCode: Int64?, records: [ProberRecord]), Error> = {
+                do {
+                    return .success(try await withTransientRetry { try await self.fetchLXNSRecordsRaw(for: targetId) })
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    return .failure(error)
+                }
+            }()
+            async let dfResult: Result<(username: String?, nickname: String?, records: [ProberRecord]), Error> = {
+                do {
+                    return .success(try await withTransientRetry { try await self.fetchDivingFishRecordsRaw(for: targetId) })
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    return .failure(error)
+                }
+            }()
+
+            let (lxRes, dfRes) = try await (lxnsResult, dfResult)
+            let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+            let existing = await loadRecordsSnapshot(for: targetId)
+
+            switch (lxRes, dfRes) {
+            case let (.success(lx), .success(df)):
+                var list = identities
+                if let idx = list.firstIndex(where: { $0.id == targetId }) {
+                    if let name = lx.playerName, !name.isEmpty { list[idx].lxns?.displayName = name }
+                    if let fc = lx.friendCode { list[idx].lxns?.friendCode = fc }
+                    if let uname = df.username, !uname.isEmpty { list[idx].divingFish?.username = uname }
+                    if let nick = df.nickname, !nick.isEmpty { list[idx].divingFish?.nickname = nick }
+                    list[idx].lastSyncMode = .lxns
+                    list[idx].lastSyncedAtEpochMs = nowMs
+                    list[idx].hasMixedScoreSources = true
+                    identities = list
+                }
+                let withDF = existing.isEmpty
+                    ? ScoreSyncEngine.applyFullSync(incoming: df.records)
+                    : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: df.records)
+                let finalRecords = ScoreSyncEngine.mergeQuickSync(existing: withDF, incoming: lx.records)
+                try await installFetchedRecords(finalRecords, for: targetId, syncMode: .lxns, makeActive: false)
+                await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+                SyncDiagnostics.shared.record(operation: "pull_merged", message: "双查分器合并同步完成（共 \(finalRecords.count) 条）")
+                return SyncOutcome()
+
+            case let (.success(lx), .failure(dfErr)):
+                var list = identities
+                if let idx = list.firstIndex(where: { $0.id == targetId }) {
+                    if let name = lx.playerName, !name.isEmpty { list[idx].lxns?.displayName = name }
+                    if let fc = lx.friendCode { list[idx].lxns?.friendCode = fc }
+                    list[idx].lastSyncMode = .lxns
+                    list[idx].lastSyncedAtEpochMs = nowMs
+                    list[idx].hasMixedScoreSources = true
+                    identities = list
+                }
+                let finalRecords = existing.isEmpty
+                    ? ScoreSyncEngine.applyFullSync(incoming: lx.records)
+                    : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: lx.records)
+                try await installFetchedRecords(finalRecords, for: targetId, syncMode: .lxns, makeActive: false)
+                await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+                recordDiagnosticFailure(operation: "pull_merged", channel: "divingFish", error: dfErr)
+                return SyncOutcome(warningMessage: "水鱼同步失败（已合并落雪与本地最佳成绩）：\(dfErr.localizedDescription)")
+
+            case let (.failure(lxErr), .success(df)):
+                var list = identities
+                if let idx = list.firstIndex(where: { $0.id == targetId }) {
+                    if let uname = df.username, !uname.isEmpty { list[idx].divingFish?.username = uname }
+                    if let nick = df.nickname, !nick.isEmpty { list[idx].divingFish?.nickname = nick }
+                    list[idx].lastSyncMode = .divingFish
+                    list[idx].lastSyncedAtEpochMs = nowMs
+                    list[idx].hasMixedScoreSources = true
+                    identities = list
+                }
+                let finalRecords = existing.isEmpty
+                    ? ScoreSyncEngine.applyFullSync(incoming: df.records)
+                    : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: df.records)
+                try await installFetchedRecords(finalRecords, for: targetId, syncMode: .divingFish, makeActive: false)
+                await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+                recordDiagnosticFailure(operation: "pull_merged", channel: "lxns", error: lxErr)
+                return SyncOutcome(warningMessage: "落雪同步失败（已合并水鱼与本地最佳成绩）：\(lxErr.localizedDescription)")
+
+            case let (.failure(lxErr), .failure(dfErr)):
+                recordDiagnosticFailure(operation: "pull_merged", channel: "lxns", error: lxErr)
+                recordDiagnosticFailure(operation: "pull_merged", channel: "divingFish", error: dfErr)
+                throw MaimaiAPIError.httpError(
+                    -1,
+                    "落雪与水鱼均同步失败：落雪（\(lxErr.localizedDescription)）；水鱼（\(dfErr.localizedDescription)）"
+                )
+            }
+        }
+    }
+
+    func writebackToBoundProbers(identityId: String? = nil) async throws -> WritebackSummary {
+        guard let targetId = (identityId ?? activeIdentityId)?.lowercased(),
+              identities.contains(where: { $0.id == targetId }) else {
+            throw MaimaiAPIError.unauthorized("请先选择要上传的成绩档案")
+        }
+        return try await runRecordSync(identityId: targetId, operation: .writeback) {
+            let localRecords = await loadRecordsSnapshot(for: targetId)
+            return try await performWriteback(for: targetId, localRecords: localRecords)
+        }
+    }
+
+    /// Runs the identity's default sync plan (CN Direct quick sync, merged probers, or single prober pull).
+    @discardableResult
+    func syncActiveIdentityDefault() async throws -> SyncOutcome {
+        guard let identity = activeIdentity else {
+            throw MaimaiAPIError.unauthorized("请先添加成绩档案或绑定账号")
+        }
+        switch identity.syncPlan {
+        case .cnDirectQuick:
+            _ = try await quickSyncSelfHosted(identityId: identity.id, writeback: false)
+            return SyncOutcome()
+        case .singleProber(.lxns):
+            try await pullFromLXNS(identityId: identity.id)
+            return SyncOutcome()
+        case .singleProber(.divingFish):
+            try await pullFromDivingFish(identityId: identity.id)
+            return SyncOutcome()
+        case .singleProber:
+            throw MaimaiAPIError.unauthorized("请先绑定账号或查分器")
+        case .mergedProbers:
+            return try await pullMergedProbers(identityId: identity.id)
+        case .none:
+            throw MaimaiAPIError.unauthorized("请先绑定账号或查分器")
+        }
+    }
+
+    // MARK: - Internal Channel Sync & Writeback Helpers
+
+    private func ensureCredentialStoreWritable() throws {
+        if credentialStoreLoadFailed {
+            throw MaimaiAPIError.unauthorized("本地安全存储读取异常，已暂停写入以保护档案；请重启 App 或解锁设备后重试")
+        }
+    }
+
+    private func resolveOrCreateIdentity(
+        targetIdentityId: String?,
+        matchingSelfHostedId: Int64? = nil,
+        matchingLXNSKey: String? = nil,
+        matchingDFKey: String? = nil,
+        defaultLabel: String,
+        mutate: (inout PlayerIdentity) -> Void
+    ) -> String {
+        var list = identities
+        let targetIdx: Int? = {
+            if let explicit = targetIdentityId?.lowercased(),
+               let i = list.firstIndex(where: { $0.id == explicit }) {
+                return i
+            }
+            if let uid = matchingSelfHostedId,
+               let i = list.firstIndex(where: { $0.selfHosted?.externalUserId == uid }) {
+                return i
+            }
+            if let key = matchingLXNSKey,
+               let i = list.firstIndex(where: { $0.lxns?.accountKey == key }) {
+                return i
+            }
+            if let key = matchingDFKey,
+               let i = list.firstIndex(where: { $0.divingFish?.accountKey == key }) {
+                return i
+            }
+            return nil
+        }()
+
+        let resolvedId: String
+        if let idx = targetIdx {
+            mutate(&list[idx])
+            if list[idx].label.isEmpty && !defaultLabel.isEmpty {
+                list[idx].label = defaultLabel
+            }
+            resolvedId = list[idx].id
+        } else {
+            var created = PlayerIdentity(
+                id: UUID().uuidString.lowercased(),
+                label: defaultLabel
+            )
+            mutate(&created)
+            list.append(created)
+            resolvedId = created.id
+        }
+        identities = list
+        return resolvedId
+    }
+
+    private func isTransientSyncError(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if let urlError = error as? URLError {
+            return urlError.code != .cancelled
+        }
+        if case let MaimaiAPIError.httpError(code, _) = error {
+            return code >= 500 || code == -1
+        }
+        if case let MaimaiAPIError.backendError(statusCode, _, _, _) = error {
+            return statusCode >= 500
+        }
+        return false
+    }
+
+    private func withTransientRetry<T>(_ work: () async throws -> T) async throws -> T {
+        do {
+            return try await work()
+        } catch {
+            guard isTransientSyncError(error) else { throw error }
+            try await Task.sleep(nanoseconds: 600_000_000)
+            return try await work()
+        }
+    }
+
+    private func recordDiagnosticFailure(operation: String, channel: String? = nil, error: Error) {
+        if error is CancellationError { return }
+        var statusCode: Int?
+        var errorCode: String?
+        if case let MaimaiAPIError.httpError(code, _) = error {
+            statusCode = code
+        } else if case let MaimaiAPIError.backendError(code, errCode, _, _) = error {
+            statusCode = code
+            errorCode = errCode
+        } else if let urlError = error as? URLError {
+            errorCode = "URLError(\(urlError.code.rawValue))"
+        }
+        SyncDiagnostics.shared.record(
+            operation: operation,
+            channel: channel,
+            statusCode: statusCode,
+            errorCode: errorCode,
+            message: error.localizedDescription
+        )
+    }
+
+    private func fetchDivingFishRecordsRaw(
+        for identityId: String
+    ) async throws -> (username: String?, nickname: String?, records: [ProberRecord]) {
+        guard let identity = identities.first(where: { $0.id == identityId }),
+              let df = identity.divingFish else {
+            throw MaimaiAPIError.unauthorized("当前档案未绑定水鱼查分器")
+        }
+        var secret = AccountCredentialStore.loadDivingFishSecret(for: identityId)
+
+        let resp: ProberRecordsResponse
+        switch df.authMethod {
         case .divingFishPassword:
-            let username = profile.username
+            let username = df.username.isEmpty ? secret.username : df.username
             let password = secret.password
             var cookie = secret.cookie
 
-            // Unstructured Task avoids SwiftUI `.refreshable` cancelling URLSession mid-flight.
-            let (resp, usedCookie) = try await Task { () -> (ProberRecordsResponse, String) in
+            let (fetchedResp, usedCookie) = try await Task { () -> (ProberRecordsResponse, String) in
                 if cookie.isEmpty {
                     guard !username.isEmpty, !password.isEmpty else {
-                        throw MaimaiAPIError.unauthorized("水鱼登录已过期，请重新登录")
+                        throw MaimaiAPIError.unauthorized("水鱼登录已过期，请解绑后重新绑定")
                     }
                     cookie = try await MaimaiAPI.login(username: username, password: password)
                 }
@@ -976,201 +1825,674 @@ final class DataStore {
 
             if usedCookie != secret.cookie {
                 secret.cookie = usedCookie
-                AccountCredentialStore.saveSecret(secret, for: profileId)
+                AccountCredentialStore.saveDivingFishSecret(secret, for: identityId)
             }
-            updateProfileMetadata(
-                id: profileId,
-                username: resp.username ?? profile.username,
-                nickname: resp.nickname,
-                syncedAt: Date()
-            )
-            installFetchedRecords(resp.records ?? [], for: profileId)
+            resp = fetchedResp
 
         case .divingFishImportToken:
             let token = secret.importToken
             guard !token.isEmpty else {
-                throw MaimaiAPIError.unauthorized("未找到保存的水鱼导入 Token，请重新添加档案")
+                throw MaimaiAPIError.unauthorized("未找到保存的水鱼导入密钥，请解绑后重新绑定")
             }
-            let resp = try await Task {
+            resp = try await Task {
                 try await MaimaiAPI.fetchPlayerRecords(importToken: token)
             }.value
-            updateProfileMetadata(
-                id: profileId,
-                username: resp.username ?? profile.username,
-                nickname: resp.nickname,
-                syncedAt: Date()
-            )
-            installFetchedRecords(resp.records ?? [], for: profileId)
 
+        default:
+            throw MaimaiAPIError.unauthorized("水鱼认证方式不受支持")
+        }
+
+        return (resp.username, resp.nickname, resp.records ?? [])
+    }
+
+    private func fetchLXNSRecordsRaw(
+        for identityId: String
+    ) async throws -> (playerName: String?, friendCode: Int64?, records: [ProberRecord]) {
+        guard let identity = identities.first(where: { $0.id == identityId }),
+              let lxns = identity.lxns else {
+            throw MaimaiAPIError.unauthorized("当前档案未绑定落雪咖啡屋")
+        }
+        let secret = AccountCredentialStore.loadLXNSSecret(for: identityId)
+
+        let player: LXNSPlayer?
+        let lxScores: [LXNSScore]
+
+        switch lxns.authMethod {
         case .lxnsOAuth:
-            let initialAccessToken = try await validLXNSAccessToken(for: profileId, forceRefresh: false)
-            let (player, lxScores): (LXNSPlayer?, [LXNSScore])
+            let initialToken = try await validLXNSAccessToken(for: identityId, forceRefresh: false)
             do {
                 (player, lxScores) = try await Task {
-                    try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: initialAccessToken)
+                    try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: initialToken)
                 }.value
             } catch MaimaiAPIError.unauthorized {
-                let refreshedAccessToken = try await validLXNSAccessToken(
-                    for: profileId,
+                let refreshedToken = try await validLXNSAccessToken(
+                    for: identityId,
                     forceRefresh: true,
-                    failedAccessToken: initialAccessToken
+                    failedAccessToken: initialToken
                 )
                 (player, lxScores) = try await Task {
-                    try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: refreshedAccessToken)
+                    try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: refreshedToken)
                 }.value
             }
-
-            let lookup = mergedSongLookupForScoreImport()
-            let converted = await Task.detached(priority: .userInitiated) {
-                LXNSCatalogConverter.convertScores(lxScores, songsById: lookup)
-            }.value
-            updateProfileMetadata(
-                id: profileId,
-                username: profile.username,
-                nickname: player?.name,
-                syncedAt: Date()
-            )
-            installFetchedRecords(converted, for: profileId)
 
         case .lxnsPersonalToken:
             let token = secret.personalToken
             guard !token.isEmpty else {
-                throw MaimaiAPIError.unauthorized("未找到保存的落雪个人密钥，请重新添加档案")
+                throw MaimaiAPIError.unauthorized("未找到保存的落雪个人密钥，请解绑后重新绑定")
             }
-            let (player, lxScores) = try await Task {
+            (player, lxScores) = try await Task {
                 try await MaimaiAPI.fetchLXNSPlayerAndScores(personalToken: token)
             }.value
-            let lookup = mergedSongLookupForScoreImport()
-            let converted = await Task.detached(priority: .userInitiated) {
-                LXNSCatalogConverter.convertScores(lxScores, songsById: lookup)
-            }.value
-            updateProfileMetadata(
-                id: profileId,
-                username: profile.username,
-                nickname: player?.name,
-                syncedAt: Date()
-            )
-            installFetchedRecords(converted, for: profileId)
+
+        default:
+            throw MaimaiAPIError.unauthorized("落雪认证方式不受支持")
         }
+
+        let lookup = scoreImportSongLookup()
+        let converted = await Task.detached(priority: .userInitiated) {
+            LXNSCatalogConverter.convertScores(lxScores, songsById: lookup)
+        }.value
+        return (player?.name, player?.friendCode, converted)
     }
 
-    /// Serializes LXNS refresh-token exchange per profile and persists the rotated `refresh_token` immediately.
+    private func performPullDivingFish(for identityId: String, mergeExisting: Bool, makeActive: Bool) async throws {
+        let fetched = try await fetchDivingFishRecordsRaw(for: identityId)
+
+        let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+        var list = identities
+        if let idx = list.firstIndex(where: { $0.id == identityId }) {
+            if let uname = fetched.username, !uname.isEmpty {
+                list[idx].divingFish?.username = uname
+            }
+            if let nick = fetched.nickname, !nick.isEmpty {
+                list[idx].divingFish?.nickname = nick
+            }
+            list[idx].lastSyncMode = .divingFish
+            list[idx].lastSyncedAtEpochMs = nowMs
+            if mergeExisting {
+                list[idx].hasMixedScoreSources = true
+            }
+            identities = list
+        }
+
+        let incoming = fetched.records
+        let finalRecords: [ProberRecord]
+        if mergeExisting {
+            let existing = await loadRecordsSnapshot(for: identityId)
+            finalRecords = existing.isEmpty ? ScoreSyncEngine.applyFullSync(incoming: incoming)
+                : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: incoming)
+        } else {
+            finalRecords = ScoreSyncEngine.applyFullSync(incoming: incoming)
+        }
+        try await installFetchedRecords(finalRecords, for: identityId, syncMode: .divingFish, makeActive: makeActive)
+        await resolveUnknownSongsAfterSync(in: finalRecords, for: identityId)
+        SyncDiagnostics.shared.record(operation: "pull_df", channel: "divingFish", message: "同步水鱼成绩完成（共 \(finalRecords.count) 条）")
+    }
+
+    private func performPullLXNS(for identityId: String, mergeExisting: Bool, makeActive: Bool) async throws {
+        let fetched = try await fetchLXNSRecordsRaw(for: identityId)
+
+        let nowMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
+        var list = identities
+        if let idx = list.firstIndex(where: { $0.id == identityId }) {
+            if let name = fetched.playerName, !name.isEmpty {
+                list[idx].lxns?.displayName = name
+            }
+            if let fc = fetched.friendCode {
+                list[idx].lxns?.friendCode = fc
+            }
+            list[idx].lastSyncMode = .lxns
+            list[idx].lastSyncedAtEpochMs = nowMs
+            if mergeExisting {
+                list[idx].hasMixedScoreSources = true
+            }
+            identities = list
+        }
+
+        let finalRecords: [ProberRecord]
+        if mergeExisting {
+            let existing = await loadRecordsSnapshot(for: identityId)
+            finalRecords = existing.isEmpty ? ScoreSyncEngine.applyFullSync(incoming: fetched.records)
+                : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: fetched.records)
+        } else {
+            finalRecords = ScoreSyncEngine.applyFullSync(incoming: fetched.records)
+        }
+        try await installFetchedRecords(finalRecords, for: identityId, syncMode: .lxns, makeActive: makeActive)
+        await resolveUnknownSongsAfterSync(in: finalRecords, for: identityId)
+        SyncDiagnostics.shared.record(operation: "pull_lxns", channel: "lxns", message: "同步落雪成绩完成（共 \(finalRecords.count) 条）")
+    }
+
+    private func performWriteback(for identityId: String, localRecords: [ProberRecord]) async throws -> WritebackSummary {
+        guard let identity = identities.first(where: { $0.id == identityId }) else {
+            return WritebackSummary(results: [])
+        }
+        let cnCatalog = pureCNSongsLookup()
+        guard !cnCatalog.isEmpty else {
+            throw MaimaiAPIError.httpError(-1, "国服曲库尚未加载完成，请稍后再试")
+        }
+        let titleLookup = scoreImportSongLookup()
+        var results: [WritebackChannelStatus] = []
+
+        for channel in identity.uploadTargets {
+            switch channel {
+            case .divingFish:
+                guard let df = identity.divingFish else { continue }
+                do {
+                    let outcome = try await withTransientRetry {
+                        try await writebackToDivingFish(
+                            identityId: identityId,
+                            binding: df,
+                            localRecords: localRecords,
+                            songsById: titleLookup,
+                            cnSongsById: cnCatalog
+                        )
+                    }
+                    results.append(WritebackChannelStatus(
+                        channel: .divingFish,
+                        uploadedCount: outcome.uploadedCount,
+                        skippedCount: outcome.skippedCount,
+                        errorMessage: nil
+                    ))
+                    SyncDiagnostics.shared.record(
+                        operation: "writeback",
+                        channel: "divingFish",
+                        message: outcome.uploadedCount == 0 ? "水鱼无需更新" : "水鱼上传成功",
+                        uploadedCount: outcome.uploadedCount,
+                        skippedCount: outcome.skippedCount,
+                        sampleSkippedIds: outcome.sampleSkippedIds
+                    )
+                } catch {
+                    recordDiagnosticFailure(operation: "writeback", channel: "divingFish", error: error)
+                    results.append(WritebackChannelStatus(
+                        channel: .divingFish,
+                        uploadedCount: 0,
+                        skippedCount: 0,
+                        errorMessage: error.localizedDescription
+                    ))
+                }
+
+            case .lxns:
+                guard let lxns = identity.lxns else { continue }
+                do {
+                    let outcome = try await withTransientRetry {
+                        try await writebackToLXNS(
+                            identityId: identityId,
+                            binding: lxns,
+                            localRecords: localRecords,
+                            songsById: titleLookup,
+                            cnSongsById: cnCatalog
+                        )
+                    }
+                    results.append(WritebackChannelStatus(
+                        channel: .lxns,
+                        uploadedCount: outcome.uploadedCount,
+                        skippedCount: outcome.skippedCount,
+                        errorMessage: nil
+                    ))
+                    SyncDiagnostics.shared.record(
+                        operation: "writeback",
+                        channel: "lxns",
+                        message: outcome.uploadedCount == 0 ? "落雪无需更新" : "落雪上传成功",
+                        uploadedCount: outcome.uploadedCount,
+                        skippedCount: outcome.skippedCount,
+                        sampleSkippedIds: outcome.sampleSkippedIds
+                    )
+                } catch {
+                    recordDiagnosticFailure(operation: "writeback", channel: "lxns", error: error)
+                    results.append(WritebackChannelStatus(
+                        channel: .lxns,
+                        uploadedCount: 0,
+                        skippedCount: 0,
+                        errorMessage: error.localizedDescription
+                    ))
+                }
+
+            case .selfHosted:
+                continue
+            }
+        }
+
+        return WritebackSummary(results: results)
+    }
+
+    private func writebackToDivingFish(
+        identityId: String,
+        binding: DivingFishBinding,
+        localRecords: [ProberRecord],
+        songsById: [Int: SongData],
+        cnSongsById: [Int: SongData]
+    ) async throws -> (uploadedCount: Int, skippedCount: Int, sampleSkippedIds: [Int]) {
+        var secret = AccountCredentialStore.loadDivingFishSecret(for: identityId)
+        let username = binding.username.isEmpty ? secret.username : binding.username
+        let password = secret.password
+        var cookie = secret.cookie
+
+        let cloudResp: ProberRecordsResponse
+        switch binding.authMethod {
+        case .divingFishPassword:
+            let (resp, usedCookie) = try await Task { () -> (ProberRecordsResponse, String) in
+                if cookie.isEmpty {
+                    guard !username.isEmpty, !password.isEmpty else {
+                        throw MaimaiAPIError.unauthorized("水鱼凭据已过期，请解绑后重新绑定")
+                    }
+                    cookie = try await MaimaiAPI.login(username: username, password: password)
+                }
+                do {
+                    return (try await MaimaiAPI.fetchPlayerRecords(cookie: cookie), cookie)
+                } catch where MaimaiAPI.shouldRetryLogin(after: error) {
+                    guard !username.isEmpty, !password.isEmpty else { throw error }
+                    let freshCookie = try await MaimaiAPI.login(username: username, password: password)
+                    return (try await MaimaiAPI.fetchPlayerRecords(cookie: freshCookie), freshCookie)
+                }
+            }.value
+            if usedCookie != secret.cookie {
+                secret.cookie = usedCookie
+                AccountCredentialStore.saveDivingFishSecret(secret, for: identityId)
+            }
+            cloudResp = resp
+
+        case .divingFishImportToken:
+            guard !secret.importToken.isEmpty else {
+                throw MaimaiAPIError.unauthorized("缺少水鱼成绩导入密钥")
+            }
+            cloudResp = try await Task {
+                try await MaimaiAPI.fetchPlayerRecords(importToken: secret.importToken)
+            }.value
+
+        default:
+            return (0, 0, [])
+        }
+
+        let cloudRecords = cloudResp.records ?? []
+        let needsTitleMap = ScoreSyncEngine.needsDivingFishTitleMap(
+            localRecords: localRecords,
+            cloudRecords: cloudRecords,
+            cnSongsById: cnSongsById
+        )
+        if needsTitleMap && divingFishMusicTitles.isEmpty {
+            let fetchedTitles: [Int: String]
+            do {
+                fetchedTitles = try await MaimaiAPI.fetchDivingFishMusicTitles()
+            } catch {
+                throw MaimaiAPIError.httpError(-1, "获取水鱼曲名列表失败，已取消本次上传以避免误匹配曲目")
+            }
+            guard !fetchedTitles.isEmpty else {
+                throw MaimaiAPIError.httpError(-1, "获取水鱼曲名列表失败，已取消本次上传以避免误匹配曲目")
+            }
+            divingFishMusicTitles = fetchedTitles
+        }
+
+        let result = ScoreSyncEngine.buildDivingFishWriteback(
+            localRecords: localRecords,
+            cloudRecords: cloudRecords,
+            songsById: songsById,
+            cnSongsById: cnSongsById,
+            musicTitlesById: divingFishMusicTitles
+        )
+        let uploads = result.uploads
+        guard !uploads.isEmpty else {
+            return (0, result.skippedDeletedCount, result.sampleSkippedSongIds)
+        }
+
+        switch binding.authMethod {
+        case .divingFishPassword:
+            let finalCookie = try await Task { () -> String in
+                do {
+                    try await MaimaiAPI.uploadDivingFishRecords(uploads, cookie: secret.cookie)
+                    return secret.cookie
+                } catch where MaimaiAPI.shouldRetryUploadLogin(after: error) {
+                    guard !username.isEmpty, !password.isEmpty else { throw error }
+                    let freshCookie = try await MaimaiAPI.login(username: username, password: password)
+                    try await MaimaiAPI.uploadDivingFishRecords(uploads, cookie: freshCookie)
+                    return freshCookie
+                }
+            }.value
+            if finalCookie != secret.cookie {
+                secret.cookie = finalCookie
+                AccountCredentialStore.saveDivingFishSecret(secret, for: identityId)
+            }
+
+        case .divingFishImportToken:
+            try await Task {
+                try await MaimaiAPI.uploadDivingFishRecords(uploads, importToken: secret.importToken)
+            }.value
+
+        default:
+            break
+        }
+        return (uploads.count, result.skippedDeletedCount, result.sampleSkippedSongIds)
+    }
+
+    private func writebackToLXNS(
+        identityId: String,
+        binding: LXNSBinding,
+        localRecords: [ProberRecord],
+        songsById: [Int: SongData],
+        cnSongsById: [Int: SongData]
+    ) async throws -> (uploadedCount: Int, skippedCount: Int, sampleSkippedIds: [Int]) {
+        let secret = AccountCredentialStore.loadLXNSSecret(for: identityId)
+        let lxScores: [LXNSScore]
+        var resolvedBearer: String?
+
+        switch binding.authMethod {
+        case .lxnsOAuth:
+            let initialToken = try await validLXNSAccessToken(for: identityId, forceRefresh: false)
+            do {
+                (_, lxScores) = try await Task {
+                    try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: initialToken)
+                }.value
+                resolvedBearer = initialToken
+            } catch MaimaiAPIError.unauthorized {
+                let refreshed = try await validLXNSAccessToken(
+                    for: identityId,
+                    forceRefresh: true,
+                    failedAccessToken: initialToken
+                )
+                (_, lxScores) = try await Task {
+                    try await MaimaiAPI.fetchLXNSPlayerAndScores(bearerToken: refreshed)
+                }.value
+                resolvedBearer = refreshed
+            }
+
+        case .lxnsPersonalToken:
+            guard !secret.personalToken.isEmpty else {
+                throw MaimaiAPIError.unauthorized("缺少落雪个人密钥")
+            }
+            (_, lxScores) = try await Task {
+                try await MaimaiAPI.fetchLXNSPlayerAndScores(personalToken: secret.personalToken)
+            }.value
+
+        default:
+            return (0, 0, [])
+        }
+
+        let cloudRecords = await Task.detached(priority: .userInitiated) {
+            LXNSCatalogConverter.convertScores(lxScores, songsById: songsById)
+        }.value
+        let result = ScoreSyncEngine.buildLXNSWriteback(
+            localRecords: localRecords,
+            cloudRecords: cloudRecords,
+            cnSongsById: cnSongsById
+        )
+        let uploads = result.uploads
+        guard !uploads.isEmpty else {
+            return (0, result.skippedDeletedCount, result.sampleSkippedSongIds)
+        }
+
+        do {
+            switch binding.authMethod {
+            case .lxnsOAuth:
+                let bearer: String
+                if let resolvedBearer {
+                    bearer = resolvedBearer
+                } else {
+                    bearer = try await validLXNSAccessToken(for: identityId, forceRefresh: false)
+                }
+                do {
+                    try await Task {
+                        try await MaimaiAPI.uploadLXNSScores(uploads, bearerToken: bearer)
+                    }.value
+                } catch MaimaiAPIError.unauthorized {
+                    let refreshed = try await validLXNSAccessToken(
+                        for: identityId,
+                        forceRefresh: true,
+                        failedAccessToken: bearer
+                    )
+                    try await Task {
+                        try await MaimaiAPI.uploadLXNSScores(uploads, bearerToken: refreshed)
+                    }.value
+                }
+
+            case .lxnsPersonalToken:
+                try await Task {
+                    try await MaimaiAPI.uploadLXNSScores(uploads, personalToken: secret.personalToken)
+                }.value
+
+            default:
+                break
+            }
+        } catch let error as MaimaiAPIError {
+            if case .httpError(let status, _) = error, status == 403 {
+                var list = identities
+                if let idx = list.firstIndex(where: { $0.id == identityId.lowercased() }) {
+                    list[idx].lxns?.hasWriteScope = false
+                    identities = list
+                }
+            }
+            throw error
+        }
+        return (uploads.count, result.skippedDeletedCount, result.sampleSkippedSongIds)
+    }
+
+    /// Serializes LXNS refresh-token exchange per identity and persists rotated `refresh_token` immediately.
     private func validLXNSAccessToken(
-        for profileId: UUID,
+        for identityId: String,
         forceRefresh: Bool,
         failedAccessToken: String? = nil
     ) async throws -> String {
-        if let existingTask = inFlightTokenRefreshTasks[profileId] {
+        let lower = identityId.lowercased()
+        if let existingTask = inFlightTokenRefreshTasks[lower] {
             return try await existingTask.value
         }
 
-        let currentSecret = AccountCredentialStore.loadSecret(for: profileId)
+        let currentSecret = AccountCredentialStore.loadLXNSSecret(for: lower)
         let alreadyRotatedSinceFailure = failedAccessToken != nil
             && !currentSecret.accessToken.isEmpty
             && currentSecret.accessToken != failedAccessToken
         if (!forceRefresh || alreadyRotatedSinceFailure),
            !currentSecret.accessToken.isEmpty,
-           let expiresAt = currentSecret.accessTokenExpiresAt,
-           Date().timeIntervalSince1970 < expiresAt - SyncPolicy.oauthExpiryBufferSeconds {
+           let expiresSec = currentSecret.accessTokenExpiresAtEpochSec,
+           Date().timeIntervalSince1970 < Double(expiresSec) - SyncPolicy.oauthExpiryBufferSeconds {
             return currentSecret.accessToken
         }
 
         guard !currentSecret.refreshToken.isEmpty else {
-            throw MaimaiAPIError.unauthorized("落雪授权已过期，请重新授权登录")
+            throw MaimaiAPIError.unauthorized("落雪授权已过期，请解绑后重新绑定")
         }
 
         let refreshTokenToUse = currentSecret.refreshToken
         let task = Task<String, Error> { @MainActor in
-            defer { inFlightTokenRefreshTasks[profileId] = nil }
+            defer { inFlightTokenRefreshTasks[lower] = nil }
             let refreshed = try await MaimaiAPI.refreshLXNSToken(refreshToken: refreshTokenToUse)
-            guard profiles.contains(where: { $0.id == profileId }) else {
-                throw MaimaiAPIError.unauthorized("该成绩档案已被移除")
+            guard identities.contains(where: { $0.id == lower && $0.lxns != nil }) else {
+                throw MaimaiAPIError.unauthorized("该落雪绑定已被移除")
             }
-            var updated = AccountCredentialStore.loadSecret(for: profileId)
+            var updated = AccountCredentialStore.loadLXNSSecret(for: lower)
             updated.accessToken = refreshed.accessToken
             if let newRefresh = refreshed.refreshToken, !newRefresh.isEmpty {
                 updated.refreshToken = newRefresh
             }
-            updated.accessTokenExpiresAt = Date().timeIntervalSince1970 + Double(refreshed.expiresIn)
-            // Persist rotated refresh token synchronously before returning; retry once on transient Keychain error.
-            let persisted = AccountCredentialStore.saveSecret(updated, for: profileId)
-                || AccountCredentialStore.saveSecret(updated, for: profileId)
+            updated.accessTokenExpiresAtEpochSec = Int64((Date().timeIntervalSince1970 + Double(refreshed.expiresIn)).rounded())
+            if let newScope = refreshed.scope, !newScope.isEmpty {
+                updated.grantedScopes = newScope
+            }
+            let persisted = AccountCredentialStore.saveLXNSSecret(updated, for: lower)
+                || AccountCredentialStore.saveLXNSSecret(updated, for: lower)
             guard persisted else {
-                throw MaimaiAPIError.unauthorized("落雪授权令牌保存失败，请重新授权登录")
+                throw MaimaiAPIError.unauthorized("落雪授权令牌保存失败，请解绑后重新绑定")
             }
             return refreshed.accessToken
         }
-        inFlightTokenRefreshTasks[profileId] = task
+        inFlightTokenRefreshTasks[lower] = task
         return try await task.value
     }
 
-    private func mergedSongLookupForScoreImport() -> [Int: SongData] {
-        if cnSongsById.isEmpty { return songsById }
-        return songsById.merging(cnSongsById) { _, cn in cn }
+    private func pureCNSongsLookup() -> [Int: SongData] {
+        cnSongsById
     }
 
-    private func upsertProfile(
-        provider: ScoreProvider,
-        authMethod: ScoreAuthMethod,
-        accountKey: String,
-        username: String,
-        nickname: String?,
-        syncedAt: Date? = nil
-    ) -> ScoreProfile {
-        var list = profiles
-        if let idx = list.firstIndex(where: { $0.provider == provider && $0.accountKey == accountKey }) {
-            list[idx].authMethod = authMethod
-            if !username.isEmpty { list[idx].username = username }
-            if let nickname, !nickname.isEmpty { list[idx].nickname = nickname }
-            if let syncedAt { list[idx].lastSyncedAt = syncedAt }
-            profiles = list
-            return list[idx]
-        } else {
-            let created = ScoreProfile(
-                id: UUID(),
-                provider: provider,
-                authMethod: authMethod,
-                accountKey: accountKey,
-                username: username,
-                nickname: nickname ?? "",
-                lastSyncedAt: syncedAt
-            )
-            list.append(created)
-            profiles = list
-            return created
+    private func scoreImportSongLookup() -> [Int: SongData] {
+        var map = deletedSongsById
+        if !songsById.isEmpty {
+            map.merge(songsById) { _, active in active }
+        }
+        if !cnSongsById.isEmpty {
+            map.merge(cnSongsById) { _, cn in cn }
+        }
+        return map
+    }
+
+    private func loadRecordsSnapshot(for identityId: String) async -> [ProberRecord] {
+        let lower = identityId.lowercased()
+        if lower == activeIdentityId && recordsOwnerIdentityId == lower && !records.isEmpty {
+            return records
+        }
+        let url = AccountCredentialStore.recordsFileURL(for: lower, in: appSupportDir)
+        return await Task.detached(priority: .utility) {
+            guard let data = try? Data(contentsOf: url),
+                  let decoded = try? JSONDecoder().decode([ProberRecord].self, from: data) else {
+                return []
+            }
+            return ScoreSyncEngine.normalizeCachedRecords(decoded)
+        }.value
+    }
+
+    private func installFetchedRecords(
+        _ fetched: [ProberRecord],
+        for identityId: String,
+        syncMode: SyncMode,
+        makeActive: Bool
+    ) async throws {
+        let lower = identityId.lowercased()
+        let fileURL = AccountCredentialStore.recordsFileURL(for: lower, in: appSupportDir)
+        let encoded = try JSONEncoder().encode(fetched)
+        try await Task.detached(priority: .userInitiated) {
+            try encoded.write(to: fileURL, options: .atomic)
+        }.value
+
+        let historyLookup = cnSongsById
+        if !historyLookup.isEmpty {
+            let historyStore = syncHistoryStore
+            Task.detached(priority: .utility) {
+                try? historyStore.appendSnapshot(
+                    identityId: lower,
+                    syncMode: syncMode,
+                    records: fetched,
+                    songsById: historyLookup
+                )
+            }
+        }
+
+        if makeActive && activeIdentityId != lower {
+            isRestoringCachedRecords = false
+            suppressNextIdentityRestore = true
+            activeIdentityId = lower
+        }
+        if activeIdentityId == lower {
+            recordsEpoch += 1
+            isRestoringCachedRecords = false
+            setRecordsSnapshot(fetched, ownerIdentityId: lower)
+            prefetchBest50Covers()
         }
     }
 
-    private func updateProfileMetadata(
-        id: UUID,
-        username: String?,
-        nickname: String?,
-        syncedAt: Date
-    ) {
-        guard let idx = profiles.firstIndex(where: { $0.id == id }) else { return }
-        var list = profiles
-        if let username, !username.isEmpty {
-            list[idx].username = username
+    private func resolveUnknownSongsAfterSync(in syncedRecords: [ProberRecord], for identityId: String) async {
+        guard !syncedRecords.isEmpty else { return }
+        func computeUnknownIds() -> Set<Int> {
+            var out = Set<Int>()
+            for rec in syncedRecords {
+                let id = rec.songId
+                if id > 0,
+                   self.cnSongsById[id] == nil,
+                   self.deletedSongsById[id] == nil,
+                   !self.unresolvableDeletedSongIds.contains(id) {
+                    out.insert(id)
+                }
+            }
+            return out
         }
-        if let nickname, !nickname.isEmpty {
-            list[idx].nickname = nickname
-        }
-        list[idx].lastSyncedAt = syncedAt
-        profiles = list
-    }
 
-    private func installFetchedRecords(_ fetched: [ProberRecord], for profileId: UUID) {
-        let fileURL = AccountCredentialStore.recordsFileURL(for: profileId, in: appSupportDir)
-        if let encoded = try? JSONEncoder().encode(fetched) {
-            try? encoded.write(to: fileURL, options: .atomic)
+        var unknownIds = computeUnknownIds()
+        guard !unknownIds.isEmpty else { return }
+
+        var didRefreshCN = false
+        if !isFetchingCNSongs {
+            let canRefreshCN: Bool = {
+                guard let lastAttempt = lastUnknownSongCatalogRefreshDate else { return true }
+                return Date().timeIntervalSince(lastAttempt) >= SyncPolicy.unknownSongCatalogCooldown
+            }()
+            if canRefreshCN {
+                let result = await performLXNSCatalogSync()
+                if let fetchedSongs = result.songs, !fetchedSongs.isEmpty {
+                    lastUnknownSongCatalogRefreshDate = Date()
+                    didRefreshCN = true
+                    let cnSnapshot = await storeCNBaseline(fetchedSongs)
+                    if serverRegion == .cn {
+                        applySnapshot(cnSnapshot, epoch: regionEpoch)
+                    } else if let catalog = zetarakuCatalog {
+                        await applyZetarakuCatalog(catalog, for: serverRegion, epoch: regionEpoch)
+                    }
+                    unknownIds = computeUnknownIds()
+                }
+            }
         }
-        if activeProfileId != profileId {
-            suppressNextProfileRestore = true
-            activeProfileId = profileId
+
+        let didConfirmFreshCNCatalog = didRefreshCN || (
+            !cnSongsById.isEmpty &&
+            (lastCNCatalogSync.map { Date().timeIntervalSince($0) < SyncPolicy.unknownSongCatalogCooldown } ?? false)
+        )
+
+        if !unknownIds.isEmpty && didConfirmFreshCNCatalog {
+            if zetarakuCatalog == nil || dxDataIdMap == nil {
+                let canFetchZetaraku: Bool = {
+                    guard let lastAttempt = lastDeletedSongsResolveAttemptDate else { return true }
+                    return Date().timeIntervalSince(lastAttempt) >= SyncPolicy.deletedSongsResolveCooldown
+                }()
+                if canFetchZetaraku && !isFetchingZetaraku {
+                    let zErr = await performZetarakuSync()
+                    if zErr == nil && zetarakuCatalog != nil {
+                        lastDeletedSongsResolveAttemptDate = Date()
+                    }
+                }
+            }
+
+            if let zCatalog = zetarakuCatalog, let idMap = dxDataIdMap {
+                let resolution = await Task.detached(priority: .userInitiated) {
+                    ZetarakuCatalogConverter.resolveDeletedCNSongs(
+                        unknownIds: unknownIds,
+                        catalog: zCatalog,
+                        dxIdMap: idMap
+                    )
+                }.value
+
+                if !resolution.resolved.isEmpty || !resolution.unresolvableIds.isEmpty {
+                    var updatedDeleted = deletedSongsById
+                    for song in resolution.resolved where song.numericId > 0 {
+                        updatedDeleted[song.numericId] = song
+                    }
+                    deletedSongsById = updatedDeleted
+                    unresolvableDeletedSongIds.formUnion(resolution.unresolvableIds)
+
+                    let cachePayload = DeletedCNSongsCache(
+                        songs: Array(updatedDeleted.values).sorted { $0.numericId < $1.numericId },
+                        unresolvableIds: Array(unresolvableDeletedSongIds).sorted()
+                    )
+                    let cacheURL = cachedDeletedCNSongsURL
+                    Task.detached(priority: .utility) {
+                        if let encoded = try? JSONEncoder().encode(cachePayload) {
+                            try? encoded.write(to: cacheURL, options: .atomic)
+                        }
+                    }
+                    catalogRevision &+= 1
+                    SyncDiagnostics.shared.record(
+                        operation: "resolve_deleted",
+                        message: "解析删除曲 \(resolution.resolved.count) 首，未收录 \(resolution.unresolvableIds.count) 首",
+                        sampleSkippedIds: Array(resolution.unresolvableIds).sorted()
+                    )
+                }
+            }
         }
-        recordsEpoch += 1
-        self.records = fetched
-        prefetchBest50Covers()
+
+        if activeIdentityId == identityId.lowercased() {
+            let lookup = scoreImportSongLookup()
+            let reprojected = records.map { rec -> ProberRecord in
+                if let song = lookup[rec.songId] {
+                    return rec.projected(onto: song, region: serverRegion)
+                }
+                return rec
+            }
+            setRecordsSnapshot(reprojected, ownerIdentityId: identityId)
+        }
     }
 
     private func prefetchBest50Covers() {
@@ -1185,20 +2507,26 @@ final class DataStore {
     }
 
     private func restoreCachedRecords() {
-        let targetProfileId = activeProfileId
+        let targetId = activeIdentityId
         recordsEpoch += 1
         let epoch = recordsEpoch
-        records = []
-        guard let targetProfileId else { return }
-        let url = AccountCredentialStore.recordsFileURL(for: targetProfileId, in: appSupportDir)
+        isRestoringCachedRecords = true
+        setRecordsSnapshot([], ownerIdentityId: nil)
+        guard let targetId else {
+            isRestoringCachedRecords = false
+            return
+        }
+        let url = AccountCredentialStore.recordsFileURL(for: targetId, in: appSupportDir)
         Task(priority: .userInitiated) {
             let cached = await Task.detached(priority: .utility) { () -> [ProberRecord]? in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? JSONDecoder().decode([ProberRecord].self, from: data)
+                guard let data = try? Data(contentsOf: url),
+                      let decoded = try? JSONDecoder().decode([ProberRecord].self, from: data) else { return nil }
+                return ScoreSyncEngine.normalizeCachedRecords(decoded)
             }.value
-            guard activeProfileId == targetProfileId,
+            guard activeIdentityId == targetId,
                   recordsEpoch == epoch else { return }
-            records = cached ?? []
+            isRestoringCachedRecords = false
+            setRecordsSnapshot(cached ?? [], ownerIdentityId: targetId)
             prefetchBest50Covers()
         }
     }
@@ -1231,20 +2559,41 @@ final class DataStore {
     }
 
     func filteredSongs(criteria: SongFilterCriteria) -> [SongData] {
-        SongFilter.apply(
+        let pool: [SongData]
+        if serverRegion == .cn, !deletedSongsById.isEmpty, !playedSongIds.isEmpty {
+            var list = songs
+            for songId in playedSongIds {
+                if songsById[songId] == nil, let deleted = deletedSongsById[songId] {
+                    list.append(deleted)
+                }
+            }
+            pool = list
+        } else {
+            pool = songs
+        }
+        return SongFilter.apply(
             criteria,
-            to: songs,
+            to: pool,
             favoriteIds: favoriteIds,
             enableAliasSearch: enableAliasSearch,
             enableCharterSearch: enableCharterSearch,
-            region: serverRegion
+            region: serverRegion,
+            playedSongIds: playedSongIds
         )
     }
 
     // MARK: - Records & Best50 Helpers
 
     var isLoggedIn: Bool {
-        activeProfile != nil
+        activeIdentity != nil
+    }
+
+    func song(forId rawId: String) -> SongData? {
+        if let numId = Int(rawId) {
+            if let active = songsById[numId] { return active }
+            if serverRegion == .cn, let deleted = deletedSongsById[numId] { return deleted }
+        }
+        return songs.first { $0.id == rawId }
     }
 
     /// Finds the SD <-> DX counterpart of the same song (`id ± 10000` or same title+genre in JP/INTL), if present.
@@ -1252,7 +2601,7 @@ final class DataStore {
         guard !song.isUtage else { return nil }
         if song.numericId > 0 {
             let targetId = song.numericId < 10_000 ? song.numericId + 10_000 : song.numericId - 10_000
-            if let candidate = songsById[targetId],
+            if let candidate = songsById[targetId] ?? (serverRegion == .cn ? deletedSongsById[targetId] : nil),
                !candidate.isUtage,
                candidate.title == song.title,
                candidate.isDX != song.isDX {
@@ -1286,7 +2635,13 @@ final class DataStore {
 
     func record(forSongId songId: Int, difficultyIndex: Int) -> ProberRecord? {
         guard songId > 0 else { return nil }
-        return recordsByKey["\(songId)_\(difficultyIndex)"]
+        if let exact = recordsByKey["\(songId)_\(difficultyIndex)"] {
+            return exact
+        }
+        if difficultyIndex == 11 {
+            return recordsByKey["\(songId)_10"]
+        }
+        return nil
     }
 
     func sortedRecords(isNewVersion: Bool) -> [ProberRecord] {
@@ -1295,7 +2650,7 @@ final class DataStore {
             guard let song = songsById[rec.songId],
                   !song.isUtage,
                   song.isDisabled != true,
-                  rec.levelIndex < song.ds.count,
+                  song.chartArrayIndex(forRecordLevelIndex: rec.levelIndex) != nil,
                   song.basicInfo.isNew == isNewVersion else {
                 return nil
             }
@@ -1310,12 +2665,17 @@ final class DataStore {
         var newList: [ProberRecord] = []
         for rec in records {
             guard let song = songsById[rec.songId] else {
+                if deletedSongsById[rec.songId] != nil || unresolvableDeletedSongIds.contains(rec.songId) {
+                    continue
+                }
                 if region == .cn || cnSongsById[rec.songId] == nil {
                     matching = false
                 }
                 continue
             }
-            guard !song.isUtage, song.isDisabled != true, rec.levelIndex < song.ds.count else { continue }
+            guard !song.isUtage,
+                  song.isDisabled != true,
+                  song.chartArrayIndex(forRecordLevelIndex: rec.levelIndex) != nil else { continue }
             let projected = rec.projected(onto: song, region: region)
             if song.basicInfo.isNew {
                 newList.append(projected)
@@ -1337,20 +2697,18 @@ final class DataStore {
         if lhs.achievements != rhs.achievements {
             return lhs.achievements > rhs.achievements
         }
-        return lhs.ds > rhs.ds
+        if lhs.songId != rhs.songId {
+            return lhs.songId < rhs.songId
+        }
+        return lhs.levelIndex < rhs.levelIndex
     }
 
     var displayPlayerName: String {
-        if !useProberNickname {
-            let trimmed = customNickname.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                return trimmed
-            }
-        }
-        if let profile = activeProfile {
-            return profile.displayTitle
-        }
-        return "Player"
+        activeIdentity?.primaryDisplayName ?? "Player"
+    }
+
+    var activeB50PlayerName: String {
+        activeIdentity?.b50PlayerName ?? "Player"
     }
 }
 
@@ -1359,6 +2717,7 @@ private struct LocalCaches {
     var plates: CNPlateCatalog?
     var zetaraku: ZetarakuCatalog?
     var dxIdMap: DXDataIdMap?
+    var deletedCache: DeletedCNSongsCache?
     var stats: ChartStatsResponse?
     var records: [ProberRecord]?
 }

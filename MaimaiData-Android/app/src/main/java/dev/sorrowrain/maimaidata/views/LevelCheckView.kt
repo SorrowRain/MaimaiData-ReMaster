@@ -79,7 +79,7 @@ fun LevelCheckScreen(
     val (dsGroups, totalChartCount) = remember(store.songs, store.catalogRevision, selectedLevel) {
         val chartItems = store.songs
             .asSequence()
-            .filter { !it.isUtage }
+            .filter { !it.isUtage && it.isDisabled != true }
             .flatMap { song ->
                 song.resolvedCharts
                     .asSequence()

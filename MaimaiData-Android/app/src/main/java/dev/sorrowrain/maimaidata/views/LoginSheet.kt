@@ -1,8 +1,8 @@
 package dev.sorrowrain.maimaidata.views
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -14,7 +14,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -30,23 +33,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import dev.sorrowrain.maimaidata.bridges.CustomTabOAuthLauncher
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
-import dev.sorrowrain.maimaidata.components.AppInlineButton
+import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
+import dev.sorrowrain.maimaidata.components.AppInsetRow
+import dev.sorrowrain.maimaidata.components.AppPasteField
 import dev.sorrowrain.maimaidata.components.AppPrimaryButton
 import dev.sorrowrain.maimaidata.components.AppSectionCard
 import dev.sorrowrain.maimaidata.components.AppSecureField
-import dev.sorrowrain.maimaidata.components.AppSegmentedControl
+import dev.sorrowrain.maimaidata.components.AppSheetHeader
 import dev.sorrowrain.maimaidata.components.AppTextField
-import dev.sorrowrain.maimaidata.models.ScoreProfile
-import dev.sorrowrain.maimaidata.models.ScoreProvider
+import dev.sorrowrain.maimaidata.models.PlayerIdentity
+import dev.sorrowrain.maimaidata.models.SyncChannelKind
 import dev.sorrowrain.maimaidata.services.LocalDataStore
 import dev.sorrowrain.maimaidata.services.MaimaiAPIException
 import dev.sorrowrain.maimaidata.theme.AppTheme
@@ -55,37 +61,186 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoginSheet(
+fun AddIdentitySheet(
     onDismiss: () -> Unit,
-    onProfileAdded: (ScoreProfile) -> Unit = {},
+    onCompleted: (String) -> Unit = {},
     onWarningMessage: ((String) -> Unit)? = null
+) {
+    val store = LocalDataStore.current
+    var selectedChannel by rememberSaveable { mutableStateOf<SyncChannelKind?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { !(isSubmitting && it == SheetValue.Hidden) }
+    )
+
+    val availableChannels = remember(store.isCNDirectAvailable) {
+        SyncChannelKind.entries.filter {
+            it != SyncChannelKind.SELF_HOSTED || store.isCNDirectAvailable
+        }
+    }
+
+    val requestClose = {
+        if (!isSubmitting) {
+            store.cancelPendingLXNSOAuth()
+            onDismiss()
+        }
+    }
+
+    val forceClose = {
+        store.cancelPendingLXNSOAuth()
+        onDismiss()
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = requestClose,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        val activeChannel = selectedChannel
+        if (activeChannel == null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
+                    .padding(bottom = AppTheme.Space.l),
+                verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
+            ) {
+                AppSheetHeader(
+                    title = "添加档案",
+                    onClose = requestClose
+                )
+
+                AppSectionCard(
+                    title = "选择成绩来源",
+                    subtitle = "添加后还可以在档案详情里继续绑定其他账号"
+                ) {
+                    AppInsetGroup {
+                        availableChannels.forEachIndexed { idx, channel ->
+                            if (idx > 0) {
+                                AppInsetDivider()
+                            }
+                            AppInsetRow(
+                                title = channel.displayName,
+                                subtitle = channel.sourceSubtitle(),
+                                icon = channel.sourceIcon(),
+                                iconTint = channel.sourceTint(),
+                                showsChevron = true,
+                                onClick = { selectedChannel = channel }
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            ChannelBindFormContent(
+                channel = activeChannel,
+                targetIdentityId = null,
+                onBack = { selectedChannel = null },
+                onRequestClose = requestClose,
+                onDismiss = forceClose,
+                onSubmittingChange = { isSubmitting = it },
+                onCompleted = onCompleted,
+                onWarningMessage = onWarningMessage
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChannelBindSheet(
+    channel: SyncChannelKind,
+    targetIdentityId: String?,
+    onDismiss: () -> Unit,
+    onCompleted: (String) -> Unit = {},
+    onWarningMessage: ((String) -> Unit)? = null
+) {
+    val store = LocalDataStore.current
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { !(isSubmitting && it == SheetValue.Hidden) }
+    )
+
+    val requestClose = {
+        if (!isSubmitting) {
+            store.cancelPendingLXNSOAuth()
+            onDismiss()
+        }
+    }
+
+    val forceClose = {
+        store.cancelPendingLXNSOAuth()
+        onDismiss()
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = requestClose,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        ChannelBindFormContent(
+            channel = channel,
+            targetIdentityId = targetIdentityId,
+            onBack = null,
+            onRequestClose = requestClose,
+            onDismiss = forceClose,
+            onSubmittingChange = { isSubmitting = it },
+            onCompleted = onCompleted,
+            onWarningMessage = onWarningMessage
+        )
+    }
+}
+
+@Composable
+private fun ChannelBindFormContent(
+    channel: SyncChannelKind,
+    targetIdentityId: String?,
+    onBack: (() -> Unit)?,
+    onRequestClose: () -> Unit,
+    onDismiss: () -> Unit,
+    onSubmittingChange: (Boolean) -> Unit,
+    onCompleted: (String) -> Unit,
+    onWarningMessage: ((String) -> Unit)?
 ) {
     val store = LocalDataStore.current
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
 
-    var selectedProvider by rememberSaveable { mutableStateOf(ScoreProvider.LXNS) }
-    var lxnsUsePersonalToken by rememberSaveable { mutableStateOf(false) }
-    var dfUseImportToken by rememberSaveable { mutableStateOf(false) }
+    var secondaryStep by rememberSaveable(channel) { mutableStateOf(false) }
 
-    var dfUsername by rememberSaveable { mutableStateOf("") }
-    var dfPassword by rememberSaveable { mutableStateOf("") }
-    var dfImportToken by rememberSaveable { mutableStateOf("") }
-    var lxnsPersonalToken by rememberSaveable { mutableStateOf("") }
     var remarkName by rememberSaveable { mutableStateOf("") }
+    var dfUsername by rememberSaveable { mutableStateOf("") }
+
+    // Sensitive credentials/tokens/QR contents intentionally kept in volatile `remember`
+    // so Android SavedState never serializes secrets into transaction bundles.
+    var qrContent by remember { mutableStateOf("") }
+    var dfPassword by remember { mutableStateOf("") }
+    var dfImportToken by remember { mutableStateOf("") }
+    var lxnsPersonalToken by remember { mutableStateOf("") }
 
     var isSubmitting by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true,
-        confirmValueChange = { !(isSubmitting && it == SheetValue.Hidden) }
-    )
     var errorTitle by remember { mutableStateOf("授权或同步提示") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var shouldDismissAfterAlert by remember { mutableStateOf(false) }
 
+    BackHandler(enabled = secondaryStep && !isSubmitting) {
+        secondaryStep = false
+    }
+
+    LaunchedEffect(isSubmitting) {
+        onSubmittingChange(isSubmitting)
+    }
+
     fun handleRecordSyncFailureAfterLogin(err: MaimaiAPIException.RecordSyncFailedAfterLogin) {
-        store.activeProfile?.let(onProfileAdded)
         if (onWarningMessage != null) {
             onDismiss()
             onWarningMessage(err.recoveryMessage)
@@ -96,12 +251,13 @@ fun LoginSheet(
         }
     }
 
-    LaunchedEffect(store) {
+    LaunchedEffect(store, channel) {
+        if (channel != SyncChannelKind.LXNS) return@LaunchedEffect
         store.pendingOAuthCallbacks.collect { callbackUri ->
             isSubmitting = true
             try {
-                val profile = store.completeLXNSOAuth(callbackUri)
-                onProfileAdded(profile)
+                store.completeLXNSOAuth(callbackUri)
+                onCompleted("已绑定 ${SyncChannelKind.LXNS.displayName}")
                 onDismiss()
             } catch (ce: CancellationException) {
                 throw ce
@@ -119,10 +275,31 @@ fun LoginSheet(
         }
     }
 
-    val requestClose = {
-        if (!isSubmitting) {
-            store.cancelPendingLXNSOAuth()
-            onDismiss()
+    fun submitCNDirectBind() {
+        val trimmedQR = qrContent.trim()
+        if (isSubmitting || trimmedQR.isEmpty()) return
+        focusManager.clearFocus()
+        scope.launch {
+            isSubmitting = true
+            try {
+                store.bindSelfHosted(
+                    qrContent = trimmedQR,
+                    initialFullSync = true,
+                    targetIdentityId = targetIdentityId
+                )
+                onCompleted("已绑定 ${SyncChannelKind.SELF_HOSTED.displayName}")
+                onDismiss()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (err: MaimaiAPIException) {
+                errorTitle = "绑定或同步提示"
+                errorMessage = err.recoveryMessage
+            } catch (err: Throwable) {
+                errorTitle = "绑定或同步提示"
+                errorMessage = err.message ?: "国服直连绑定失败"
+            } finally {
+                isSubmitting = false
+            }
         }
     }
 
@@ -132,8 +309,12 @@ fun LoginSheet(
         scope.launch {
             isSubmitting = true
             try {
-                val profile = store.addLXNSPersonalTokenProfile(lxnsPersonalToken, remarkName)
-                onProfileAdded(profile)
+                store.bindLXNSPersonalToken(
+                    rawToken = lxnsPersonalToken,
+                    remarkName = remarkName,
+                    targetIdentityId = targetIdentityId
+                )
+                onCompleted("已绑定 ${SyncChannelKind.LXNS.displayName}")
                 onDismiss()
             } catch (ce: CancellationException) {
                 throw ce
@@ -155,8 +336,12 @@ fun LoginSheet(
         scope.launch {
             isSubmitting = true
             try {
-                val profile = store.addDivingFishPasswordProfile(dfUsername, dfPassword)
-                onProfileAdded(profile)
+                store.bindDivingFishPassword(
+                    username = dfUsername,
+                    password = dfPassword,
+                    targetIdentityId = targetIdentityId
+                )
+                onCompleted("已绑定 ${SyncChannelKind.DIVING_FISH.displayName}")
                 onDismiss()
             } catch (ce: CancellationException) {
                 throw ce
@@ -180,8 +365,11 @@ fun LoginSheet(
         scope.launch {
             isSubmitting = true
             try {
-                val profile = store.addDivingFishImportTokenProfile(dfImportToken)
-                onProfileAdded(profile)
+                store.bindDivingFishImportToken(
+                    rawToken = dfImportToken,
+                    targetIdentityId = targetIdentityId
+                )
+                onCompleted("已绑定 ${SyncChannelKind.DIVING_FISH.displayName}")
                 onDismiss()
             } catch (ce: CancellationException) {
                 throw ce
@@ -190,97 +378,88 @@ fun LoginSheet(
                 errorMessage = err.recoveryMessage
             } catch (err: Throwable) {
                 errorTitle = "授权或同步提示"
-                errorMessage = "验证失败：${err.message ?: "网络异常"}\n请检查导入 Token 是否正确。"
+                errorMessage = "验证失败：${err.message ?: "网络异常"}\n请检查成绩导入密钥是否正确。"
             } finally {
                 isSubmitting = false
             }
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = requestClose,
-        sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
+            .padding(bottom = AppTheme.Space.l),
+        verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(horizontal = AppTheme.pagePadding)
-                .padding(bottom = AppTheme.Space.xl),
-            verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "添加成绩档案",
-                    style = AppTheme.AppTypography.cardTitle,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                AppInlineButton(
-                    title = "关闭",
-                    isNeutral = true,
-                    enabled = !isSubmitting,
-                    onClick = requestClose
-                )
-            }
+        AppSheetHeader(
+            title = when {
+                !secondaryStep -> "绑定${channel.displayName}"
+                channel == SyncChannelKind.LXNS -> "使用个人 API 密钥"
+                else -> "使用成绩导入密钥"
+            },
+            onClose = onRequestClose,
+            onBack = if (secondaryStep) ({ secondaryStep = false }) else onBack,
+            enabled = !isSubmitting
+        )
 
-            // 1. Score Provider Selector
-            AppSectionCard(
-                title = "成绩来源",
-                subtitle = "成绩档案仅用于拉取并本地保存成绩单，与外面的游戏区服算分规则互不绑定"
-            ) {
-                val providers = ScoreProvider.entries
-                AppSegmentedControl(
-                    options = providers.map { it.displayName },
-                    selectedIndex = providers.indexOf(selectedProvider).coerceAtLeast(0),
-                    onSelect = { index -> if (!isSubmitting) selectedProvider = providers[index] },
-                    enabled = !isSubmitting && !store.isLoadingLocalData
-                )
-            }
-
-            // 2. Provider-specific Auth Section
-            if (selectedProvider == ScoreProvider.LXNS) {
+        when (channel) {
+            SyncChannelKind.SELF_HOSTED -> {
                 AppSectionCard(
-                    title = "连接落雪咖啡屋",
-                    subtitle = "凭据与令牌仅加密存储在设备本机安全存储"
+                    title = "粘贴玩家二维码",
+                    subtitle = "获取玩家二维码，长按识别后复制文本"
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
                     ) {
-                        AppSegmentedControl(
-                            options = listOf("OAuth 授权", "个人 API 密钥"),
-                            selectedIndex = if (lxnsUsePersonalToken) 1 else 0,
-                            onSelect = { index -> if (!isSubmitting) lxnsUsePersonalToken = (index == 1) },
-                            enabled = !isSubmitting && !store.isLoadingLocalData
+                        QRPasteInputRow(
+                            text = qrContent,
+                            onValueChange = { qrContent = it },
+                            onDone = { submitCNDirectBind() }
                         )
 
-                        if (!lxnsUsePersonalToken) {
+                        AppPrimaryButton(
+                            title = if (isSubmitting) "正在绑定并同步…" else "绑定并同步成绩",
+                            icon = Icons.Rounded.QrCode2,
+                            isLoading = isSubmitting,
+                            enabled = !isSubmitting && !store.isLoadingLocalData && qrContent.isNotBlank(),
+                            onClick = { submitCNDirectBind() }
+                        )
+                    }
+                }
+            }
+
+            SyncChannelKind.LXNS -> {
+                if (!secondaryStep) {
+                    AppSectionCard(
+                        title = "连接落雪咖啡屋",
+                        subtitle = "凭据仅加密保存在本机"
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                        ) {
                             AppInsetGroup(padding = AppTheme.Space.m) {
                                 Text(
-                                    text = "点击下方按钮在系统安全网页中登录落雪账号并确认只读授权，授权完成后将自动跳回应用并拉取全量成绩单。",
+                                    text = "将跳转到落雪网页登录，并授权读取和上传成绩。",
                                     style = AppTheme.AppTypography.caption,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
                             AppPrimaryButton(
-                                title = if (isSubmitting) "正在授权并同步成绩…" else "前往落雪咖啡屋授权",
+                                title = if (isSubmitting) "正在授权并同步…" else "前往落雪授权",
                                 icon = Icons.Rounded.VerifiedUser,
                                 isLoading = isSubmitting,
                                 enabled = !isSubmitting && !store.isLoadingLocalData,
                                 onClick = {
                                     focusManager.clearFocus()
                                     try {
-                                        val authorizeUrl = store.beginLXNSOAuth()
+                                        val authorizeUrl = store.beginLXNSOAuth(targetIdentityId)
                                         CustomTabOAuthLauncher.launch(context, authorizeUrl)
                                     } catch (err: MaimaiAPIException) {
                                         errorTitle = "授权或同步提示"
@@ -291,7 +470,27 @@ fun LoginSheet(
                                     }
                                 }
                             )
-                        } else {
+
+                            AppInsetDivider()
+
+                            AppInsetGroup {
+                                AppInsetRow(
+                                    title = "使用个人 API 密钥",
+                                    showsChevron = true,
+                                    onClick = { if (!isSubmitting) secondaryStep = true }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    AppSectionCard(
+                        title = "连接落雪咖啡屋",
+                        subtitle = "凭据仅加密保存在本机"
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                        ) {
                             AppSecureField(
                                 value = lxnsPersonalToken,
                                 onValueChange = { lxnsPersonalToken = it },
@@ -310,34 +509,27 @@ fun LoginSheet(
                             )
 
                             AppPrimaryButton(
-                                title = if (isSubmitting) "正在验证并同步成绩…" else "验证并保存档案",
+                                title = if (isSubmitting) "正在验证并同步…" else "验证并绑定",
                                 icon = Icons.Rounded.CloudDownload,
                                 isLoading = isSubmitting,
-                                enabled = !isSubmitting &&
-                                    !store.isLoadingLocalData &&
-                                    lxnsPersonalToken.isNotBlank(),
+                                enabled = !isSubmitting && !store.isLoadingLocalData && lxnsPersonalToken.isNotBlank(),
                                 onClick = { submitLXNSPersonalToken() }
                             )
                         }
                     }
                 }
-            } else {
-                AppSectionCard(
-                    title = "连接水鱼查分器",
-                    subtitle = "凭据仅加密存储在设备本机安全存储"
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                    ) {
-                        AppSegmentedControl(
-                            options = listOf("账号密码", "成绩导入 Token"),
-                            selectedIndex = if (dfUseImportToken) 1 else 0,
-                            onSelect = { index -> if (!isSubmitting) dfUseImportToken = (index == 1) },
-                            enabled = !isSubmitting && !store.isLoadingLocalData
-                        )
+            }
 
-                        if (!dfUseImportToken) {
+            SyncChannelKind.DIVING_FISH -> {
+                if (!secondaryStep) {
+                    AppSectionCard(
+                        title = "连接水鱼查分器",
+                        subtitle = "凭据仅加密保存在本机"
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                        ) {
                             AppTextField(
                                 value = dfUsername,
                                 onValueChange = { dfUsername = it },
@@ -358,7 +550,7 @@ fun LoginSheet(
                             )
 
                             AppPrimaryButton(
-                                title = if (isSubmitting) "正在登录并同步成绩…" else "登录并保存档案",
+                                title = if (isSubmitting) "正在登录并同步…" else "登录并绑定",
                                 icon = Icons.AutoMirrored.Rounded.Login,
                                 isLoading = isSubmitting,
                                 enabled = !isSubmitting &&
@@ -367,30 +559,48 @@ fun LoginSheet(
                                     dfPassword.isNotEmpty(),
                                 onClick = { submitDivingFishPassword() }
                             )
-                        } else {
+
+                            AppInsetDivider()
+
+                            AppInsetGroup {
+                                AppInsetRow(
+                                    title = "使用成绩导入密钥",
+                                    showsChevron = true,
+                                    onClick = { if (!isSubmitting) secondaryStep = true }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    AppSectionCard(
+                        title = "连接水鱼查分器",
+                        subtitle = "凭据仅加密保存在本机"
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                        ) {
                             AppSecureField(
                                 value = dfImportToken,
                                 onValueChange = { dfImportToken = it },
-                                label = "成绩导入 Token",
-                                placeholder = "粘贴水鱼「编辑个人资料」生成的成绩导入 Token",
+                                label = "成绩导入密钥",
+                                placeholder = "粘贴水鱼「编辑个人资料」生成的成绩导入密钥",
                                 keyboardActions = KeyboardActions(onDone = { submitDivingFishImportToken() })
                             )
 
                             AppInsetGroup(padding = AppTheme.Space.m) {
                                 Text(
-                                    text = "无需输入水鱼账号密码，直接通过 Import-Token 拉取完整成绩单与查分器昵称。",
+                                    text = "成绩导入密钥可同时用于获取和上传成绩。",
                                     style = AppTheme.AppTypography.caption,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
                             AppPrimaryButton(
-                                title = if (isSubmitting) "正在验证并同步成绩…" else "验证并保存档案",
+                                title = if (isSubmitting) "正在验证并同步…" else "验证并绑定",
                                 icon = Icons.Rounded.CloudDownload,
                                 isLoading = isSubmitting,
-                                enabled = !isSubmitting &&
-                                    !store.isLoadingLocalData &&
-                                    dfImportToken.isNotBlank(),
+                                enabled = !isSubmitting && !store.isLoadingLocalData && dfImportToken.isNotBlank(),
                                 onClick = { submitDivingFishImportToken() }
                             )
                         }
@@ -412,3 +622,148 @@ fun LoginSheet(
         }
     )
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FullSyncSheet(
+    identity: PlayerIdentity,
+    onDismiss: () -> Unit,
+    onCompleted: (String) -> Unit = {}
+) {
+    val store = LocalDataStore.current
+    val focusManager = LocalFocusManager.current
+    val scope = rememberCoroutineScope()
+
+    var qrContent by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { !(isSubmitting && it == SheetValue.Hidden) }
+    )
+
+    val subtitle = if (store.identities.size > 1) {
+        "将覆盖 ${identity.primaryDisplayName} 的本地成绩标记；获取玩家二维码，长按识别后复制文本"
+    } else {
+        "获取玩家二维码，长按识别后复制文本"
+    }
+
+    fun runFullSync() {
+        val trimmedQR = qrContent.trim()
+        if (isSubmitting || trimmedQR.isEmpty()) return
+        focusManager.clearFocus()
+        scope.launch {
+            isSubmitting = true
+            try {
+                store.fullSyncSelfHosted(
+                    identityId = identity.id,
+                    qrContent = trimmedQR,
+                    writeback = false
+                )
+                onCompleted("完整同步完成")
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (err: MaimaiAPIException) {
+                errorMessage = err.recoveryMessage
+            } catch (err: Throwable) {
+                errorMessage = err.message ?: "完整同步失败"
+            } finally {
+                isSubmitting = false
+            }
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
+                .padding(bottom = AppTheme.Space.l),
+            verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
+        ) {
+            AppSheetHeader(
+                title = "完整同步",
+                onClose = { if (!isSubmitting) onDismiss() },
+                enabled = !isSubmitting
+            )
+
+            AppSectionCard(
+                title = "粘贴玩家二维码",
+                subtitle = subtitle
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                ) {
+                    QRPasteInputRow(
+                        text = qrContent,
+                        onValueChange = { qrContent = it },
+                        onDone = { runFullSync() }
+                    )
+
+                    AppPrimaryButton(
+                        title = if (isSubmitting) "正在完整同步…" else "开始完整同步",
+                        icon = Icons.Rounded.QrCode2,
+                        isLoading = isSubmitting,
+                        enabled = !isSubmitting && qrContent.isNotBlank(),
+                        onClick = { runFullSync() }
+                    )
+                }
+            }
+        }
+    }
+
+    AppErrorDialog(
+        title = "完整同步提示",
+        message = errorMessage,
+        onDismiss = { errorMessage = null }
+    )
+}
+
+@Composable
+private fun QRPasteInputRow(
+    text: String,
+    onValueChange: (String) -> Unit,
+    onDone: () -> Unit
+) {
+    AppPasteField(
+        value = text,
+        onValueChange = onValueChange,
+        placeholder = "粘贴链接或 SGWCMAID 开头的文本",
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Uri,
+            imeAction = ImeAction.Done
+        ),
+        keyboardActions = KeyboardActions(onDone = { onDone() })
+    )
+}
+
+private fun SyncChannelKind.sourceIcon(): ImageVector =
+    when (this) {
+        SyncChannelKind.SELF_HOSTED -> Icons.Rounded.QrCode2
+        SyncChannelKind.LXNS -> Icons.Rounded.PersonAdd
+        SyncChannelKind.DIVING_FISH -> Icons.Rounded.BarChart
+    }
+
+private fun SyncChannelKind.sourceTint(): Color =
+    when (this) {
+        SyncChannelKind.SELF_HOSTED -> AppTheme.accent
+        SyncChannelKind.LXNS -> AppTheme.Palette.ratingPurple
+        SyncChannelKind.DIVING_FISH -> AppTheme.Palette.statFC
+    }
+
+private fun SyncChannelKind.sourceSubtitle(): String =
+    when (this) {
+        SyncChannelKind.SELF_HOSTED -> "用微信玩家二维码同步"
+        SyncChannelKind.LXNS -> "用落雪账号授权"
+        SyncChannelKind.DIVING_FISH -> "用水鱼账号登录"
+    }

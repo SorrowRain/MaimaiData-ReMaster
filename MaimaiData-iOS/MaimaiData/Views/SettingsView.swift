@@ -1,7 +1,11 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(DataStore.self) private var store
+    @State private var toast = ToastState()
+
+    private static let qqGroupNumber = "1016143695"
 
     private enum SettingsRoute: Hashable {
         case scoreProfiles
@@ -18,8 +22,8 @@ struct SettingsView: View {
     }
 
     private var activeProfileSummary: String {
-        guard let profile = store.activeProfile else { return "未添加" }
-        return profile.displayTitle
+        guard let identity = store.activeIdentity else { return "未添加" }
+        return identity.primaryDisplayName
     }
 
     var body: some View {
@@ -35,7 +39,7 @@ struct SettingsView: View {
                                 }
                                 .buttonStyle(.plain)
 
-                                Divider()
+                                AppInsetDivider()
 
                                 NavigationLink(value: SettingsRoute.serverRegion) {
                                     AppInsetRow(title: "游戏区服", showsChevron: true) {
@@ -63,7 +67,7 @@ struct SettingsView: View {
                                 }
                                 .buttonStyle(.plain)
 
-                                Divider()
+                                AppInsetDivider()
 
                                 NavigationLink(value: SettingsRoute.dataAndStorage) {
                                     AppInsetRow(title: "数据同步与存储", showsChevron: true) {
@@ -86,12 +90,23 @@ struct SettingsView: View {
                                 }
                                 .buttonStyle(.plain)
 
-                                Divider()
+                                AppInsetDivider()
 
                                 NavigationLink(value: SettingsRoute.acknowledgments) {
                                     directoryRow(title: "致谢与参考")
                                 }
                                 .buttonStyle(.plain)
+
+                                AppInsetDivider()
+
+                                Button {
+                                    UIPasteboard.general.string = Self.qqGroupNumber
+                                    toast.show("已复制 QQ 群号", duration: 1.8)
+                                } label: {
+                                    directoryRow(title: "反馈与交流群", value: Self.qqGroupNumber)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("复制反馈与交流群 QQ 群号 \(Self.qqGroupNumber)")
                             }
                         }
                     }
@@ -102,6 +117,7 @@ struct SettingsView: View {
             .appPageBackground()
             .navigationTitle("设置与数据")
             .navigationBarTitleDisplayMode(.inline)
+            .statusToast(toast)
             .navigationDestination(for: SettingsRoute.self) { route in
                 switch route {
                 case .scoreProfiles:
@@ -117,6 +133,9 @@ struct SettingsView: View {
                 case .acknowledgments:
                     AcknowledgmentsView()
                 }
+            }
+            .navigationDestination(for: IdentityDetailRoute.self) { route in
+                IdentityDetailView(identityId: route.identityId)
             }
         }
     }
@@ -146,7 +165,7 @@ private struct ServerRegionSettingsView: View {
                         VStack(spacing: 0) {
                             ForEach(Array(MaimaiConstants.ServerRegion.allCases.enumerated()), id: \.element.id) { idx, region in
                                 if idx > 0 {
-                                    Divider()
+                                    AppInsetDivider()
                                 }
                                 regionRow(region)
                             }
@@ -203,12 +222,12 @@ private struct PreferencesSettingsView: View {
                                 title: "曲目详情页显示别名",
                                 isOn: $storeBindable.enableShowAlias
                             )
-                            Divider()
+                            AppInsetDivider()
                             AppInsetToggleRow(
                                 title: "搜索时匹配曲目别名",
                                 isOn: $storeBindable.enableAliasSearch
                             )
-                            Divider()
+                            AppInsetDivider()
                             AppInsetToggleRow(
                                 title: "搜索时匹配谱师名称",
                                 isOn: $storeBindable.enableCharterSearch
@@ -254,7 +273,7 @@ private struct DataAndStorageSettingsView: View {
                                 }
                             }
 
-                            Divider()
+                            AppInsetDivider()
 
                             AppInsetRow(
                                 title: "水鱼拟合定数",
@@ -274,22 +293,44 @@ private struct DataAndStorageSettingsView: View {
 
                 AppSectionCard(title: "本地存储") {
                     AppInsetGroup {
-                        AppInsetRow(
-                            title: "封面磁盘缓存",
-                            subtitle: "当前占用 \(cacheSizeText)",
-                            monospacedSubtitle: true
-                        ) {
-                            AppInlineButton(
-                                title: "清除缓存",
-                                icon: "trash",
-                                tint: AppTheme.destructive
+                        VStack(spacing: 0) {
+                            AppInsetRow(
+                                title: "封面磁盘缓存",
+                                subtitle: "当前占用 \(cacheSizeText)",
+                                monospacedSubtitle: true
                             ) {
-                                Task {
-                                    await Task.detached(priority: .utility) {
-                                        CoverImageCache.shared.clearCache()
-                                    }.value
-                                    await refreshCacheSize()
-                                    toast.show("封面缓存已清除", duration: 1.8)
+                                AppInlineButton(
+                                    title: "清除缓存",
+                                    icon: "trash",
+                                    tint: AppTheme.destructive
+                                ) {
+                                    Task {
+                                        await Task.detached(priority: .utility) {
+                                            CoverImageCache.shared.clearCache()
+                                        }.value
+                                        await refreshCacheSize()
+                                        toast.show("封面缓存已清除", duration: 1.8)
+                                    }
+                                }
+                            }
+
+                            AppInsetDivider()
+
+                            AppInsetRow(
+                                title: "同步诊断日志",
+                                subtitle: "用于排查成绩同步或上传异常"
+                            ) {
+                                AppInlineButton(
+                                    title: "复制日志",
+                                    icon: "doc.on.doc"
+                                ) {
+                                    let logText = store.exportSyncDiagnosticLog()
+                                    if logText.isEmpty {
+                                        toast.show("暂无同步日志", duration: 1.6)
+                                    } else {
+                                        UIPasteboard.general.string = logText
+                                        toast.show("已复制诊断日志", duration: 1.8)
+                                    }
                                 }
                             }
                         }

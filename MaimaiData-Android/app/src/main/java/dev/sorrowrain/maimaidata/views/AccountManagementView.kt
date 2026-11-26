@@ -1,31 +1,15 @@
 package dev.sorrowrain.maimaidata.views
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddCircle
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -33,60 +17,50 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
+import dev.sorrowrain.maimaidata.components.AppCard
 import dev.sorrowrain.maimaidata.components.AppConfirmDialog
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
 import dev.sorrowrain.maimaidata.components.AppInlineButton
 import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
-import dev.sorrowrain.maimaidata.components.AppInsetToggleRow
+import dev.sorrowrain.maimaidata.components.AppInsetRow
 import dev.sorrowrain.maimaidata.components.AppPrimaryButton
 import dev.sorrowrain.maimaidata.components.AppSectionCard
-import dev.sorrowrain.maimaidata.components.AppTextField
 import dev.sorrowrain.maimaidata.components.AppTopBar
-import dev.sorrowrain.maimaidata.components.ScoreProfileRowLabel
+import dev.sorrowrain.maimaidata.components.CapsuleStyle
 import dev.sorrowrain.maimaidata.components.StatusToastHost
 import dev.sorrowrain.maimaidata.components.appInsetRowHighlight
 import dev.sorrowrain.maimaidata.components.rememberToastState
-import dev.sorrowrain.maimaidata.models.ScoreProfile
 import dev.sorrowrain.maimaidata.services.LocalDataStore
-import dev.sorrowrain.maimaidata.services.MaimaiAPIException
 import dev.sorrowrain.maimaidata.theme.AppPageBackground
 import dev.sorrowrain.maimaidata.theme.AppTheme
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 
 @Composable
 fun AccountManagementScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenIdentityDetail: (String) -> Unit
 ) {
     val store = LocalDataStore.current
-    val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
     val toastState = rememberToastState()
 
-    var showAddProfileSheet by remember { mutableStateOf(false) }
-    var pendingDeleteProfile by remember { mutableStateOf<ScoreProfile?>(null) }
-    var errorDialogTitle by remember { mutableStateOf("同步失败") }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showAddSheet by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
+    var warningMessage by remember { mutableStateOf<String?>(null) }
+    val isMultiProfile = store.identities.size > 1
 
     AppPageBackground(tint = AppTheme.accent) {
         Scaffold(
             topBar = {
-                AppTopBar(
-                    title = "成绩档案",
-                    onBack = onBack
-                )
+                AppTopBar(title = "成绩档案", onBack = onBack)
             },
-            containerColor = Color.Transparent
+            containerColor = androidx.compose.ui.graphics.Color.Transparent
         ) { innerPadding ->
             Box(
                 modifier = Modifier
@@ -97,145 +71,112 @@ fun AccountManagementScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .imePadding()
                         .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.m),
                     verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
                 ) {
-                    // 1. Score Profiles List Card
-                    AppSectionCard(
-                        title = "成绩档案",
-                        trailing = if (store.activeProfile != null) {
-                            {
-                                AppInlineButton(
-                                    title = "同步当前",
-                                    icon = Icons.Rounded.Refresh,
-                                    isLoading = store.isSyncingRecords,
-                                    onClick = {
-                                        scope.launch {
-                                            try {
-                                                store.syncActiveProfileRecords()
-                                                toastState.show("成绩已同步")
-                                            } catch (ce: CancellationException) {
-                                                throw ce
-                                            } catch (err: MaimaiAPIException) {
-                                                errorDialogTitle = "同步失败"
-                                                errorMessage = err.recoveryMessage
-                                            } catch (err: Throwable) {
-                                                errorDialogTitle = "同步失败"
-                                                errorMessage = "同步失败：${err.message ?: "网络请求异常"}"
-                                            }
-                                        }
-                                    }
+                    if (store.credentialStoreLoadFailed) {
+                        AppCard(
+                            padding = AppTheme.cardPadding,
+                            tint = AppTheme.warning
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+                            ) {
+                                androidx.compose.foundation.layout.Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+                                ) {
+                                    Text(
+                                        text = "安全存储读取受限",
+                                        style = AppTheme.AppTypography.songTitle,
+                                        color = AppTheme.warningText,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    AppInlineButton(
+                                        title = "重置档案",
+                                        tint = AppTheme.destructive,
+                                        enabled = !store.isSyncingRecords,
+                                        onClick = { showResetConfirm = true }
+                                    )
+                                }
+                                Text(
+                                    text = "当前未能解码或读取安全存储中的玩家档案。为避免数据被覆盖，已暂时锁定修改操作；请重启应用后重试，如仍无法恢复可点击重置档案。",
+                                    style = AppTheme.AppTypography.caption,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                        } else {
-                            null
                         }
-                    ) {
-                        if (store.profiles.isEmpty()) {
+                    }
+
+                    AppSectionCard(title = "成绩档案") {
+                        if (store.identities.isEmpty()) {
                             AppInsetGroup(padding = AppTheme.cardPadding) {
                                 Text(
-                                    text = "暂无成绩档案，点击下方按钮选择落雪或水鱼添加",
+                                    text = "还没有成绩档案，点击下方按钮添加",
                                     style = AppTheme.AppTypography.caption,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         } else {
                             AppInsetGroup {
-                                store.profiles.forEachIndexed { idx, profile ->
+                                store.identities.forEachIndexed { idx, identity ->
                                     if (idx > 0) {
                                         AppInsetDivider()
                                     }
-                                    val isCurrent = profile.id == store.activeProfileId
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .appInsetRowHighlight(isCurrent)
-                                            .padding(
-                                                start = AppTheme.Space.m,
-                                                end = AppTheme.Space.xs
-                                            ),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .defaultMinSize(minHeight = AppTheme.rowMinHeight)
-                                                .clickable(role = Role.Button) {
-                                                    if (!isCurrent) {
-                                                        store.switchProfile(profile.id)
-                                                        toastState.show("已切换至 ${profile.displayTitle}")
-                                                    }
-                                                },
-                                            contentAlignment = Alignment.CenterStart
-                                        ) {
-                                            ScoreProfileRowLabel(
-                                                profile = profile,
-                                                isSelected = isCurrent
-                                            )
-                                        }
+                                    val isCurrent = isMultiProfile && (identity.id == store.activeIdentityId)
+                                    val showSwitchButton = isMultiProfile && (identity.id != store.activeIdentityId)
 
-                                        IconButton(
-                                            onClick = { pendingDeleteProfile = profile },
-                                            enabled = !store.isSyncingRecords,
-                                            modifier = Modifier.size(36.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.DeleteOutline,
-                                                contentDescription = "移除成绩档案 ${profile.displayTitle}",
-                                                tint = AppTheme.destructiveText,
-                                                modifier = Modifier.size(19.dp)
-                                            )
+                                    AppInsetRow(
+                                        title = identity.primaryDisplayName,
+                                        subtitle = identity.boundChannelsSummary,
+                                        showsChevron = true,
+                                        modifier = Modifier
+                                            .appInsetRowHighlight(isCurrent)
+                                            .semantics {
+                                                if (isCurrent) {
+                                                    selected = true
+                                                }
+                                            },
+                                        onClick = { onOpenIdentityDetail(identity.id) },
+                                        trailing = when {
+                                            isCurrent -> {
+                                                {
+                                                    AppCapsuleLabel(text = "当前", style = CapsuleStyle.Compact)
+                                                }
+                                            }
+
+                                            showSwitchButton -> {
+                                                {
+                                                    AppInlineButton(
+                                                        title = "设为当前",
+                                                        enabled = !store.isSyncingRecords,
+                                                        modifier = Modifier.semantics {
+                                                            contentDescription = "将 ${identity.primaryDisplayName} 设为当前档案"
+                                                        },
+                                                        onClick = {
+                                                            store.switchIdentity(identity.id)
+                                                            toastState.show("已切换至 ${identity.primaryDisplayName}")
+                                                        }
+                                                    )
+                                                }
+                                            }
+
+                                            else -> null
                                         }
-                                    }
+                                    )
                                 }
                             }
                         }
                     }
 
-                    // 2. Add Score Profile Primary Action
                     AppPrimaryButton(
-                        title = "添加成绩档案",
+                        title = "添加档案",
                         icon = Icons.Rounded.AddCircle,
-                        enabled = !store.isSyncingRecords,
-                        onClick = { showAddProfileSheet = true }
+                        enabled = !store.isSyncingRecords && !store.credentialStoreLoadFailed,
+                        onClick = { showAddSheet = true }
                     )
-
-                    // 3. B50 Image Player Name Section
-                    AppSectionCard(title = "B50 图片玩家名称") {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
-                        ) {
-                            AppInsetGroup {
-                                AppInsetToggleRow(
-                                    title = "使用查分器返回昵称",
-                                    checked = store.useProberNickname,
-                                    onCheckedChange = {
-                                        focusManager.clearFocus()
-                                        store.useProberNickname = it
-                                    }
-                                )
-                            }
-
-                            AnimatedVisibility(
-                                visible = !store.useProberNickname,
-                                enter = fadeIn() + expandVertically(),
-                                exit = fadeOut() + shrinkVertically()
-                            ) {
-                                AppTextField(
-                                    value = store.customNickname,
-                                    onValueChange = { store.customNickname = it },
-                                    placeholder = "输入自定义显示的玩家昵称",
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                    keyboardActions = KeyboardActions(
-                                        onDone = { focusManager.clearFocus() }
-                                    )
-                                )
-                            }
-                        }
-                    }
                 }
 
                 StatusToastHost(
@@ -246,43 +187,32 @@ fun AccountManagementScreen(
         }
     }
 
-    if (showAddProfileSheet) {
-        LoginSheet(
-            onDismiss = { showAddProfileSheet = false },
-            onProfileAdded = { profile ->
-                toastState.show("已添加 ${profile.displayTitle}")
-            },
-            onWarningMessage = { msg ->
-                errorDialogTitle = "档案已添加"
-                errorMessage = msg
-            }
+    if (showAddSheet) {
+        AddIdentitySheet(
+            onDismiss = { showAddSheet = false },
+            onCompleted = { msg -> toastState.show(msg, durationMs = 2000L) },
+            onWarningMessage = { msg -> warningMessage = msg }
         )
     }
 
-    val deleteTarget = pendingDeleteProfile
-    if (deleteTarget != null) {
-        val isDeletingActive = deleteTarget.id == store.activeProfileId
+    if (showResetConfirm) {
         AppConfirmDialog(
-            title = if (isDeletingActive) "移除当前成绩档案" else "移除成绩档案",
-            message = if (isDeletingActive) {
-                "确定要移除当前使用的成绩档案「${deleteTarget.displayTitle}」及其本地缓存成绩吗？"
-            } else {
-                "确定要移除成绩档案「${deleteTarget.displayTitle}」及其本地缓存成绩吗？"
-            },
-            confirmText = "移除",
+            title = "重置安全存储档案",
+            message = "将清空无法解码的旧档案索引记录，以便重新添加账号。此操作无法撤销。",
+            confirmText = "重置档案",
             isDestructive = true,
             onConfirm = {
-                store.removeProfile(deleteTarget.id)
-                pendingDeleteProfile = null
-                toastState.show("已移除 ${deleteTarget.displayTitle}")
+                showResetConfirm = false
+                store.resetCredentialStoreAfterLoadFailure()
+                toastState.show("已重置档案存储，请重新绑定账号", durationMs = 2200L)
             },
-            onDismiss = { pendingDeleteProfile = null }
+            onDismiss = { showResetConfirm = false }
         )
     }
 
     AppErrorDialog(
-        title = errorDialogTitle,
-        message = errorMessage,
-        onDismiss = { errorMessage = null }
+        title = "档案已添加",
+        message = warningMessage,
+        onDismiss = { warningMessage = null }
     )
 }

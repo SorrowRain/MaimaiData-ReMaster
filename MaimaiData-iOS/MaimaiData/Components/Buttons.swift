@@ -43,7 +43,7 @@ struct AppPrimaryButton: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .appGlass(in: shape, tint: tint)
+        .background(tint, in: shape)
         .opacity(isLoading || isDisabled ? 0.5 : 1)
         .disabled(isLoading || isDisabled)
     }
@@ -84,9 +84,11 @@ struct AppSecondaryButton: View {
     @Environment(\.colorScheme) private var colorScheme
     let title: String
     var tint: Color = AppTheme.accent
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: AppTheme.Radius.button, style: .continuous)
         let fgColor = colorScheme == .dark
             ? tint.brightened(toAtLeast: 0.90, maxSaturation: 0.65)
             : tint
@@ -96,10 +98,13 @@ struct AppSecondaryButton: View {
                 .foregroundStyle(fgColor)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 46)
-                .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.button, style: .continuous))
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .appGlass(in: RoundedRectangle(cornerRadius: AppTheme.Radius.button, style: .continuous))
+        .background(tint.opacity(colorScheme == .dark ? 0.14 : 0.08), in: shape)
+        .overlay(shape.strokeBorder(tint.opacity(colorScheme == .dark ? 0.32 : 0.22), lineWidth: 1))
+        .opacity(isDisabled ? 0.45 : 1)
+        .disabled(isDisabled)
     }
 }
 
@@ -107,6 +112,7 @@ struct AppSecondaryButton: View {
 struct AppMenuCapsule: View {
     let title: String
     var tint: Color = AppTheme.accent
+    var isDisabled: Bool = false
 
     var body: some View {
         HStack(spacing: AppTheme.Space.xs) {
@@ -116,6 +122,7 @@ struct AppMenuCapsule: View {
                 .font(AppTheme.Typography.caption2Bold)
         }
         .modifier(TintedActionCapsuleChrome(tint: tint))
+        .opacity(isDisabled ? 0.45 : 1)
     }
 }
 

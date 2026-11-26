@@ -34,7 +34,7 @@ struct LevelCheckView: View {
     private func rebuildGroups() {
         let level = selectedLevel
         let items = store.songs
-            .filter { !$0.isUtage }
+            .filter { !$0.isUtage && $0.isDisabled != true }
             .flatMap { song in
                 song.resolvedCharts
                     .filter { $0.level == level }

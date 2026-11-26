@@ -18,7 +18,7 @@ MaimaiData/
 │   ├── Containers.swift             # 流式布局 FlowLayout、标准卡片 AppCard / AppSectionCard、分组头、内嵌分组与行、图片预览脚手架
 │   ├── RatingTierTable.swift        # 分段达成率与单曲 Rating / B50 净涨分三列对照表（详情页与计算器共用）
 │   ├── Feedback.swift               # 自适应玻璃封装 appGlass、底部状态 Toast、同步状态横幅、错误弹窗与键盘收起修饰符
-│   └── Forms.swift                  # 标准单行输入框 AppTextField、密码框 AppSecureField、键盘收起工具 KeyboardDismiss
+│   └── Forms.swift                  # 标准单行输入框 AppTextField、密码框 AppSecureField、带粘贴图标按钮 AppPasteField、键盘收起工具 KeyboardDismiss
 ├── Bridges/
 │   └── UIKitBridges.swift           # UIKit 桥接封装（相册保存 PhotoLibrarySaver、系统分享 ShareSheet、可缩放图片容器 ZoomableImageScrollView）
 ├── Models/
@@ -26,34 +26,40 @@ MaimaiData/
 │   ├── DifficultyType.swift         # 谱面难度枚举及浅色/深色模式对比度适配色彩
 │   ├── MaimaiConstants.swift        # 分类、等级、国服/日服版本常量与配色/贴图映射
 │   ├── RatingCalculator.swift       # 单曲 Rating 换算、目标总 Rating 二分反推、全曲库最大物量统计
-│   ├── RecordModels.swift           # 多源成绩档案模型 ScoreProfile、成绩模型、进度表统计、筛选条件模型
+│   ├── RecordModels.swift           # 成绩模型、进度表统计、筛选条件与旧版 ScoreProfile（升级用）
+│   ├── SyncModels.swift             # v3 PlayerIdentity 多渠道绑定模型（含 B50 玩家图片名称）、同步规划 SyncPlan、国服直连 DTO、上传摘要与历史快照模型
 │   ├── LXNSModels.swift             # 落雪咖啡屋 OAuth / 成绩模型、公共曲库与三区服通用牌子范围模型 PlateCheckScope
 │   └── Extensions.swift             # Color(hex:) / 自适应与提亮扩展、安全下标 Collection[safe:]、版本号按段数值比较 VersionString
 ├── Services/
-│   ├── DataStore.swift              # @MainActor @Observable 全局状态中心（本地缓存、多区服切换、落雪曲库/牌子与水鱼统计同步、多源成绩档案管理、B50 拆表）
-│   ├── MaimaiAPI.swift              # 无状态网络层（落雪公共曲库/别名/牌子与 OAuth、水鱼账密/Import-Token/拟合定数、Zetaraku & DXRating 曲库）
+│   ├── DataStore.swift              # @MainActor @Observable 全局状态中心（本地缓存、双查分器并发最优合并、已删除国服曲目解析层、多区服切换、多渠道身份与单飞同步、B50 拆表）
+│   ├── SyncDiagnostics.swift        # 脱敏同步/上传内存与磁盘诊断日志（设置页支持一键复制导出）
+│   ├── SyncServiceConfig.swift      # 编译期注入的闭源后端配置解析（Info.plist <- Base/Local.xcconfig，不落盘、无 UI 入口）
+│   ├── MaimaiAPI.swift              # 无状态网络层（国服直连后端、落雪公共/OAuth/上传、水鱼读写/拟合定数、Zetaraku & DXRating）
+│   ├── ScoreSyncEngine.swift        # 纯函数成绩合并引擎（快速/完整/双端合并、水鱼/落雪纯净国服增量写回、CN Rating 快照、v2->v3 升级）
+│   ├── SyncHistoryStore.swift       # 追加写 JSONL (`history_identity_<uuid>.jsonl`) 趋势快照存储
 │   ├── LXNSCatalogConverter.swift   # 落雪公共曲库/双人宴谱转换、三区服牌子规则构建与落雪成绩转标准记录纯函数
-│   ├── ZetarakuCatalogConverter.swift # 日服/国际服 Zetaraku 曲库纯函数转换器（关联国服 ID/别名/基准定数、国际服覆写与两代 B15 判定）
-│   ├── AccountCredentialStore.swift # Keychain 多源档案凭据/令牌存储与旧版单账号无感迁移
+│   ├── ZetarakuCatalogConverter.swift # 日服/国际服 Zetaraku 曲库转换器与已打过国服删除曲解析还原层 (`resolveDeletedCNSongs`)
+│   ├── AccountCredentialStore.swift # Keychain 多渠道身份 (`player_identities_v3`) 与分槽位密钥存取，含 loadFailed 写保护
 │   ├── ImageLoader.swift            # 内存 + 磁盘双层曲绘缓存 CoverImageCache 与异步曲绘视图 CoverImageView
 │   ├── Best50Renderer.swift         # Best 50 成绩图离屏并发预取与 UIGraphicsImageRenderer 渲染引擎
-│   ├── SongFilter.swift             # 纯函数曲库多维筛选与排序（无状态，供 DataStore 与单元测试共用）
+│   ├── SongFilter.swift             # 纯函数曲库多维筛选与排序（支持 playedSongIds 过滤未打过的删除曲，供 DataStore 与单元测试共用）
 │   └── PreferenceKeys.swift         # UserDefaults / Keychain 键名常量与默认布尔偏好注册
 └── Views/                           # 业务页面视图（仅包含页面级布局组装与页面内私有子视图）
     ├── MainTabView.swift            # 底部三栏 Tab 导航（曲库 / Rating与查分 / 设置与数据）
-    ├── SongListView.swift           # 曲目列表、液态玻璃搜索栏、搜索历史卡片与已筛选条件摘要
+    ├── SongListView.swift           # 曲目列表、标注国服已删除曲、液态玻璃搜索栏、搜索历史卡片与已筛选条件摘要
     ├── SearchFilterSheet.swift      # 等级/定数双滑块、分类、收录版本与难度排序筛选弹窗
     ├── SongDetailView.swift         # 曲目详情、难度切换、拟合定数、物量分布条与容错扣分参考
     ├── CoverZoomView.swift          # 曲目高清封面全屏缩放预览页
-    ├── RatingToolsView.swift        # Rating 与查分主页（玩家总览、成绩牌子入口、算分工具入口）
+    ├── RatingToolsView.swift        # Rating 与查分主页（玩家总览、同步成绩、成绩牌子入口、算分工具入口；已移除首页旧框换算入口）
     ├── RatingCalculatorView.swift   # Rating 计算器二级页（双滑块定数分段算分 + 目标总分反推）
     ├── ProberView.swift             # B35 / B15 成绩列表与 Best 50 成绩图生成预览
     ├── VersionCheckView.swift       # 国服 / 国际服 / 日服统一牌子进度表（支持旧框舞/覇者与各代全曲牌子）
     ├── LevelCheckView.swift         # 按 1～15 级定数分组的全难度完成度进度表
-    ├── FinaleToDxView.swift         # 旧框 (FiNALE) 音符判定换算 DX 达成率工具
-    ├── SettingsView.swift           # 极简两级目录式设置页（含区服选择、检索偏好、数据存储与致谢二级页）
-    ├── AccountManagementView.swift  # 多源成绩档案（落雪/水鱼）管理与本地切换二级页
-    └── LoginSheet.swift             # 添加成绩档案弹窗（支持落雪 OAuth / 个人密钥、水鱼账密 / Import-Token）
+    ├── FinaleToDxView.swift         # 旧框 (FiNALE) 音符判定换算 DX 达成率工具（保留实现，待后续重构挂载）
+    ├── SettingsView.swift           # 极简两级目录式设置页（含区服选择、检索偏好、数据存储含诊断日志复制与致谢二级页）
+    ├── AccountManagementView.swift  # L1 成绩档案列表（单行名称/当前标识/绑定摘要 + 添加档案与切换激活档案）
+    ├── IdentityDetailView.swift     # L2 成绩档案详情页（ID、B50 玩家图片名称开关、上次同步时间、SyncPlan 动态同步区、上传查分器与渠道管理）
+    └── LoginSheet.swift             # L3 弹窗集合（AddIdentitySheet 新增档案、主/次分层 ChannelBindSheet 渠道绑定、FullSyncSheet 完整同步）
 ```
 
 ### 分层依赖规则
@@ -152,7 +158,6 @@ MaimaiData/
 | `AppSectionCard` | `Containers.swift` | 组合 `AppCard` + `AppSectionHeader` 的页面主力业务卡片，凡带标题的卡片一律使用它 |
 | `AppInsetGroup` | `Containers.swift` | 卡片内部的浅底圆角内嵌容器（内置 `clipShape` 自动裁切首尾行外侧圆角，内部统一用通栏 `AppInsetDivider()` 分割），用于承载设置组、工具入口列表、数据表格或指标块 |
 | `AppInsetRow` / `AppInsetToggleRow` / `.appInsetRowHighlight` | `Containers.swift` | `AppInsetGroup` 内的标准行、开关设置行及显式 `Rectangle()` 通栏高亮修饰符（严禁对表格行裸调 `.background(color)` 以免继承外层圆角） |
-| `ScoreProfileRowLabel` | `Containers.swift` | 统一成绩档案单行展示标签（左侧平台胶囊 + 玩家 ID + 右侧对勾） |
 | `FlowLayout` | `Containers.swift` | 自适应折行流式布局，用于筛选条件 Chip、歌曲别名胶囊等多标签排布 |
 | `PhotoPreviewScaffold` | `Containers.swift` | 全屏纯黑底图片缩放预览、系统分享与保存相册通用脚手架（`CoverZoomView` 与 `B50PreviewSheet` 共用） |
 | `RatingTierTable` | `RatingTierTable.swift` | 谱面各达成率分段（含 SSS 区间 +1 跳分线）单曲分与 B50 净涨分对照表（未登录自动退化为两列） |
@@ -207,10 +212,11 @@ MaimaiData/
 3. **搜索框中文输入法防闪屏 (`SongFilterCriteria.isActive` & `SongListView`)**：
    - `SongFilterCriteria.isActive` **绝对不能包含 `!keyword.isEmpty`**。中文输入法选词上屏瞬间会先清空拼音再填入汉字，若 `keyword` 计入 `isActive` 会导致「已筛选」摘要卡片在选词瞬间反复挂载/卸载引起列表剧烈跳动。
    - 搜索历史卡片统一由 `.onChange(of: isSearchFocused)` 驱动展开收起，并在 `onDisappear` 中关闭动画重置焦点，防止键盘弹起时点进详情页再返回出现布局跳动。
-4. **多源凭据安全与单飞轮换一致性 (`AccountCredentialStore` & `DataStore`)**：
-   - 所有查分器凭据（水鱼密码/Cookie/Import-Token、落雪 OAuth 访问与刷新令牌/个人密钥）与档案元数据**只能存入 Keychain**（`AccountCredentialStore`），本地成绩缓存按档案 UUID 隔离为 `records_profile_<uuid>.json`，成绩档案与外部游戏区服完全解耦。
+4. **多渠道身份凭据安全与单飞轮换一致性 (`AccountCredentialStore` & `DataStore`)**：
+   - 自建服务器配置（`self_hosted_endpoint_v1`）、档案列表（`player_identities_v3`）及分渠道凭据槽位（`identity_sh_/lxns_/df_<uuid>`）**只能存入 Keychain**（`AccountCredentialStore`），读取失败时触发 `loadFailed` 写保护锁定写操作；本地成绩缓存按档案 UUID 隔离为 `records_identity_<uuid>.json`，趋势快照按行追加至 `history_identity_<uuid>.jsonl`，成绩档案与外部游戏区服完全解耦。
    - 落雪 OAuth 的 `refresh_token` 采用单次轮换机制（刷新成功后原令牌立即失效）：`DataStore.validLXNSAccessToken` 必须按档案 ID 做单飞互斥（`inFlightTokenRefreshTasks`），并在拿到新令牌瞬间立即落盘 Keychain，严禁并发刷新。
    - 添加档案时必须严格区分**认证本身失败**与**认证成功后首次拉取成绩失败**（`MaimaiAPIError.recordSyncFailedAfterLogin`）；最终展示名称统一由 `DataStore.displayPlayerName` 根据 `useProberNickname` 开关裁决。
+   - 宴谱记录统一使用 `levelIndex = 10`（单人/1P）与 `11`（Buddy 2P）、`type = "utage"`、`computedRating = 0`。
 5. **下拉刷新防取消与缓存竞态防护 (`DataStore`)**：
    - `DataStore.performSyncRecords` 内部使用非结构化 `Task` 承载网络请求，防止 SwiftUI `.refreshable` 在状态更新重绘瞬间取消底层 `URLSession` 请求（`NSURLErrorCancelled`）。
    - 切换档案异步回填本地成绩缓存（`restoreCachedRecords`）受单调递增令牌 `recordsEpoch` 保护，绝不能覆盖网络刚拉回的新鲜成绩。

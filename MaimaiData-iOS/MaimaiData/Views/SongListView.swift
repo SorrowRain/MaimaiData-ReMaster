@@ -141,6 +141,7 @@ struct SongListView: View {
             }
             .onChange(of: criteria) { _, _ in refreshDisplayedSongs() }
             .onChange(of: store.catalogRevision) { _, _ in refreshDisplayedSongs() }
+            .onChange(of: store.playedSongIds) { _, _ in refreshDisplayedSongs() }
             .onChange(of: store.serverRegion) { _, newRegion in
                 let pruned = SongFilter.prunedCriteria(criteria, for: newRegion)
                 if pruned != criteria {
@@ -340,6 +341,9 @@ private struct SongRowView: View {
 
                     HStack(spacing: 6) {
                         GenreCapsuleTag(genre: song.basicInfo.genre)
+                        if song.isDisabled == true {
+                            AppCapsuleLabel(text: "已删除", tint: .secondary, style: .compact)
+                        }
                         Spacer(minLength: 0)
                     }
                     .padding(.bottom, 7)

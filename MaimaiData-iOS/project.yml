@@ -19,13 +19,17 @@ options:
   indentWidth: 4
   tabWidth: 4
 
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+
 settings:
   base:
     DEVELOPMENT_TEAM: D5F492VR43
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "1.1.0"
-    CURRENT_PROJECT_VERSION: "5"
+    MARKETING_VERSION: "1.2.0"
+    CURRENT_PROJECT_VERSION: "6"
 
 targets:
   MaimaiData:
@@ -39,6 +43,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
+        SyncServiceHost: $(SYNC_SERVICE_HOST)
+        SyncServiceAccessKey: $(SYNC_SERVICE_ACCESS_KEY)
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: dev.0xsr.maimaidata.oauth

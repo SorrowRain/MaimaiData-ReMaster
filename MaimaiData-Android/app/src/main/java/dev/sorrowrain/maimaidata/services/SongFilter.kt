@@ -32,7 +32,8 @@ object SongFilter {
         region: MaimaiConstants.ServerRegion = MaimaiConstants.ServerRegion.CN,
         favoriteIds: Set<String> = emptySet(),
         enableAliasSearch: Boolean = true,
-        enableCharterSearch: Boolean = false
+        enableCharterSearch: Boolean = false,
+        playedSongIds: Set<Int> = emptySet()
     ): List<SongData> {
         val query = normalizeSearchText(criteria.keyword)
         val queryNumericId = query.toIntOrNull()?.takeIf { it > 0 }
@@ -46,6 +47,10 @@ object SongFilter {
         val seqDiff = criteria.sortOption.filterDifficulty
 
         val filtered = songs.filter { song ->
+            if (song.isDisabled == true && song.numericId !in playedSongIds) {
+                return@filter false
+            }
+
             // 1. Genre (default excludes 宴会場 when no genre is selected)
             if (criteria.selectedGenres.isEmpty()) {
                 if (song.isUtage) return@filter false

@@ -442,3 +442,51 @@ fun AppTopBar(
         modifier = modifier
     )
 }
+
+/**
+ * Standard ModalBottomSheet centered header with left action (back or close) and balanced spacer.
+ */
+@Composable
+fun AppSheetHeader(
+    title: String,
+    onClose: () -> Unit,
+    onBack: (() -> Unit)? = null,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (onBack != null) {
+                TextButton(onClick = onBack, enabled = enabled) {
+                    Text(
+                        text = "返回",
+                        style = AppTheme.AppTypography.rowTitle,
+                        color = AppTheme.accentText
+                    )
+                }
+            } else {
+                TextButton(onClick = onClose, enabled = enabled) {
+                    Text(
+                        text = "关闭",
+                        style = AppTheme.AppTypography.rowTitle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        Text(
+            text = title,
+            style = AppTheme.AppTypography.cardTitle,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Box(modifier = Modifier.weight(1f))
+    }
+}

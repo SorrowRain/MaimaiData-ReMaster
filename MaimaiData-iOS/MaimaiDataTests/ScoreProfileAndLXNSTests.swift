@@ -107,7 +107,9 @@ final class ScoreProfileAndLXNSTests: XCTestCase {
         XCTAssertEqual(dxRec.computedRating, RatingCalculator.singleSongRating(ds: 13.7, achievement: 100.5000))
 
         let utageRec = try! XCTUnwrap(bySongId[100018])
-        XCTAssertEqual(utageRec.type, "DX")
+        XCTAssertEqual(utageRec.type, "utage")
+        XCTAssertEqual(utageRec.levelIndex, 10)
+        XCTAssertEqual(utageRec.computedRating, 0)
         XCTAssertEqual(utageRec.title, "[協]Love You")
         XCTAssertEqual(utageRec.rate, "ss")
     }

@@ -226,14 +226,15 @@ fun AppMenuCapsule(
     title: String,
     tint: Color = AppTheme.accent,
     isNeutral: Boolean = false,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     TintedActionCapsuleSurface(
         tint = tint,
         isNeutral = isNeutral,
-        enabled = true,
-        dimmed = false,
+        enabled = enabled,
+        dimmed = !enabled,
         modifier = modifier,
         onClick = onClick
     ) {

@@ -3,168 +3,145 @@ import SwiftUI
 struct AccountManagementView: View {
     @Environment(DataStore.self) private var store
 
-    @State private var showAddProfileSheet = false
-    @State private var pendingDeleteProfile: ScoreProfile?
+    @State private var showAddSheet = false
+    @State private var showResetConfirm = false
     @State private var toast = ToastState()
-    @State private var errorMessage: String?
 
-    private var isPendingDeleteActive: Bool {
-        guard let target = pendingDeleteProfile else { return false }
-        return target.id == store.activeProfileId
+    private var isMultiProfile: Bool {
+        store.identities.count > 1
     }
 
     var body: some View {
-        @Bindable var storeBindable = store
-
         ScrollView {
             VStack(spacing: AppTheme.cardSpacing) {
-                AppSectionCard(title: "成绩档案") {
-                    if store.activeProfile != nil {
-                        AppInlineButton(
-                            title: "同步当前",
-                            icon: "arrow.clockwise",
-                            isLoading: store.isSyncingRecords
-                        ) {
-                            Task { await syncActiveProfile() }
-                        }
-                    }
-                } content: {
-                    if store.profiles.isEmpty {
-                        AppInsetGroup(padding: AppTheme.cardPadding) {
-                            Text("暂无成绩档案，点击下方按钮选择落雪或水鱼添加")
-                                .font(AppTheme.Typography.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        AppInsetGroup {
-                            VStack(spacing: 0) {
-                                ForEach(Array(store.profiles.enumerated()), id: \.element.id) { idx, profile in
-                                    if idx > 0 {
-                                        Divider()
-                                    }
-                                    profileRow(profile)
-                                }
-                            }
-                        }
-                    }
+                if store.credentialStoreLoadFailed {
+                    credentialStoreWarningBanner
                 }
+
+                identitiesSection
 
                 AppPrimaryButton(
-                    title: "添加成绩档案",
+                    title: "添加档案",
                     icon: "plus.circle.fill",
-                    isDisabled: store.isSyncingRecords
+                    isDisabled: store.isSyncingRecords || store.credentialStoreLoadFailed
                 ) {
-                    showAddProfileSheet = true
-                }
-
-                AppSectionCard(title: "B50 图片玩家名称") {
-                    VStack(spacing: AppTheme.itemSpacing) {
-                        AppInsetGroup {
-                            AppInsetToggleRow(
-                                title: "使用查分器返回昵称",
-                                isOn: $storeBindable.useProberNickname.animation(.snappy(duration: 0.2))
-                            )
-                        }
-
-                        if !store.useProberNickname {
-                            AppTextField(
-                                placeholder: "输入自定义显示的玩家昵称",
-                                text: $storeBindable.customNickname
-                            )
-                            .submitLabel(.done)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-                    }
+                    showAddSheet = true
                 }
             }
             .padding(.horizontal, AppTheme.pagePadding)
             .padding(.vertical, AppTheme.Space.m)
-            .dismissKeyboardOnTap()
         }
-        .scrollDismissesKeyboard(.interactively)
         .appPageBackground()
-        .sensoryFeedback(.selection, trigger: store.activeProfileId)
+        .sensoryFeedback(.selection, trigger: store.activeIdentityId)
         .navigationTitle("成绩档案")
         .navigationBarTitleDisplayMode(.inline)
         .statusToast(toast)
-        .sheet(isPresented: $showAddProfileSheet) {
-            LoginSheet()
+        .sheet(isPresented: $showAddSheet) {
+            AddIdentitySheet { summaryText in
+                toast.show(summaryText, duration: 2.0)
+            }
         }
-        .alert(
-            isPendingDeleteActive ? "移除当前成绩档案" : "移除成绩档案",
-            isPresented: Binding(
-                get: { pendingDeleteProfile != nil },
-                set: { if !$0 { pendingDeleteProfile = nil } }
-            ),
-            presenting: pendingDeleteProfile
-        ) { profile in
-            Button("移除", role: .destructive) {
-                store.removeProfile(id: profile.id)
-                pendingDeleteProfile = nil
-                toast.show("已移除 \(profile.displayTitle)", duration: 1.8)
+        .alert("重置安全存储档案", isPresented: $showResetConfirm) {
+            Button("重置档案", role: .destructive) {
+                store.resetCredentialStoreAfterLoadFailure()
+                toast.show("已重置档案存储，请重新绑定账号", duration: 2.2)
             }
-            Button("取消", role: .cancel) {
-                pendingDeleteProfile = nil
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将清空无法解码的旧档案索引记录，以便重新添加账号。此操作无法撤销。")
+        }
+    }
+
+    private var credentialStoreWarningBanner: some View {
+        AppCard(padding: AppTheme.cardPadding, tint: AppTheme.warning) {
+            VStack(alignment: .leading, spacing: AppTheme.Space.s) {
+                HStack(alignment: .center, spacing: AppTheme.Space.s) {
+                    Text("安全存储读取受限")
+                        .font(AppTheme.Typography.songTitle)
+                        .foregroundStyle(AppTheme.warning)
+                    Spacer(minLength: AppTheme.Space.xs)
+                    AppInlineButton(
+                        title: "重置档案",
+                        tint: AppTheme.destructive,
+                        isDisabled: store.isSyncingRecords
+                    ) {
+                        showResetConfirm = true
+                    }
+                }
+                Text("当前未能解码或读取 Keychain 中的玩家档案。为避免数据被覆盖，已暂时锁定修改操作；请重启应用或解锁设备后重试，如仍无法恢复可点击重置档案。")
+                    .font(AppTheme.Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-        } message: { profile in
-            if profile.id == store.activeProfileId {
-                Text("确定要移除当前使用的成绩档案「\(profile.displayTitle)」及其本地缓存成绩吗？")
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var identitiesSection: some View {
+        AppSectionCard(title: "成绩档案") {
+            if store.identities.isEmpty {
+                AppInsetGroup(padding: AppTheme.cardPadding) {
+                    Text("还没有成绩档案，点击下方按钮添加")
+                        .font(AppTheme.Typography.caption)
+                        .foregroundStyle(.secondary)
+                }
             } else {
-                Text("确定要移除成绩档案「\(profile.displayTitle)」及其本地缓存成绩吗？")
+                AppInsetGroup {
+                    VStack(spacing: 0) {
+                        ForEach(Array(store.identities.enumerated()), id: \.element.id) { idx, identity in
+                            if idx > 0 {
+                                AppInsetDivider()
+                            }
+                            identityRow(identity)
+                        }
+                    }
+                }
             }
         }
-        .errorAlert("同步失败", message: $errorMessage)
     }
 
-    private func profileRow(_ profile: ScoreProfile) -> some View {
-        let isCurrent = (profile.id == store.activeProfileId)
+    private func identityRow(_ identity: PlayerIdentity) -> some View {
+        let isCurrent = isMultiProfile && (identity.id == store.activeIdentityId)
+        let showSwitchButton = isMultiProfile && (identity.id != store.activeIdentityId)
 
-        return HStack(spacing: AppTheme.Space.xs) {
-            Button {
-                guard !isCurrent else { return }
-                store.switchProfile(to: profile.id)
-                toast.show("已切换至 \(profile.displayTitle)", duration: 1.6)
-            } label: {
-                ScoreProfileRowLabel(profile: profile, isSelected: isCurrent)
-                    .frame(maxWidth: .infinity, minHeight: AppTheme.rowMinHeight, alignment: .leading)
-                    .contentShape(Rectangle())
+        return NavigationLink(value: IdentityDetailRoute(identityId: identity.id)) {
+            AppInsetRow(
+                title: identity.primaryDisplayName,
+                subtitle: identity.boundChannelsSummary,
+                showsChevron: true
+            ) {
+                if isCurrent {
+                    AppCapsuleLabel(text: "当前", style: .compact)
+                } else if showSwitchButton {
+                    AppInlineButton(title: "设为当前") {}
+                        .hidden()
+                        .accessibilityHidden(true)
+                }
             }
-            .buttonStyle(.plain)
-
-            Button {
-                pendingDeleteProfile = profile
-            } label: {
-                Image(systemName: "trash")
-                    .font(AppTheme.Typography.body)
-                    .foregroundStyle(AppTheme.destructive)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(store.isSyncingRecords)
-            .accessibilityLabel("移除成绩档案 \(profile.displayTitle)")
         }
-        .padding(.leading, AppTheme.Space.m)
-        .padding(.trailing, AppTheme.Space.s)
+        .buttonStyle(.plain)
+        .overlay(alignment: .trailing) {
+            if showSwitchButton {
+                HStack(spacing: AppTheme.Space.m) {
+                    AppInlineButton(
+                        title: "设为当前",
+                        isDisabled: store.isSyncingRecords
+                    ) {
+                        store.switchIdentity(to: identity.id)
+                        toast.show("已切换至 \(identity.primaryDisplayName)", duration: 1.6)
+                    }
+                    .accessibilityLabel("将 \(identity.primaryDisplayName) 设为当前档案")
+
+                    Image(systemName: "chevron.right")
+                        .font(AppTheme.Typography.captionBold)
+                        .opacity(0)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .padding(.trailing, AppTheme.Space.m)
+            }
+        }
         .appInsetRowHighlight(isCurrent)
-        .contextMenu {
-            Button(role: .destructive) {
-                pendingDeleteProfile = profile
-            } label: {
-                Label("移除档案", systemImage: "trash")
-            }
-            .disabled(store.isSyncingRecords)
-        }
-    }
-
-    private func syncActiveProfile() async {
-        do {
-            try await store.syncActiveProfileRecords()
-            toast.show("成绩已同步", duration: 1.8)
-        } catch let error as MaimaiAPIError {
-            errorMessage = error.recoveryMessage
-        } catch {
-            errorMessage = "同步失败：\(error.localizedDescription)"
-        }
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }

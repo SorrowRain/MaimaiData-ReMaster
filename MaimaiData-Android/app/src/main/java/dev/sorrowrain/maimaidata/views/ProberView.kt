@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material.icons.rounded.PersonAdd
@@ -58,6 +59,7 @@ import dev.sorrowrain.maimaidata.components.rememberToastState
 import dev.sorrowrain.maimaidata.models.MaimaiConstants
 import dev.sorrowrain.maimaidata.models.ProberRecord
 import dev.sorrowrain.maimaidata.models.SongData
+import dev.sorrowrain.maimaidata.models.SyncOperationKind
 import dev.sorrowrain.maimaidata.services.Best50Renderer
 import dev.sorrowrain.maimaidata.services.LocalDataStore
 import dev.sorrowrain.maimaidata.services.MaimaiAPIException
@@ -92,17 +94,41 @@ fun ProberScreen(
         store.sortedRecords(isNewVersion = selectedTab == 1)
     }
     val cutoff = if (selectedTab == 0) 35 else 15
+    val listState = rememberLazyListState()
+    val isPullSyncing = store.activeSyncTask?.operation in setOf(
+        SyncOperationKind.QUICK_SYNC,
+        SyncOperationKind.FULL_SYNC,
+        SyncOperationKind.PULL_LXNS,
+        SyncOperationKind.PULL_DIVING_FISH,
+        SyncOperationKind.PULL_MERGED
+    )
+
+    LaunchedEffect(selectedTab) {
+        listState.scrollToItem(0)
+    }
 
     suspend fun refreshRecords(showToastOnSuccess: Boolean = false) {
         try {
-            store.syncActiveProfileRecords()
-            if (showToastOnSuccess) {
+            val outcome = store.syncActiveIdentityDefault()
+            if (outcome.warningMessage != null) {
+                errorMessage = outcome.warningMessage
+            } else if (showToastOnSuccess) {
                 toastState.show("成绩已同步")
             }
         } catch (ce: CancellationException) {
             throw ce
-        } catch (_: MaimaiAPIException.Unauthorized) {
-            showLoginSheet = true
+        } catch (_: MaimaiAPIException.SyncInProgress) {
+            // Ignore overlapping auto-refresh/pull-to-refresh cleanly
+        } catch (err: MaimaiAPIException.BackendError) {
+            if (err.errorCode != "SYNC_IN_PROGRESS") {
+                errorMessage = "成绩刷新失败：${err.recoveryMessage}\n已有成绩已保留，请稍后重试。"
+            }
+        } catch (err: MaimaiAPIException.Unauthorized) {
+            if (!store.isLoggedIn) {
+                showLoginSheet = true
+            } else {
+                errorMessage = "成绩刷新失败：${err.recoveryMessage}\n已有成绩已保留，请稍后重试。"
+            }
         } catch (err: MaimaiAPIException) {
             errorMessage = "成绩刷新失败：${err.recoveryMessage}\n已有成绩已保留，请稍后重试。"
         } catch (err: Throwable) {
@@ -110,8 +136,16 @@ fun ProberScreen(
         }
     }
 
-    LaunchedEffect(store.isLoggedIn, store.isLoadingLocalData) {
-        if (!store.isLoadingLocalData && store.isLoggedIn && store.records.isEmpty()) {
+    LaunchedEffect(
+        store.isLoadingLocalData,
+        store.isRestoringCachedRecords,
+        store.activeIdentityId
+    ) {
+        if (!store.isLoadingLocalData &&
+            !store.isRestoringCachedRecords &&
+            store.records.isEmpty() &&
+            store.activeIdentity?.hasAnyChannel == true
+        ) {
             refreshRecords(showToastOnSuccess = false)
         }
     }
@@ -136,7 +170,7 @@ fun ProberScreen(
                                     try {
                                         val rendered = Best50Renderer.render(
                                             context = context,
-                                            playerName = store.displayPlayerName,
+                                            playerName = store.activeB50PlayerName,
                                             songsById = store.songsById,
                                             b35 = summary.b35,
                                             b15 = summary.b15,
@@ -168,11 +202,9 @@ fun ProberScreen(
                     .padding(innerPadding)
             ) {
                 PullToRefreshBox(
-                    isRefreshing = isPullRefreshing || store.isSyncingRecords,
+                    isRefreshing = isPullRefreshing || isPullSyncing,
                     onRefresh = {
-                        if (!store.isLoggedIn) {
-                            showLoginSheet = true
-                        } else if (!isPullRefreshing && !store.isSyncingRecords) {
+                        if (store.isLoggedIn && !isPullRefreshing && !store.isSyncingRecords) {
                             isPullRefreshing = true
                             scope.launch {
                                 try {
@@ -186,6 +218,7 @@ fun ProberScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             horizontal = AppTheme.pagePadding,
@@ -242,14 +275,14 @@ fun ProberScreen(
                                     icon = if (store.isLoggedIn) Icons.Rounded.Inbox else Icons.Rounded.PersonAdd,
                                     title = if (store.isLoggedIn) "暂无成绩数据" else "尚未添加成绩档案",
                                     description = if (store.isLoggedIn) {
-                                        "下拉刷新从当前查分器拉取最新成绩"
+                                        "下拉刷新获取最新成绩"
                                     } else {
-                                        "连接落雪咖啡屋或水鱼查分器后即可查看 B35 / B15 并生成 Best50 图"
+                                        "绑定${if (store.isCNDirectAvailable) "国服直连、" else ""}落雪或水鱼后即可查看 B35 / B15 并生成 Best50 图"
                                     },
                                     action = if (!store.isLoggedIn) {
                                         {
                                             AppInlineButton(
-                                                title = "添加成绩档案",
+                                                title = "添加档案",
                                                 icon = Icons.Rounded.PersonAdd,
                                                 onClick = { showLoginSheet = true }
                                             )
@@ -308,10 +341,10 @@ fun ProberScreen(
     }
 
     if (showLoginSheet) {
-        LoginSheet(
+        AddIdentitySheet(
             onDismiss = { showLoginSheet = false },
-            onProfileAdded = { profile ->
-                toastState.show("已连接 ${profile.displayTitle}")
+            onCompleted = { msg ->
+                toastState.show(msg, durationMs = 2000L)
             },
             onWarningMessage = { msg ->
                 errorMessage = msg

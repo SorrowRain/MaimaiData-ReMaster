@@ -5,7 +5,9 @@ struct RatingToolsView: View {
 
     @State private var path = NavigationPath()
     @State private var toast = ToastState()
+    @State private var syncAlertTitle = "同步失败"
     @State private var syncErrorMessage: String?
+    @State private var showAddSheet = false
 
     private enum ToolRoute: Hashable {
         case prober
@@ -31,7 +33,12 @@ struct RatingToolsView: View {
             .navigationTitle("Rating 与查分")
             .navigationBarTitleDisplayMode(.inline)
             .statusToast(toast)
-            .errorAlert("同步失败", message: $syncErrorMessage)
+            .errorAlert(syncAlertTitle, message: $syncErrorMessage)
+            .sheet(isPresented: $showAddSheet) {
+                AddIdentitySheet { summaryText in
+                    toast.show(summaryText, duration: 2.0)
+                }
+            }
             .navigationDestination(for: ToolRoute.self) { route in
                 switch route {
                 case .prober:
@@ -47,6 +54,9 @@ struct RatingToolsView: View {
                 case .accountManagement:
                     AccountManagementView()
                 }
+            }
+            .navigationDestination(for: IdentityDetailRoute.self) { route in
+                IdentityDetailView(identityId: route.identityId)
             }
             .navigationDestination(for: SongDetailRoute.self) { route in
                 SongDetailView(song: route.song, initialDifficulty: route.initialDifficulty)
@@ -66,65 +76,97 @@ struct RatingToolsView: View {
         return AppCard(padding: AppTheme.cardPadding, tint: AppTheme.accent) {
             VStack(alignment: .leading, spacing: AppTheme.Space.m) {
                 HStack(alignment: .center, spacing: AppTheme.Space.s) {
-                    Text(store.activeProfile != nil ? store.displayPlayerName : "未添加档案")
-                        .font(AppTheme.Typography.cardTitle)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .transaction { $0.animation = nil }
+                    if store.identities.count == 1, let identity = store.activeIdentity {
+                        NavigationLink(value: IdentityDetailRoute(identityId: identity.id)) {
+                            playerNameHeaderView(name: store.displayPlayerName)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看 \(store.displayPlayerName) 档案详情")
+                    } else if store.activeIdentity != nil {
+                        NavigationLink(value: ToolRoute.accountManagement) {
+                            playerNameHeaderView(name: store.displayPlayerName)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("切换或管理成绩档案")
+                    } else {
+                        Text("未添加档案")
+                            .font(AppTheme.Typography.cardTitle)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .transaction { $0.animation = nil }
+                    }
 
-                    Spacer(minLength: 4)
+                    Spacer(minLength: AppTheme.Space.xs)
 
-                    if isLoggedIn {
-                        AppInlineButton(
-                            title: "同步成绩",
-                            icon: "arrow.clockwise",
-                            isLoading: store.isSyncingRecords
-                        ) {
-                            Task { await syncRecords() }
+                    if let identity = store.activeIdentity {
+                        if identity.hasAnyChannel {
+                            AppInlineButton(
+                                title: "同步成绩",
+                                isLoading: store.isSyncingRecords,
+                                isDisabled: store.isLoadingLocalData
+                            ) {
+                                Task { await syncRecords() }
+                            }
+                        } else {
+                            AppInlineButton(title: "绑定账号") {
+                                path.append(IdentityDetailRoute(identityId: identity.id))
+                            }
                         }
                     } else {
-                        AppInlineButton(
-                            title: "添加档案",
-                            icon: "person.crop.circle.badge.plus"
-                        ) {
-                            path.append(ToolRoute.accountManagement)
+                        AppInlineButton(title: "添加档案") {
+                            showAddSheet = true
                         }
                     }
                 }
 
-                Button {
-                    path.append(isLoggedIn ? ToolRoute.prober : ToolRoute.accountManagement)
-                } label: {
-                    HStack(spacing: AppTheme.Space.s) {
-                        AppMetricTile(
-                            title: "总 Rating",
-                            value: isLoggedIn ? "\(summary.totalRating)" : "—",
-                            highlight: isLoggedIn
-                        )
-                        AppMetricTile(
-                            title: "旧版本 B35",
-                            value: isLoggedIn ? "\(summary.b35Rating)" : "—"
-                        )
-                        AppMetricTile(
-                            title: "现行版本 B15",
-                            value: isLoggedIn ? "\(summary.b15Rating)" : "—"
-                        )
-                    }
-                    .contentShape(Rectangle())
+                HStack(spacing: AppTheme.Space.s) {
+                    AppMetricTile(
+                        title: "总 Rating",
+                        value: isLoggedIn ? "\(summary.totalRating)" : "—",
+                        highlight: isLoggedIn
+                    )
+                    AppMetricTile(
+                        title: "旧版本 B35",
+                        value: isLoggedIn ? "\(summary.b35Rating)" : "—"
+                    )
+                    AppMetricTile(
+                        title: "现行版本 B15",
+                        value: isLoggedIn ? "\(summary.b15Rating)" : "—"
+                    )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isLoggedIn ? "查看 Best 50 成绩详情" : "前往添加成绩档案")
             }
         }
     }
 
+    private func playerNameHeaderView(name: String) -> some View {
+        HStack(spacing: AppTheme.Space.xs) {
+            Text(name)
+                .font(AppTheme.Typography.cardTitle)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .transaction { $0.animation = nil }
+            Image(systemName: "chevron.right")
+                .font(AppTheme.Typography.captionBold)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+    }
+
     private func syncRecords() async {
         do {
-            try await store.syncActiveProfileRecords()
-            toast.show("成绩已同步", duration: 1.8)
+            let outcome = try await store.syncActiveIdentityDefault()
+            if let warning = outcome.warningMessage {
+                syncAlertTitle = "部分同步成功"
+                syncErrorMessage = warning
+            } else {
+                toast.show("成绩已同步", duration: 1.8)
+            }
         } catch let error as MaimaiAPIError {
+            syncAlertTitle = "同步失败"
             syncErrorMessage = error.recoveryMessage
         } catch {
+            syncAlertTitle = "同步失败"
             syncErrorMessage = error.localizedDescription
         }
     }
@@ -144,7 +186,7 @@ struct RatingToolsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    Divider()
+                    AppInsetDivider()
 
                     NavigationLink(value: ToolRoute.versionCheck) {
                         AppInsetRow(
@@ -155,7 +197,7 @@ struct RatingToolsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    Divider()
+                    AppInsetDivider()
 
                     NavigationLink(value: ToolRoute.levelCheck) {
                         AppInsetRow(
@@ -175,27 +217,14 @@ struct RatingToolsView: View {
     private var calculatorsSection: some View {
         AppSectionCard(title: "算分与推分工具") {
             AppInsetGroup {
-                VStack(spacing: 0) {
-                    NavigationLink(value: ToolRoute.calculator) {
-                        AppInsetRow(
-                            icon: "function",
-                            iconColor: AppTheme.Palette.ratingBlue,
-                            title: "Rating 计算器"
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Divider()
-
-                    NavigationLink(value: ToolRoute.finaleToDx) {
-                        AppInsetRow(
-                            icon: "arrow.left.arrow.right",
-                            iconColor: AppTheme.Palette.noteSlide,
-                            title: "旧框达成率换算"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                NavigationLink(value: ToolRoute.calculator) {
+                    AppInsetRow(
+                        icon: "function",
+                        iconColor: AppTheme.Palette.ratingBlue,
+                        title: "Rating 计算器"
+                    )
                 }
+                .buttonStyle(.plain)
             }
         }
     }

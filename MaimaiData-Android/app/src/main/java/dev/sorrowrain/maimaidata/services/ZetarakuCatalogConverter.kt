@@ -116,7 +116,21 @@ data class DXDataIdMap(
             return DXDataIdMap(updatedAt = raw.updatedAt, idsByKey = map)
         }
     }
+
+    fun reverseKeysById(): Map<Int, String> {
+        val out = HashMap<Int, String>(idsByKey.size)
+        for ((key, id) in idsByKey) {
+            out.putIfAbsent(id, key)
+        }
+        return out
+    }
 }
+
+@Serializable
+data class DeletedCNSongsCache(
+    val songs: List<SongData> = emptyList(),
+    val unresolvableIds: List<Int> = emptyList()
+)
 
 @Serializable
 data class DXDataRawCatalog(
@@ -150,6 +164,11 @@ object ZetarakuCatalogConverter {
     data class ConversionOutput(
         val songs: List<SongData>,
         val migratedIdPairs: List<MigratedIdPair>
+    )
+
+    data class DeletedSongsResolution(
+        val resolved: List<SongData>,
+        val unresolvableIds: Set<Int>
     )
 
     private data class CNLookupKey(
@@ -459,24 +478,6 @@ object ZetarakuCatalogConverter {
                     val fromVersion = effectiveVersion(sortedSheets[0], zSong.version, region)
                     val vRank = versionRank[fromVersion] ?: 0
                     val sortOrder = vRank * 100_000 + catalogIdx * 2 + if (isDX) 1 else 0
-                    val bpmInt = (zSong.bpm ?: 0.0).roundToInt()
-
-                    val charts = sortedSheets.map { sh ->
-                        val nc = sh.noteCounts
-                        val tap = nc?.tap ?: 0
-                        val hold = nc?.hold ?: 0
-                        val slide = nc?.slide ?: 0
-                        val touch = nc?.touch ?: 0
-                        val brk = nc?.breakCount ?: 0
-                        val notes = if (isDX) listOf(tap, hold, slide, touch, brk) else listOf(tap, hold, slide, brk)
-                        SongData.RawChart(
-                            charter = cleanedCharter(sh.noteDesigner),
-                            notes = notes
-                        )
-                    }
-
-                    val levels = sortedSheets.map { effectiveLevel(it, region) }
-                    val dsValues = sortedSheets.map { effectiveDS(it, region) }
                     val cnBaselineDs = matchedCN?.let { cn ->
                         sortedSheets.indices.map { idx -> cn.ds.getOrElse(idx) { 0.0 } }
                     }
@@ -490,36 +491,220 @@ object ZetarakuCatalogConverter {
                         resolvedAliases = list
                     }
 
-                    val basic = SongData.BasicInfo(
-                        artist = zSong.artist,
-                        bpm = bpmInt,
-                        from = fromVersion,
-                        genre = mappedGenre,
+                    output += buildStandardOrDXSongData(
+                        zSong = zSong,
+                        sortedSheets = sortedSheets,
+                        resolvedId = resolvedId,
+                        mappedGenre = mappedGenre,
+                        mappedType = mappedType,
+                        isDX = isDX,
+                        fromVersion = fromVersion,
                         isNew = fromVersion in b15Versions,
-                        title = zSong.title,
-                        version = fromVersion
-                    )
-
-                    output += SongData(
-                        basicInfo = basic,
-                        charts = charts,
-                        ds = dsValues,
                         oldDs = cnBaselineDs,
-                        id = resolvedId,
-                        level = levels,
-                        title = zSong.title,
-                        type = mappedType,
-                        alias = resolvedAliases,
-                        comment = null,
-                        remoteCoverName = zSong.imageName,
+                        aliases = resolvedAliases,
                         preferRemoteCover = if (matchedCN == null) true else null,
-                        sortOrder = sortOrder
+                        sortOrder = sortOrder,
+                        region = region,
+                        isDisabled = null
                     )
                 }
             }
         }
 
         return ConversionOutput(songs = output, migratedIdPairs = migratedPairs)
+    }
+
+    /** Resolves metadata for removed/deleted CN songs present in player records without region filtering. */
+    fun resolveDeletedCNSongs(
+        unknownIds: Set<Int>,
+        catalog: ZetarakuCatalog,
+        dxIdMap: DXDataIdMap
+    ): DeletedSongsResolution {
+        if (unknownIds.isEmpty()) return DeletedSongsResolution(emptyList(), emptySet())
+        val reverseKeys = dxIdMap.reverseKeysById()
+        val byTitleGenre = HashMap<String, ZetarakuSong>()
+        val byTitleNonUtage = HashMap<String, ZetarakuSong>()
+        val utageByTitle = HashMap<String, ZetarakuSong>()
+
+        for (zSong in catalog.songs) {
+            if (zSong.category == "宴会場") {
+                utageByTitle[zSong.title] = zSong
+            } else {
+                val genre = mapCategoryToCNGenre(zSong.category)
+                byTitleGenre["${zSong.title}|$genre"] = zSong
+                byTitleNonUtage.putIfAbsent(zSong.title, zSong)
+            }
+        }
+
+        val unremovedCNGuardVersions = setOf("CiRCLE", "CiRCLE PLUS", "MAGiCAL")
+        val resolved = mutableListOf<SongData>()
+        val unresolvable = mutableSetOf<Int>()
+
+        for (songId in unknownIds.sorted()) {
+            val key = reverseKeys[songId]
+            val parsed = key?.let(::parseDXKey)
+            if (parsed == null) {
+                unresolvable += songId
+                continue
+            }
+
+            if (parsed.sheetType == "utage") {
+                val zSong = utageByTitle[parsed.title]
+                val rawGroup = zSong?.sheets?.filter { it.type == "utage" }.orEmpty()
+                if (zSong == null || rawGroup.isEmpty()) {
+                    unresolvable += songId
+                    continue
+                }
+                val fromVersion = effectiveVersion(rawGroup[0], zSong.version, MaimaiConstants.ServerRegion.JP)
+                if (rawGroup.any { it.regions.cn == true } || fromVersion in unremovedCNGuardVersions) {
+                    continue
+                }
+                val charts = rawGroup.map { sh ->
+                    val nc = sh.noteCounts
+                    SongData.RawChart(
+                        charter = cleanedCharter(sh.noteDesigner),
+                        notes = listOf(nc?.tap ?: 0, nc?.hold ?: 0, nc?.slide ?: 0, nc?.touch ?: 0, nc?.breakCount ?: 0),
+                        kanji = cleanedOptionalText(sh.difficulty)
+                    )
+                }
+                resolved += SongData(
+                    basicInfo = SongData.BasicInfo(
+                        artist = zSong.artist,
+                        bpm = (zSong.bpm ?: 0.0).roundToInt(),
+                        from = fromVersion,
+                        genre = MaimaiConstants.GENRE_UTAGE,
+                        isNew = false,
+                        title = zSong.title,
+                        version = fromVersion
+                    ),
+                    charts = charts,
+                    ds = rawGroup.map { effectiveDS(it, MaimaiConstants.ServerRegion.JP) },
+                    oldDs = null,
+                    id = songId.toString(),
+                    level = rawGroup.map { effectiveLevel(it, MaimaiConstants.ServerRegion.JP) },
+                    title = zSong.title,
+                    type = MaimaiConstants.CHART_TYPE_DX,
+                    alias = null,
+                    comment = cleanedOptionalText(zSong.comment),
+                    remoteCoverName = zSong.imageName,
+                    preferRemoteCover = true,
+                    sortOrder = null,
+                    isDisabled = true
+                )
+            } else {
+                val zSong = byTitleGenre["${parsed.title}|${parsed.cnGenre}"] ?: byTitleNonUtage[parsed.title]
+                val sortedSheets = zSong?.sheets
+                    ?.filter { it.type == parsed.sheetType }
+                    ?.sortedBy { difficultyOrder[it.difficulty] ?: 99 }
+                    .orEmpty()
+                if (zSong == null || sortedSheets.isEmpty()) {
+                    unresolvable += songId
+                    continue
+                }
+                val isDX = parsed.sheetType == "dx"
+                val mappedType = if (isDX) MaimaiConstants.CHART_TYPE_DX else MaimaiConstants.CHART_TYPE_SD
+                val fromVersion = effectiveVersion(sortedSheets[0], zSong.version, MaimaiConstants.ServerRegion.JP)
+                if (sortedSheets.any { it.regions.cn == true } || fromVersion in unremovedCNGuardVersions) {
+                    continue
+                }
+                resolved += buildStandardOrDXSongData(
+                    zSong = zSong,
+                    sortedSheets = sortedSheets,
+                    resolvedId = songId.toString(),
+                    mappedGenre = mapCategoryToCNGenre(zSong.category),
+                    mappedType = mappedType,
+                    isDX = isDX,
+                    fromVersion = fromVersion,
+                    isNew = false,
+                    oldDs = null,
+                    aliases = null,
+                    preferRemoteCover = true,
+                    sortOrder = null,
+                    region = MaimaiConstants.ServerRegion.JP,
+                    isDisabled = true
+                )
+            }
+        }
+
+        return DeletedSongsResolution(resolved = resolved, unresolvableIds = unresolvable)
+    }
+
+    private fun buildStandardOrDXSongData(
+        zSong: ZetarakuSong,
+        sortedSheets: List<ZetarakuSheet>,
+        resolvedId: String,
+        mappedGenre: String,
+        mappedType: String,
+        isDX: Boolean,
+        fromVersion: String,
+        isNew: Boolean,
+        oldDs: List<Double>?,
+        aliases: List<String>?,
+        preferRemoteCover: Boolean?,
+        sortOrder: Int?,
+        region: MaimaiConstants.ServerRegion,
+        isDisabled: Boolean?
+    ): SongData {
+        val bpmInt = (zSong.bpm ?: 0.0).roundToInt()
+        val charts = sortedSheets.map { sh ->
+            val nc = sh.noteCounts
+            val tap = nc?.tap ?: 0
+            val hold = nc?.hold ?: 0
+            val slide = nc?.slide ?: 0
+            val touch = nc?.touch ?: 0
+            val brk = nc?.breakCount ?: 0
+            val notes = if (isDX) listOf(tap, hold, slide, touch, brk) else listOf(tap, hold, slide, brk)
+            SongData.RawChart(
+                charter = cleanedCharter(sh.noteDesigner),
+                notes = notes
+            )
+        }
+        return SongData(
+            basicInfo = SongData.BasicInfo(
+                artist = zSong.artist,
+                bpm = bpmInt,
+                from = fromVersion,
+                genre = mappedGenre,
+                isNew = isNew,
+                title = zSong.title,
+                version = fromVersion
+            ),
+            charts = charts,
+            ds = sortedSheets.map { effectiveDS(it, region) },
+            oldDs = oldDs,
+            id = resolvedId,
+            level = sortedSheets.map { effectiveLevel(it, region) },
+            title = zSong.title,
+            type = mappedType,
+            alias = aliases,
+            comment = null,
+            remoteCoverName = zSong.imageName,
+            preferRemoteCover = preferRemoteCover,
+            sortOrder = sortOrder,
+            isDisabled = isDisabled
+        )
+    }
+
+    private data class ParsedDXKey(
+        val title: String,
+        val cnGenre: String,
+        val sheetType: String
+    )
+
+    private fun parseDXKey(key: String): ParsedDXKey? {
+        if (key.startsWith("utage|")) {
+            return ParsedDXKey(key.removePrefix("utage|"), MaimaiConstants.GENRE_UTAGE, "utage")
+        }
+        val lastPipe = key.lastIndexOf('|')
+        if (lastPipe <= 0) return null
+        val typeStr = key.substring(lastPipe + 1)
+        val head = key.substring(0, lastPipe)
+        val prevPipe = head.lastIndexOf('|')
+        if (prevPipe < 0) return null
+        val cnGenre = head.substring(prevPipe + 1)
+        val title = head.substring(0, prevPipe)
+        val sheetType = if (typeStr == MaimaiConstants.CHART_TYPE_DX) "dx" else "std"
+        return ParsedDXKey(title, cnGenre, sheetType)
     }
 
     private fun resolveUtageBPM(

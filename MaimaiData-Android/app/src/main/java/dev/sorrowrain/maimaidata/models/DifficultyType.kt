@@ -9,9 +9,13 @@ enum class DifficultyType(val rawValue: Int) {
     EXPERT(2),
     MASTER(3),
     REMASTER(4),
-    UTAGE(5),
-    UTAGE_PLAYER2(6),
+    UTAGE(10),
+    UTAGE_PLAYER2(11),
     UNKNOWN(-1);
+
+    /** Canonical level index used by `ProberRecord.levelIndex` and prober payloads. */
+    val recordLevelIndex: Int
+        get() = rawValue
 
     val shortName: String
         get() = when (this) {
@@ -79,8 +83,8 @@ enum class DifficultyType(val rawValue: Int) {
         fun from(genre: String, index: Int): DifficultyType {
             if (genre == MaimaiConstants.GENRE_UTAGE) {
                 return when (index) {
-                    0 -> UTAGE
-                    1 -> UTAGE_PLAYER2
+                    0, 10 -> UTAGE
+                    1, 11 -> UTAGE_PLAYER2
                     else -> UNKNOWN
                 }
             }
