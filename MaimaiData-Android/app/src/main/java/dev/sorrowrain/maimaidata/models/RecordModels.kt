@@ -3,6 +3,11 @@ package dev.sorrowrain.maimaidata.models
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import org.w3c.dom.Element
+import org.w3c.dom.Text
+import org.xml.sax.InputSource
+import java.io.StringReader
+import javax.xml.parsers.DocumentBuilderFactory
 
 @Serializable
 data class ChartStatsResponse(
@@ -305,13 +310,6 @@ data class SongFilterCriteria(
             sortOption != SongSortOption.DEFAULT_DESC
 }
 
-@Serializable
-data class GitHubLatestReleasePayload(
-    @SerialName("tag_name") val tagName: String,
-    @SerialName("html_url") val htmlUrl: String,
-    val body: String? = null
-)
-
 data class AppReleaseInfo(
     val version: String,
     val notes: String,
@@ -323,21 +321,77 @@ data class AppReleaseInfo(
     }
 
     companion object {
-        fun from(payload: GitHubLatestReleasePayload): AppReleaseInfo? {
-            val rawTag = payload.tagName.trim()
-            val cleaned = rawTag.trimStart('v', 'V')
-            if (cleaned.isEmpty()) return null
-            val trimmedNotes = payload.body.orEmpty().trim()
-            val cappedNotes = if (trimmedNotes.length > 420) {
-                trimmedNotes.take(420) + "…"
-            } else {
-                trimmedNotes
+        private const val ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
+        private const val RELEASE_TAG_PREFIX = "https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v"
+        private val stableVersion = Regex("""[0-9]+\.[0-9]+\.[0-9]+""")
+        private val otherEncoding = Regex("""\A<\?xml\s+[^?]*\bencoding\s*=\s*(['"])(?!UTF-8\1)""", RegexOption.IGNORE_CASE)
+        private val noteTypes = setOf(null, "text", "text/plain", "html")
+        private val listStart = Regex("""(?i)(<li\b[^>]*>)\s*(?:<p\b[^>]*>\s*)?""")
+        private val lineTags = setOf("p", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "div", "blockquote", "pre", "hr")
+        private val tags = Regex("""(?is)<!--.*?-->|<(/?)([a-z][a-z0-9:-]*)(?:[^"'<>]++|"[^"]*"|'[^']*')*>""")
+        private val entities = Regex("""&(amp|lt|gt|quot|apos|nbsp|#[0-9]+|#[xX][0-9a-fA-F]+);""")
+
+        fun fromAtom(data: ByteArray): AppReleaseInfo {
+            val xml = data.decodeToString(throwOnInvalidSequence = true).removePrefix("\uFEFF")
+            require("<!DOCTYPE" !in xml && '\u0000' !in xml && !otherEncoding.containsMatchIn(xml)) {
+                "Invalid GitHub release feed"
             }
-            return AppReleaseInfo(
-                version = cleaned,
-                notes = cappedNotes,
-                htmlUrl = payload.htmlUrl
-            )
+            val root = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
+                .newDocumentBuilder().parse(InputSource(StringReader(xml))).documentElement
+            require(root.localName == "feed" && root.namespaceURI == ATOM_NAMESPACE) { "Invalid GitHub release feed" }
+
+            var latest: AppReleaseInfo? = null
+            for (entry in root.atomChildren("entry")) {
+                val (version, url) = entry.atomChildren("link").firstNotNullOfOrNull { link ->
+                    val href = link.getAttribute("href")
+                    val tag = href.removePrefix(RELEASE_TAG_PREFIX)
+                    if (link.getAttribute("rel") == "alternate" && href.startsWith(RELEASE_TAG_PREFIX) &&
+                        stableVersion.matches(tag) && tag.split('.').all { it.toIntOrNull() != null }
+                    ) tag to href else null
+                } ?: continue
+                if (latest != null && !VersionString.isNewer(version, than = latest.version)) continue
+                val content = entry.atomChildren("content").firstOrNull { it.getAttributeNode("type")?.value in noteTypes }
+                val rawNotes = content?.childNodes?.let { children ->
+                    (0 until children.length).joinToString("") { (children.item(it) as? Text)?.data.orEmpty() }
+                }.orEmpty()
+                val notes = (if (content?.getAttribute("type") == "html") plainNotes(rawNotes) else rawNotes).trim()
+                val cappedNotes = if (notes.codePointCount(0, notes.length) > 420) {
+                    notes.substring(0, notes.offsetByCodePoints(0, 420)) + "…"
+                } else notes
+                latest = AppReleaseInfo(version, cappedNotes, url)
+            }
+            return requireNotNull(latest) { "No stable release in GitHub release feed" }
         }
+
+        private fun Element.atomChildren(name: String): Sequence<Element> {
+            val children = childNodes
+            return (0 until children.length).asSequence().mapNotNull { children.item(it) as? Element }
+                .filter { it.localName == name && it.namespaceURI == ATOM_NAMESPACE }
+        }
+
+        private fun plainNotes(html: String): String = html.replace(listStart, "\$1").replace(tags) { match ->
+            val tag = match.groupValues[2].lowercase()
+            when {
+                tag == "li" && match.groupValues[1].isEmpty() -> "\n- "
+                tag in lineTags -> "\n"
+                else -> ""
+            }
+        }.replace(entities) { match ->
+            when (val entity = match.groupValues[1]) {
+                "amp" -> "&"
+                "lt" -> "<"
+                "gt" -> ">"
+                "quot" -> "\""
+                "apos" -> "'"
+                "nbsp" -> " "
+                else -> {
+                    val codePoint = if (entity.startsWith("#x", ignoreCase = true)) {
+                        entity.drop(2).toIntOrNull(16)
+                    } else entity.drop(1).toIntOrNull()
+                    codePoint?.takeIf { Character.isValidCodePoint(it) && it !in 0xD800..0xDFFF }
+                        ?.let { String(Character.toChars(it)) } ?: match.value
+                }
+            }
+        }.lineSequence().map(String::trim).filter(String::isNotEmpty).joinToString("\n")
     }
 }

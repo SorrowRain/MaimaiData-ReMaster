@@ -15,9 +15,10 @@
 | **外服独占曲目 ID** | `https://miruku.dxrating.net/api/v1/dxdata` | `dxdata_id_map.json` | 随 Zetaraku 并发更新 | 10 分钟 |
 | **水鱼拟合定数** | `https://www.diving-fish.com/api/maimaidxprober/chart_stats` | `chart_stats.json` | 5 天 | 5 分钟 |
 | **曲绘 CDN 优先级** | 国服曲：`assets2.lxns.net/maimai/jacket/{baseId}.png` -> 水鱼 5 位补零兜底；外服独占曲：Zetaraku CloudFront `img/cover/{imageName}` | 内存 + 磁盘双层永久缓存 | 按需懒加载 | 手动清除缓存 |
-| **客户端版本检查** | `https://api.github.com/repos/SorrowRain/MaimaiData-ReMaster/releases/latest` | `PreferenceKeys.appUpdateCheck` | 冷启动即检 + 前台 2 小时节流（Android 全渠道；iOS TestFlight 与自签/开发渠道） | 「关于」页手动点击即时检测 |
+| **客户端版本检查** | `https://github.com/SorrowRain/MaimaiData-ReMaster/releases.atom` | `PreferenceKeys.appUpdateCheck` | 冷启动即检 + 前台 2 小时节流（Android 全渠道；iOS TestFlight 与自签/开发渠道） | 「关于」页手动点击即时检测 |
 
 - 节流命中提示统一为 **`当前已是最新数据`**，全量曲库与规则更新成功提示统一为 **`已更新至最新数据`**，拟合定数刷新成功提示统一为 **`拟合定数已刷新`**。
+- 客户端只从 GitHub Atom 订阅读取版本：在该仓库 `vX.Y.Z` 标签中按数字比较选最高版本，跳过 `nightly` 和带预发布后缀的标签。正式版独占 `vX.Y.Z` 标签格式。更新说明转为文本展示；请求失败、订阅无效或无符合条件的版本时沿用检查失败提示，不切换数据源。
 
 ---
 

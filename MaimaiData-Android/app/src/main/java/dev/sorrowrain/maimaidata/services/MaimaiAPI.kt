@@ -617,8 +617,8 @@ object MaimaiAPI {
 
     // 5. GitHub Latest Release Update Check (short 6s timeout)
 
-    private const val GITHUB_LATEST_RELEASE_URL =
-        "https://api.github.com/repos/SorrowRain/MaimaiData-ReMaster/releases/latest"
+    private const val GITHUB_RELEASE_FEED_URL =
+        "https://github.com/SorrowRain/MaimaiData-ReMaster/releases.atom"
 
     private val shortTimeoutClient: OkHttpClient by lazy {
         httpClient.newBuilder()
@@ -636,25 +636,18 @@ object MaimaiAPI {
             .build()
     }
 
-    suspend fun fetchLatestGitHubRelease(manual: Boolean = false): AppReleaseInfo? = withContext(Dispatchers.IO) {
+    suspend fun fetchLatestGitHubRelease(manual: Boolean = false): AppReleaseInfo = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url(GITHUB_LATEST_RELEASE_URL)
+            .url(GITHUB_RELEASE_FEED_URL)
             .header("User-Agent", APP_USER_AGENT)
-            .header("Accept", "application/vnd.github+json")
+            .header("Accept", "application/atom+xml")
             .get()
             .build()
 
         val client = if (manual) manualTimeoutClient else shortTimeoutClient
         client.newCall(req).await().use { resp ->
-            if (resp.code == 404) return@withContext null
-            val bytes = resp.body?.bytes() ?: ByteArray(0)
-            if (resp.code !in 200..299) {
-                throw MaimaiAPIException.HttpError(resp.code, extractErrorMessage(bytes))
-            }
-            val payload = json.decodeFromString<dev.sorrowrain.maimaidata.models.GitHubLatestReleasePayload>(
-                bytes.toString(Charsets.UTF_8)
-            )
-            dev.sorrowrain.maimaidata.models.AppReleaseInfo.from(payload)
+            if (!resp.isSuccessful) throw MaimaiAPIException.HttpError(resp.code)
+            AppReleaseInfo.fromAtom(resp.body?.bytes() ?: ByteArray(0))
         }
     }
 
