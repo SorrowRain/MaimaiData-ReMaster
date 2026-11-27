@@ -1,12 +1,10 @@
 package dev.sorrowrain.maimaidata.views
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -132,6 +130,12 @@ fun SongListScreen(
     var criteria by rememberSaveable(stateSaver = SongFilterCriteriaSaver) {
         mutableStateOf(SongFilterCriteria())
     }
+    var lastScrollCriteria by rememberSaveable(stateSaver = SongFilterCriteriaSaver) {
+        mutableStateOf(criteria)
+    }
+    var lastScrollRegionName by rememberSaveable {
+        mutableStateOf(store.serverRegion.name)
+    }
     var searchFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(criteria.keyword))
     }
@@ -154,6 +158,14 @@ fun SongListScreen(
         }
     }
 
+    LaunchedEffect(criteria, store.serverRegion) {
+        if (criteria != lastScrollCriteria || store.serverRegion.name != lastScrollRegionName) {
+            lastScrollCriteria = criteria
+            lastScrollRegionName = store.serverRegion.name
+            listState.scrollToItem(0)
+        }
+    }
+
     LaunchedEffect(listState.isScrollInProgress) {
         if (listState.isScrollInProgress && isSearchFocused) {
             focusManager.clearFocus()
@@ -165,8 +177,6 @@ fun SongListScreen(
         store.catalogRevision,
         store.songs,
         store.serverRegion,
-        store.playedSongIds,
-        store.deletedSongsById,
         if (criteria.onlyFavorites) store.favoriteIds else emptySet(),
         store.enableAliasSearch,
         store.enableCharterSearch
@@ -256,8 +266,10 @@ fun SongListScreen(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            horizontal = AppTheme.pagePadding,
-                            vertical = AppTheme.Space.s
+                            start = AppTheme.pagePadding,
+                            end = AppTheme.pagePadding,
+                            top = AppTheme.itemSpacing,
+                            bottom = AppTheme.Space.m
                         ),
                         verticalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
                     ) {
@@ -308,9 +320,15 @@ fun SongListScreen(
                         }
 
                         when {
-                            store.isLoadingLocalData && displayedSongs.isEmpty() -> {
+                            (store.isLoadingLocalData || store.isSyncingSongs) && store.songs.isEmpty() -> {
                                 item(key = "loading_placeholder") {
-                                    AppLoadingState(message = "正在读取曲库…")
+                                    AppLoadingState(
+                                        message = if (store.isLoadingLocalData) {
+                                            "正在读取曲库…"
+                                        } else {
+                                            "正在同步${store.serverRegion.shortName}曲库…"
+                                        }
+                                    )
                                 }
                             }
 
@@ -355,12 +373,16 @@ fun SongListScreen(
                     }
 
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = isSearchFocused && store.searchHistory.isNotEmpty(),
-                        enter = fadeIn() + scaleIn(initialScale = 0.97f) + expandVertically(),
-                        exit = fadeOut() + scaleOut(targetScale = 0.98f) + shrinkVertically(),
+                        visible = isSearchFocused && criteria.keyword.isBlank() && store.searchHistory.isNotEmpty(),
+                        enter = fadeIn() + slideInVertically { -it / 4 },
+                        exit = fadeOut() + slideOutVertically { -it / 4 },
                         modifier = Modifier
                             .align(Alignment.TopCenter)
-                            .padding(horizontal = AppTheme.pagePadding, vertical = 2.dp)
+                            .padding(
+                                start = AppTheme.pagePadding,
+                                end = AppTheme.pagePadding,
+                                top = AppTheme.Space.s
+                            )
                     ) {
                         RecentSearchesCard(
                             history = store.searchHistory.take(12),
@@ -419,7 +441,12 @@ private fun SearchPillInputBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = AppTheme.pagePadding, vertical = 6.dp),
+            .padding(
+                start = AppTheme.pagePadding,
+                end = AppTheme.pagePadding,
+                top = AppTheme.itemSpacing,
+                bottom = 0.dp
+            ),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
@@ -497,7 +524,7 @@ private fun RecentSearchesCard(
 ) {
     AppCard(
         padding = AppTheme.compactCardPadding,
-        tint = AppTheme.accent
+        useRaisedSurface = true
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -546,8 +573,7 @@ private fun ActiveFilterSummaryCard(
     onReset: () -> Unit
 ) {
     AppCard(
-        padding = AppTheme.compactCardPadding,
-        tint = AppTheme.accent
+        padding = AppTheme.compactCardPadding
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -641,7 +667,6 @@ private fun SongRowCard(
 
     AppCard(
         padding = AppTheme.compactCardPadding,
-        tint = colors.bg,
         onClick = onClick
     ) {
         Row(
@@ -698,21 +723,8 @@ private fun SongRowCard(
 
                 Spacer(modifier = Modifier.height(5.dp))
 
-                // Line 2: GenreCapsuleTag (+ Deleted badge if removed)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    GenreCapsuleTag(genre = song.basicInfo.genre)
-                    if (song.isDisabled == true) {
-                        AppCapsuleLabel(
-                            text = "已删除",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = CapsuleStyle.Compact
-                        )
-                    }
-                }
+                // Line 2: GenreCapsuleTag
+                GenreCapsuleTag(genre = song.basicInfo.genre)
 
                 Spacer(modifier = Modifier.height(7.dp))
 

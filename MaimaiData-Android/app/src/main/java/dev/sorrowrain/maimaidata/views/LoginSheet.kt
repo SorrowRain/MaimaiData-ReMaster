@@ -26,6 +26,8 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.bridges.CustomTabOAuthLauncher
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
 import dev.sorrowrain.maimaidata.components.AppInsetDivider
@@ -55,7 +58,9 @@ import dev.sorrowrain.maimaidata.models.PlayerIdentity
 import dev.sorrowrain.maimaidata.models.SyncChannelKind
 import dev.sorrowrain.maimaidata.services.LocalDataStore
 import dev.sorrowrain.maimaidata.services.MaimaiAPIException
+import dev.sorrowrain.maimaidata.theme.AppSurfaceLevel
 import dev.sorrowrain.maimaidata.theme.AppTheme
+import dev.sorrowrain.maimaidata.theme.LocalSurfaceLevel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -93,60 +98,68 @@ fun AddIdentitySheet(
         onDismiss()
     }
 
+    DisposableEffect(store) {
+        store.beginAppUpdatePresentationBlock()
+        onDispose { store.endAppUpdatePresentationBlock() }
+    }
+
     ModalBottomSheet(
         onDismissRequest = requestClose,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp
     ) {
-        val activeChannel = selectedChannel
-        if (activeChannel == null) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
-                    .padding(bottom = AppTheme.Space.l),
-                verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
-            ) {
-                AppSheetHeader(
-                    title = "添加档案",
-                    onClose = requestClose
-                )
-
-                AppSectionCard(
-                    title = "选择成绩来源",
-                    subtitle = "添加后还可以在档案详情里继续绑定其他账号"
+        CompositionLocalProvider(LocalSurfaceLevel provides AppSurfaceLevel.Sheet) {
+            val activeChannel = selectedChannel
+            if (activeChannel == null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
+                        .padding(bottom = AppTheme.Space.l),
+                    verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
                 ) {
-                    AppInsetGroup {
-                        availableChannels.forEachIndexed { idx, channel ->
-                            if (idx > 0) {
-                                AppInsetDivider()
+                    AppSheetHeader(
+                        title = "添加档案",
+                        onClose = requestClose
+                    )
+
+                    AppSectionCard(
+                        title = "选择成绩来源",
+                        subtitle = "添加后还可以在档案详情里继续绑定其他账号"
+                    ) {
+                        AppInsetGroup {
+                            availableChannels.forEachIndexed { idx, channel ->
+                                if (idx > 0) {
+                                    AppInsetDivider()
+                                }
+                                AppInsetRow(
+                                    title = channel.displayName,
+                                    subtitle = channel.sourceSubtitle(),
+                                    icon = channel.sourceIcon(),
+                                    iconTint = channel.sourceTint(),
+                                    showsChevron = true,
+                                    onClick = { selectedChannel = channel }
+                                )
                             }
-                            AppInsetRow(
-                                title = channel.displayName,
-                                subtitle = channel.sourceSubtitle(),
-                                icon = channel.sourceIcon(),
-                                iconTint = channel.sourceTint(),
-                                showsChevron = true,
-                                onClick = { selectedChannel = channel }
-                            )
                         }
                     }
                 }
+            } else {
+                ChannelBindFormContent(
+                    channel = activeChannel,
+                    targetIdentityId = null,
+                    onBack = { selectedChannel = null },
+                    onRequestClose = requestClose,
+                    onDismiss = forceClose,
+                    onSubmittingChange = { isSubmitting = it },
+                    onCompleted = onCompleted,
+                    onWarningMessage = onWarningMessage
+                )
             }
-        } else {
-            ChannelBindFormContent(
-                channel = activeChannel,
-                targetIdentityId = null,
-                onBack = { selectedChannel = null },
-                onRequestClose = requestClose,
-                onDismiss = forceClose,
-                onSubmittingChange = { isSubmitting = it },
-                onCompleted = onCompleted,
-                onWarningMessage = onWarningMessage
-            )
         }
     }
 }
@@ -180,22 +193,30 @@ fun ChannelBindSheet(
         onDismiss()
     }
 
+    DisposableEffect(store) {
+        store.beginAppUpdatePresentationBlock()
+        onDispose { store.endAppUpdatePresentationBlock() }
+    }
+
     ModalBottomSheet(
         onDismissRequest = requestClose,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp
     ) {
-        ChannelBindFormContent(
-            channel = channel,
-            targetIdentityId = targetIdentityId,
-            onBack = null,
-            onRequestClose = requestClose,
-            onDismiss = forceClose,
-            onSubmittingChange = { isSubmitting = it },
-            onCompleted = onCompleted,
-            onWarningMessage = onWarningMessage
-        )
+        CompositionLocalProvider(LocalSurfaceLevel provides AppSurfaceLevel.Sheet) {
+            ChannelBindFormContent(
+                channel = channel,
+                targetIdentityId = targetIdentityId,
+                onBack = null,
+                onRequestClose = requestClose,
+                onDismiss = forceClose,
+                onSubmittingChange = { isSubmitting = it },
+                onCompleted = onCompleted,
+                onWarningMessage = onWarningMessage
+            )
+        }
     }
 }
 
@@ -674,49 +695,57 @@ fun FullSyncSheet(
         }
     }
 
+    DisposableEffect(store) {
+        store.beginAppUpdatePresentationBlock()
+        onDispose { store.endAppUpdatePresentationBlock() }
+    }
+
     ModalBottomSheet(
         onDismissRequest = { if (!isSubmitting) onDismiss() },
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
-                .padding(bottom = AppTheme.Space.l),
-            verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
-        ) {
-            AppSheetHeader(
-                title = "完整同步",
-                onClose = { if (!isSubmitting) onDismiss() },
-                enabled = !isSubmitting
-            )
-
-            AppSectionCard(
-                title = "粘贴玩家二维码",
-                subtitle = subtitle
+        CompositionLocalProvider(LocalSurfaceLevel provides AppSurfaceLevel.Sheet) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
+                    .padding(bottom = AppTheme.Space.l),
+                verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                ) {
-                    QRPasteInputRow(
-                        text = qrContent,
-                        onValueChange = { qrContent = it },
-                        onDone = { runFullSync() }
-                    )
+                AppSheetHeader(
+                    title = "完整同步",
+                    onClose = { if (!isSubmitting) onDismiss() },
+                    enabled = !isSubmitting
+                )
 
-                    AppPrimaryButton(
-                        title = if (isSubmitting) "正在完整同步…" else "开始完整同步",
-                        icon = Icons.Rounded.QrCode2,
-                        isLoading = isSubmitting,
-                        enabled = !isSubmitting && qrContent.isNotBlank(),
-                        onClick = { runFullSync() }
-                    )
+                AppSectionCard(
+                    title = "粘贴玩家二维码",
+                    subtitle = subtitle
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                    ) {
+                        QRPasteInputRow(
+                            text = qrContent,
+                            onValueChange = { qrContent = it },
+                            onDone = { runFullSync() }
+                        )
+
+                        AppPrimaryButton(
+                            title = if (isSubmitting) "正在完整同步…" else "开始完整同步",
+                            icon = Icons.Rounded.QrCode2,
+                            isLoading = isSubmitting,
+                            enabled = !isSubmitting && qrContent.isNotBlank(),
+                            onClick = { runFullSync() }
+                        )
+                    }
                 }
             }
         }

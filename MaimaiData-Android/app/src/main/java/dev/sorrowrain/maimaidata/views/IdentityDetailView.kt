@@ -114,7 +114,7 @@ fun IdentityDetailScreen(
         }
     }
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(title = "档案详情", onBack = onBack)
@@ -135,7 +135,7 @@ fun IdentityDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
                     ) {
                         // 1. Summary Card
-                        AppCard(padding = AppTheme.cardPadding, tint = AppTheme.accent) {
+                        AppCard(padding = AppTheme.cardPadding) {
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)

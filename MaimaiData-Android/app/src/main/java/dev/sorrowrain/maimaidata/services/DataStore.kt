@@ -8,16 +8,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.sorrowrain.maimaidata.BuildConfig
+import dev.sorrowrain.maimaidata.components.CheckDisplayMode
 import dev.sorrowrain.maimaidata.models.AppReleaseInfo
 import dev.sorrowrain.maimaidata.models.CNPlateCatalog
 import dev.sorrowrain.maimaidata.models.CNPlateRuleGroup
 import dev.sorrowrain.maimaidata.models.ChartStatEntry
 import dev.sorrowrain.maimaidata.models.ChartStatsResponse
+import dev.sorrowrain.maimaidata.models.DifficultyType
 import dev.sorrowrain.maimaidata.models.DivingFishBinding
 import dev.sorrowrain.maimaidata.models.DivingFishSecret
 import dev.sorrowrain.maimaidata.models.LXNSBinding
 import dev.sorrowrain.maimaidata.models.LXNSConfiguration
-import dev.sorrowrain.maimaidata.models.LXNSPlayer
 import dev.sorrowrain.maimaidata.models.LXNSScore
 import dev.sorrowrain.maimaidata.models.LXNSSecret
 import dev.sorrowrain.maimaidata.models.MaimaiConstants
@@ -26,6 +27,7 @@ import dev.sorrowrain.maimaidata.models.PlateCheckScope
 import dev.sorrowrain.maimaidata.models.PlayerIdentity
 import dev.sorrowrain.maimaidata.models.ProberRecord
 import dev.sorrowrain.maimaidata.models.ProberRecordsResponse
+import dev.sorrowrain.maimaidata.models.ResolvedChart
 import dev.sorrowrain.maimaidata.models.ScoreAuthMethod
 import dev.sorrowrain.maimaidata.models.SelfHostedBinding
 import dev.sorrowrain.maimaidata.models.SelfHostedEndpointConfig
@@ -70,15 +72,29 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 val LocalDataStore = staticCompositionLocalOf<DataStore> {
     error("LocalDataStore has not been provided")
 }
 
+data class LevelCheckChartItem(
+    val song: SongData,
+    val chart: ResolvedChart
+) {
+    val id: String get() = "${song.id}_${chart.index}"
+}
+
+data class LevelCheckDSBucket(
+    val ds: Double,
+    val items: List<LevelCheckChartItem>
+) {
+    val id: Int get() = (ds * 10.0).roundToInt()
+}
+
 data class Best50Summary(
     val b35: List<ProberRecord>,
-    val b15: List<ProberRecord>,
-    val isMatching: Boolean
+    val b15: List<ProberRecord>
 ) {
     val b35Rating: Int = b35.sumOf { it.computedRating }
     val b15Rating: Int = b15.sumOf { it.computedRating }
@@ -112,7 +128,6 @@ class DataStore(context: Context) {
         const val CATALOG_AUTO_REFRESH_MS = 7L * 24L * 3600L * 1000L
         const val CATALOG_MANUAL_COOLDOWN_MS = 10L * 60L * 1000L
         const val UNKNOWN_SONG_CATALOG_COOLDOWN_MS = 12L * 3600L * 1000L
-        const val DELETED_SONGS_RESOLVE_COOLDOWN_MS = 12L * 3600L * 1000L
         const val STATS_AUTO_REFRESH_MS = 5L * 24L * 3600L * 1000L
         const val STATS_MANUAL_COOLDOWN_MS = 5L * 60L * 1000L
         const val APP_UPDATE_CHECK_INTERVAL_MS = 2L * 3600L * 1000L
@@ -125,14 +140,11 @@ class DataStore(context: Context) {
         private set
     var songsById: Map<Int, SongData> by mutableStateOf(emptyMap())
         private set
+    var levelCheckBuckets: Map<String, List<LevelCheckDSBucket>> by mutableStateOf(emptyMap())
+        private set
     var cnSongs: List<SongData> by mutableStateOf(emptyList())
         private set
     var cnSongsById: Map<Int, SongData> by mutableStateOf(emptyMap())
-        private set
-    var deletedSongsById: Map<Int, SongData> by mutableStateOf(emptyMap())
-        private set
-    private var unresolvableDeletedSongIds: Set<Int> = emptySet()
-    var playedSongIds: Set<Int> by mutableStateOf(emptySet())
         private set
     var plateCatalog: CNPlateCatalog? by mutableStateOf(null)
         private set
@@ -179,9 +191,14 @@ class DataStore(context: Context) {
         activeSyncTask?.identityId == identityId.lowercase(Locale.ROOT) &&
             activeSyncTask?.operation == operation
 
-    var statusMessage: String? by mutableStateOf(null)
+    var catalogSyncMessage: String? by mutableStateOf(null)
+    var catalogSyncToast: String? by mutableStateOf(null)
+    var appUpdateMessage: String? by mutableStateOf(null)
+    var appUpdateToast: String? by mutableStateOf(null)
     var syncNotice: DataSyncNotice? by mutableStateOf(null)
     var availableAppUpdate: AppReleaseInfo? by mutableStateOf(null)
+    private var pendingAppUpdate: AppReleaseInfo? = null
+    private var appUpdateBlockerCount: Int = 0
     var isCheckingAppUpdate: Boolean by mutableStateOf(false)
         private set
 
@@ -241,10 +258,6 @@ class DataStore(context: Context) {
     private var lastUnknownSongCatalogRefreshMs: Long?
         get() = readOptionalEpochMs(PreferenceKeys.unknownSongCatalogRefresh)
         set(value) = writeOptionalEpochMs(PreferenceKeys.unknownSongCatalogRefresh, value)
-
-    private var lastDeletedSongsResolveAttemptMs: Long?
-        get() = readOptionalEpochMs(PreferenceKeys.deletedSongsResolveAttempt)
-        set(value) = writeOptionalEpochMs(PreferenceKeys.deletedSongsResolveAttempt, value)
 
     // Persisted Preferences & Multi-Channel Player Identities
     var credentialStoreLoadFailed: Boolean by mutableStateOf(false)
@@ -397,6 +410,41 @@ class DataStore(context: Context) {
             }
         }
 
+    private var _lastVersionCheckScopeId: String? by mutableStateOf(null)
+    var lastVersionCheckScopeId: String?
+        get() = _lastVersionCheckScopeId
+        set(value) {
+            if (_lastVersionCheckScopeId != value) {
+                _lastVersionCheckScopeId = value
+                writeOptionalString(PreferenceKeys.lastVersionCheckScopeId, value)
+            }
+        }
+
+    private var _lastVersionCheckIntlScopeId: String? by mutableStateOf(null)
+    var lastVersionCheckIntlScopeId: String?
+        get() = _lastVersionCheckIntlScopeId
+        set(value) {
+            if (_lastVersionCheckIntlScopeId != value) {
+                _lastVersionCheckIntlScopeId = value
+                writeOptionalString(PreferenceKeys.lastVersionCheckIntlScopeId, value)
+            }
+        }
+
+    private var _lastVersionCheckJpScopeId: String? by mutableStateOf(null)
+    var lastVersionCheckJpScopeId: String?
+        get() = _lastVersionCheckJpScopeId
+        set(value) {
+            if (_lastVersionCheckJpScopeId != value) {
+                _lastVersionCheckJpScopeId = value
+                writeOptionalString(PreferenceKeys.lastVersionCheckJpScopeId, value)
+            }
+        }
+
+    // In-memory session state across navigation push/pop and bottom tab switches
+    var checklistDisplayMode: CheckDisplayMode by mutableStateOf(CheckDisplayMode.SSS)
+    var checklistOnlyUnfinished: Boolean by mutableStateOf(false)
+    var versionCheckDifficulty: DifficultyType by mutableStateOf(DifficultyType.MASTER)
+
     var activeVersionCheckIndex: Int
         get() = when (serverRegion) {
             MaimaiConstants.ServerRegion.CN -> lastVersionCheckIndex
@@ -408,6 +456,20 @@ class DataStore(context: Context) {
                 MaimaiConstants.ServerRegion.CN -> lastVersionCheckIndex = value
                 MaimaiConstants.ServerRegion.INTL -> lastVersionCheckIntlIndex = value
                 MaimaiConstants.ServerRegion.JP -> lastVersionCheckJpIndex = value
+            }
+        }
+
+    var activeVersionCheckScopeId: String?
+        get() = when (serverRegion) {
+            MaimaiConstants.ServerRegion.CN -> lastVersionCheckScopeId
+            MaimaiConstants.ServerRegion.INTL -> lastVersionCheckIntlScopeId
+            MaimaiConstants.ServerRegion.JP -> lastVersionCheckJpScopeId
+        }
+        set(value) {
+            when (serverRegion) {
+                MaimaiConstants.ServerRegion.CN -> lastVersionCheckScopeId = value
+                MaimaiConstants.ServerRegion.INTL -> lastVersionCheckIntlScopeId = value
+                MaimaiConstants.ServerRegion.JP -> lastVersionCheckJpScopeId = value
             }
         }
 
@@ -466,6 +528,12 @@ class DataStore(context: Context) {
             activeSongs = songs,
             zetarakuVersions = zetarakuCatalog?.versions
         )
+        if (activeVersionCheckScopeId == null && activePlateScopes.isNotEmpty()) {
+            activeVersionCheckScopeId = migrateLegacyPlateScopeId(
+                legacyIndex = activeVersionCheckIndex,
+                scopes = activePlateScopes
+            )
+        }
     }
 
     val lastCatalogSyncText: String
@@ -487,7 +555,6 @@ class DataStore(context: Context) {
     private val cachedPlatesFile: File get() = File(appFilesDir, "plate_rules.json")
     private val cachedZetarakuFile: File get() = File(appFilesDir, "zetaraku_data.json")
     private val cachedDXDataIdMapFile: File get() = File(appFilesDir, "dxdata_id_map.json")
-    private val cachedDeletedCNSongsFile: File get() = File(appFilesDir, "deleted_cn_songs.json")
     private val cachedStatsFile: File get() = File(appFilesDir, "chart_stats.json")
 
     init {
@@ -542,6 +609,9 @@ class DataStore(context: Context) {
         _lastVersionCheckIndex = prefs.getInt(PreferenceKeys.lastVersionCheck, 0)
         _lastVersionCheckIntlIndex = prefs.getInt(PreferenceKeys.lastVersionCheckIntl, 0)
         _lastVersionCheckJpIndex = prefs.getInt(PreferenceKeys.lastVersionCheckJp, 0)
+        _lastVersionCheckScopeId = prefs.getString(PreferenceKeys.lastVersionCheckScopeId, null)
+        _lastVersionCheckIntlScopeId = prefs.getString(PreferenceKeys.lastVersionCheckIntlScopeId, null)
+        _lastVersionCheckJpScopeId = prefs.getString(PreferenceKeys.lastVersionCheckJpScopeId, null)
         _lastLevelCheckIndex = prefs.getInt(PreferenceKeys.lastLevelCheck, 0)
     }
 
@@ -562,9 +632,10 @@ class DataStore(context: Context) {
             syncZetarakuCatalog()
         }
 
+        val needsReleaseDateBackfill = cnSongs.isNotEmpty() && cnSongs.all { it.releaseDate == null }
         delay(SyncPolicy.BOOTSTRAP_DELAY_MS)
         coroutineScope {
-            val catalogJob = async { syncAllCatalogsAndRules(force = false) }
+            val catalogJob = async { syncAllCatalogsAndRules(force = needsReleaseDateBackfill) }
             val statsJob = async { refreshChartStatsIfStale(force = false) }
             val updateJob = async { checkAppUpdateIfNeeded(manual = false, ignoreInterval = true) }
             catalogJob.await()
@@ -599,25 +670,46 @@ class DataStore(context: Context) {
             if (latest != null && latest.isNewerThan(currentShort)) {
                 val ignored = prefs.getString(PreferenceKeys.ignoredAppUpdateVersion, null)
                 if (manual || ignored != latest.version) {
-                    availableAppUpdate = latest
+                    if (!manual && appUpdateBlockerCount > 0) {
+                        pendingAppUpdate = latest
+                    } else {
+                        pendingAppUpdate = null
+                        availableAppUpdate = latest
+                    }
                 }
             } else if (manual) {
-                statusMessage = "当前已是最新版本（v$currentShort）"
+                appUpdateToast = "当前已是最新版本（v$currentShort）"
             }
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Throwable) {
             if (manual) {
-                statusMessage = "检查更新失败，请检查网络连接后重试"
+                appUpdateMessage = "检查更新失败，请检查网络连接后重试"
             }
         } finally {
             isCheckingAppUpdate = false
         }
     }
 
+    fun beginAppUpdatePresentationBlock() {
+        appUpdateBlockerCount += 1
+    }
+
+    fun endAppUpdatePresentationBlock() {
+        appUpdateBlockerCount = max(0, appUpdateBlockerCount - 1)
+        if (appUpdateBlockerCount == 0) {
+            val deferred = pendingAppUpdate ?: return
+            pendingAppUpdate = null
+            if (availableAppUpdate == null) {
+                availableAppUpdate = deferred
+            }
+        }
+    }
+
     fun ignoreAppUpdate(version: String) {
         prefs.edit().putString(PreferenceKeys.ignoredAppUpdateVersion, version).apply()
         availableAppUpdate = null
+        pendingAppUpdate = null
     }
 
     private data class LocalCaches(
@@ -625,7 +717,6 @@ class DataStore(context: Context) {
         val plates: CNPlateCatalog? = null,
         val zetaraku: ZetarakuCatalog? = null,
         val dxIdMap: DXDataIdMap? = null,
-        val deletedCache: DeletedCNSongsCache? = null,
         val stats: ChartStatsResponse? = null,
         val records: List<ProberRecord>? = null
     )
@@ -633,6 +724,7 @@ class DataStore(context: Context) {
     private data class SongSnapshot(
         val songs: List<SongData>,
         val songsById: Map<Int, SongData>,
+        val levelCheckBuckets: Map<String, List<LevelCheckDSBucket>>,
         val maxNotes: MaxNotesStats
     )
 
@@ -699,16 +791,6 @@ class DataStore(context: Context) {
                 null
             }
 
-            val loadedDeletedCache = if (cachedDeletedCNSongsFile.exists()) {
-                runCatching {
-                    MaimaiAPI.json.decodeFromString<DeletedCNSongsCache>(
-                        cachedDeletedCNSongsFile.readText(Charsets.UTF_8)
-                    )
-                }.getOrNull()
-            } else {
-                null
-            }
-
             val loadedStats = if (cachedStatsFile.exists()) {
                 runCatching {
                     MaimaiAPI.json.decodeFromString<ChartStatsResponse>(cachedStatsFile.readText(Charsets.UTF_8))
@@ -731,7 +813,6 @@ class DataStore(context: Context) {
                 plates = loadedPlates,
                 zetaraku = loadedZetaraku,
                 dxIdMap = loadedIdMap,
-                deletedCache = loadedDeletedCache,
                 stats = loadedStats,
                 records = loadedRecords
             )
@@ -740,16 +821,6 @@ class DataStore(context: Context) {
         plateCatalog = caches.plates
         zetarakuCatalog = caches.zetaraku
         dxDataIdMap = caches.dxIdMap
-        caches.deletedCache?.let { cache ->
-            val deletedMap = HashMap<Int, SongData>(cache.songs.size)
-            for (song in cache.songs) {
-                if (song.numericId > 0) {
-                    deletedMap[song.numericId] = song
-                }
-            }
-            deletedSongsById = deletedMap
-            unresolvableDeletedSongIds = cache.unresolvableIds.toSet()
-        }
         var cnSnapshot: SongSnapshot? = null
         if (caches.songs != null) {
             cnSnapshot = storeCNBaseline(caches.songs)
@@ -784,17 +855,6 @@ class DataStore(context: Context) {
         }
         cnSongs = snapshot.songs
         cnSongsById = snapshot.songsById
-        if (deletedSongsById.isNotEmpty()) {
-            val remaining = deletedSongsById.toMutableMap()
-            var changed = false
-            for (id in snapshot.songsById.keys) {
-                if (remaining.remove(id) != null) changed = true
-            }
-            if (changed) deletedSongsById = remaining
-        }
-        if (unresolvableDeletedSongIds.isNotEmpty()) {
-            unresolvableDeletedSongIds = unresolvableDeletedSongIds - snapshot.songsById.keys
-        }
         return snapshot
     }
 
@@ -802,6 +862,7 @@ class DataStore(context: Context) {
         if (epoch != null && regionEpoch != epoch) return
         songs = snapshot.songs
         songsById = snapshot.songsById
+        levelCheckBuckets = snapshot.levelCheckBuckets
         maxNotesStats = snapshot.maxNotes
         catalogRevision += 1
         rebuildPlateScopeCache()
@@ -863,15 +924,10 @@ class DataStore(context: Context) {
 
     private fun setRecordsSnapshot(list: List<ProberRecord>, ownerIdentityId: String?) {
         val map = HashMap<String, ProberRecord>(list.size)
-        val songIds = HashSet<Int>(list.size)
         for (rec in list) {
             map["${rec.songId}_${rec.levelIndex}"] = rec
-            if (rec.songId > 0) {
-                songIds.add(rec.songId)
-            }
         }
         recordsByKey = map
-        playedSongIds = songIds
         recordsOwnerIdentityId = ownerIdentityId?.lowercase(Locale.ROOT)
         _records = list
     }
@@ -892,6 +948,8 @@ class DataStore(context: Context) {
                 if (cached == null) {
                     songs = emptyList()
                     songsById = emptyMap()
+                    levelCheckBuckets = emptyMap()
+                    maxNotesStats = MaxNotesStats.fallback
                     catalogRevision += 1
                     rebuildPlateScopeCache()
                 }
@@ -964,7 +1022,7 @@ class DataStore(context: Context) {
                 plateCatalog != null &&
                 zetarakuCatalog != null
             ) {
-                statusMessage = "当前已是最新数据"
+                catalogSyncToast = "当前已是最新数据"
                 return@withContext
             }
         } else {
@@ -1010,12 +1068,12 @@ class DataStore(context: Context) {
 
         if (force) {
             if (cnErr == null && zErr == null) {
-                statusMessage = "已更新至最新数据"
+                catalogSyncToast = "已更新至最新数据"
                 syncNotice = null
             } else {
                 val err = cnErr ?: zErr
                 val detail = err?.message ?: "网络请求异常"
-                statusMessage = "部分数据同步失败：$detail"
+                catalogSyncMessage = "部分数据同步失败：$detail"
                 syncNotice = DataSyncNotice(
                     kind = DataSyncNotice.Kind.SONGS,
                     message = "曲库与规则同步未完全成功，正在使用本地缓存数据。\n$detail"
@@ -1067,20 +1125,6 @@ class DataStore(context: Context) {
                     runCatching {
                         val bytes = MaimaiAPI.json.encodeToString(fetchedIdMap).toByteArray(Charsets.UTF_8)
                         writeBytesAtomically(cachedDXDataIdMapFile, bytes)
-                    }
-                }
-                if (unresolvableDeletedSongIds.isNotEmpty()) {
-                    unresolvableDeletedSongIds = emptySet()
-                    val cachePayload = DeletedCNSongsCache(
-                        songs = deletedSongsById.values.sortedBy { it.numericId },
-                        unresolvableIds = emptyList()
-                    )
-                    val cacheFile = cachedDeletedCNSongsFile
-                    storeScope.launch(Dispatchers.IO) {
-                        runCatchingCancellable {
-                            val bytes = MaimaiAPI.json.encodeToString(cachePayload).toByteArray(Charsets.UTF_8)
-                            writeBytesAtomically(cacheFile, bytes)
-                        }
                     }
                 }
             }
@@ -1154,7 +1198,7 @@ class DataStore(context: Context) {
         if (force) {
             val last = lastChartStatsSyncEpochMs
             if (last != null && now - last < SyncPolicy.STATS_MANUAL_COOLDOWN_MS && chartStats.isNotEmpty()) {
-                statusMessage = "当前已是最新数据"
+                catalogSyncToast = "当前已是最新数据"
                 return@withContext
             }
         } else {
@@ -1173,14 +1217,14 @@ class DataStore(context: Context) {
             lastChartStatsSyncEpochMs = System.currentTimeMillis()
             applyChartStats(decoded)
             if (force) {
-                statusMessage = "拟合定数已刷新"
+                catalogSyncToast = "拟合定数已刷新"
                 syncNotice = null
             }
         } catch (ce: CancellationException) {
             throw ce
         } catch (err: Throwable) {
             val detail = err.message ?: "网络请求异常"
-            statusMessage = if (force) "拟合定数获取失败：$detail" else null
+            catalogSyncMessage = if (force) "拟合定数获取失败：$detail" else null
             syncNotice = DataSyncNotice(
                 kind = DataSyncNotice.Kind.STATS,
                 message = "拟合定数获取失败，正在使用本地数据。可前往「设置与数据」重试。"
@@ -1520,7 +1564,7 @@ class DataStore(context: Context) {
 
         val shouldMakeActive = (activeIdentityId == null) || (targetIdentityId == null) || (activeIdentityId == resolvedId)
         installFetchedRecords(merged, resolvedId, mode, makeActive = shouldMakeActive)
-        resolveUnknownSongsAfterSync(merged, resolvedId)
+        refreshCNCatalogIfUnknownSongsFound(merged, resolvedId)
         SyncDiagnostics.record(operation = "bind_cn", message = "绑定国服直连成功（共 ${merged.size} 条）")
 
         val updatedIdentity = identities.firstOrNull { it.id == resolvedId } ?: list.last()
@@ -1585,7 +1629,7 @@ class DataStore(context: Context) {
             val merged = ScoreSyncEngine.mergeQuickSync(existing = existing, incoming = incoming)
 
             installFetchedRecords(merged, targetId, SyncMode.QUICK, makeActive = false)
-            resolveUnknownSongsAfterSync(merged, targetId)
+            refreshCNCatalogIfUnknownSongsFound(merged, targetId)
             SyncDiagnostics.record(operation = "quick_sync", message = "快速同步完成（共 ${merged.size} 条）")
 
             if (writeback) {
@@ -1656,7 +1700,7 @@ class DataStore(context: Context) {
             val replaced = ScoreSyncEngine.applyFullSync(incoming)
 
             installFetchedRecords(replaced, targetId, SyncMode.FULL, makeActive = false)
-            resolveUnknownSongsAfterSync(replaced, targetId)
+            refreshCNCatalogIfUnknownSongsFound(replaced, targetId)
             SyncDiagnostics.record(operation = "full_sync", message = "完整同步完成（共 ${replaced.size} 条）")
 
             if (writeback) {
@@ -1841,7 +1885,7 @@ class DataStore(context: Context) {
             ScoreSyncEngine.applyFullSync(converted)
         }
         installFetchedRecords(finalRecords, targetId, SyncMode.LXNS, makeActive = makeActive)
-        resolveUnknownSongsAfterSync(finalRecords, targetId)
+        refreshCNCatalogIfUnknownSongsFound(finalRecords, targetId)
         identities.first { it.id == targetId }
     }
 
@@ -1990,7 +2034,7 @@ class DataStore(context: Context) {
             ScoreSyncEngine.applyFullSync(fetched)
         }
         installFetchedRecords(finalRecords, targetId, SyncMode.DIVING_FISH, makeActive = makeActive)
-        resolveUnknownSongsAfterSync(finalRecords, targetId)
+        refreshCNCatalogIfUnknownSongsFound(finalRecords, targetId)
         identities.first { it.id == targetId }
     }
 
@@ -2100,7 +2144,7 @@ class DataStore(context: Context) {
                     }
                     val finalRecords = ScoreSyncEngine.mergeQuickSync(withDF, lxSuccess.records)
                     installFetchedRecords(finalRecords, targetId, SyncMode.LXNS, makeActive = false)
-                    resolveUnknownSongsAfterSync(finalRecords, targetId)
+                    refreshCNCatalogIfUnknownSongsFound(finalRecords, targetId)
                     SyncDiagnostics.record(operation = "pull_merged", message = "双查分器合并同步完成（共 ${finalRecords.size} 条）")
                     SyncOutcome()
                 }
@@ -2130,7 +2174,7 @@ class DataStore(context: Context) {
                         ScoreSyncEngine.mergeQuickSync(existing, lxSuccess.records)
                     }
                     installFetchedRecords(finalRecords, targetId, SyncMode.LXNS, makeActive = false)
-                    resolveUnknownSongsAfterSync(finalRecords, targetId)
+                    refreshCNCatalogIfUnknownSongsFound(finalRecords, targetId)
                     recordDiagnosticFailure(operation = "pull_merged", channel = "divingFish", error = dfErr)
                     val msg = (dfErr as? MaimaiAPIException)?.recoveryMessage ?: (dfErr.message ?: "请求失败")
                     SyncOutcome(warningMessage = "水鱼同步失败（已合并落雪与本地最佳成绩）：$msg")
@@ -2161,7 +2205,7 @@ class DataStore(context: Context) {
                         ScoreSyncEngine.mergeQuickSync(existing, dfSuccess.records)
                     }
                     installFetchedRecords(finalRecords, targetId, SyncMode.DIVING_FISH, makeActive = false)
-                    resolveUnknownSongsAfterSync(finalRecords, targetId)
+                    refreshCNCatalogIfUnknownSongsFound(finalRecords, targetId)
                     recordDiagnosticFailure(operation = "pull_merged", channel = "lxns", error = lxErr)
                     val msg = (lxErr as? MaimaiAPIException)?.recoveryMessage ?: (lxErr.message ?: "请求失败")
                     SyncOutcome(warningMessage = "落雪同步失败（已合并水鱼与本地最佳成绩）：$msg")
@@ -2475,7 +2519,7 @@ class DataStore(context: Context) {
             ScoreSyncEngine.applyFullSync(fetched.records)
         }
         installFetchedRecords(finalRecords, identityId, SyncMode.DIVING_FISH, makeActive = makeActive)
-        resolveUnknownSongsAfterSync(finalRecords, identityId)
+        refreshCNCatalogIfUnknownSongsFound(finalRecords, identityId)
         SyncDiagnostics.record(operation = "pull_df", channel = "divingFish", message = "同步水鱼成绩完成（共 ${finalRecords.size} 条）")
     }
 
@@ -2517,7 +2561,7 @@ class DataStore(context: Context) {
             ScoreSyncEngine.applyFullSync(fetched.records)
         }
         installFetchedRecords(finalRecords, identityId, SyncMode.LXNS, makeActive = makeActive)
-        resolveUnknownSongsAfterSync(finalRecords, identityId)
+        refreshCNCatalogIfUnknownSongsFound(finalRecords, identityId)
         SyncDiagnostics.record(operation = "pull_lxns", channel = "lxns", message = "同步落雪成绩完成（共 ${finalRecords.size} 条）")
     }
 
@@ -2895,8 +2939,7 @@ class DataStore(context: Context) {
     private fun pureCNSongsLookup(): Map<Int, SongData> = cnSongsById
 
     private fun scoreImportSongLookup(): Map<Int, SongData> {
-        val merged = HashMap<Int, SongData>(deletedSongsById.size + songsById.size + cnSongsById.size)
-        merged.putAll(deletedSongsById)
+        val merged = HashMap<Int, SongData>(songsById.size + cnSongsById.size)
         merged.putAll(songsById)
         merged.putAll(cnSongsById)
         return merged
@@ -2954,108 +2997,27 @@ class DataStore(context: Context) {
         }
     }
 
-    private suspend fun resolveUnknownSongsAfterSync(
+    /** Triggers at most one 12h-throttled LXNS catalog refresh when newly released CN songs appear in synced records. */
+    private suspend fun refreshCNCatalogIfUnknownSongsFound(
         syncedRecords: List<ProberRecord>,
         identityId: String
     ) {
-        if (syncedRecords.isEmpty()) return
-        fun computeUnknownIds(): Set<Int> {
-            val out = HashSet<Int>()
-            for (rec in syncedRecords) {
-                val id = rec.songId
-                if (id > 0 &&
-                    !cnSongsById.containsKey(id) &&
-                    !deletedSongsById.containsKey(id) &&
-                    id !in unresolvableDeletedSongIds
-                ) {
-                    out.add(id)
-                }
-            }
-            return out
-        }
+        if (syncedRecords.isEmpty() || isFetchingCNSongs) return
+        if (syncedRecords.none { it.songId > 0 && !cnSongsById.containsKey(it.songId) }) return
 
-        var unknownIds = computeUnknownIds()
-        if (unknownIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val last = lastUnknownSongCatalogRefreshMs
+        if (last != null && now - last < SyncPolicy.UNKNOWN_SONG_CATALOG_COOLDOWN_MS) return
 
-        var didRefreshCN = false
-        if (!isFetchingCNSongs) {
-            val now = System.currentTimeMillis()
-            val last = lastUnknownSongCatalogRefreshMs
-            if (last == null || now - last >= SyncPolicy.UNKNOWN_SONG_CATALOG_COOLDOWN_MS) {
-                val (fetchedSongs, _) = performLXNSCatalogSync()
-                if (!fetchedSongs.isNullOrEmpty()) {
-                    lastUnknownSongCatalogRefreshMs = now
-                    didRefreshCN = true
-                    val cnSnapshot = storeCNBaseline(fetchedSongs)
-                    if (serverRegion == MaimaiConstants.ServerRegion.CN) {
-                        applySnapshot(cnSnapshot, epoch = regionEpoch)
-                    } else {
-                        zetarakuCatalog?.let { applyZetarakuCatalog(it, region = serverRegion, epoch = regionEpoch) }
-                    }
-                    unknownIds = computeUnknownIds()
-                }
-            }
-        }
+        val (fetchedSongs, _) = performLXNSCatalogSync()
+        if (fetchedSongs.isNullOrEmpty()) return
+        lastUnknownSongCatalogRefreshMs = now
 
-        val didConfirmFreshCNCatalog = didRefreshCN || (
-            cnSongsById.isNotEmpty() &&
-                lastCNCatalogSyncEpochMs != null &&
-                System.currentTimeMillis() - lastCNCatalogSyncEpochMs!! < SyncPolicy.UNKNOWN_SONG_CATALOG_COOLDOWN_MS
-        )
-
-        if (unknownIds.isNotEmpty() && didConfirmFreshCNCatalog) {
-            if (zetarakuCatalog == null || dxDataIdMap == null) {
-                val now = System.currentTimeMillis()
-                val last = lastDeletedSongsResolveAttemptMs
-                val canFetchZ = (last == null || now - last >= SyncPolicy.DELETED_SONGS_RESOLVE_COOLDOWN_MS)
-                if (canFetchZ && !isFetchingZetaraku) {
-                    val zErr = performZetarakuSync()
-                    if (zErr == null && zetarakuCatalog != null && dxDataIdMap != null) {
-                        lastDeletedSongsResolveAttemptMs = now
-                    }
-                }
-            }
-
-            val zCatalog = zetarakuCatalog
-            val idMap = dxDataIdMap
-            if (zCatalog != null && idMap != null) {
-                val resolution = withContext(Dispatchers.Default) {
-                    ZetarakuCatalogConverter.resolveDeletedCNSongs(
-                        unknownIds = unknownIds,
-                        catalog = zCatalog,
-                        dxIdMap = idMap
-                    )
-                }
-
-                if (resolution.resolved.isNotEmpty() || resolution.unresolvableIds.isNotEmpty()) {
-                    val nextDeleted = deletedSongsById.toMutableMap()
-                    for (song in resolution.resolved) {
-                        if (song.numericId > 0) {
-                            nextDeleted[song.numericId] = song
-                        }
-                    }
-                    deletedSongsById = nextDeleted
-                    unresolvableDeletedSongIds = unresolvableDeletedSongIds + resolution.unresolvableIds
-
-                    val payload = DeletedCNSongsCache(
-                        songs = nextDeleted.values.sortedBy { it.numericId },
-                        unresolvableIds = unresolvableDeletedSongIds.sorted()
-                    )
-                    val targetFile = cachedDeletedCNSongsFile
-                    storeScope.launch(Dispatchers.IO) {
-                        runCatchingCancellable {
-                            val bytes = MaimaiAPI.json.encodeToString(payload).toByteArray(Charsets.UTF_8)
-                            writeBytesAtomically(targetFile, bytes)
-                        }
-                    }
-                    catalogRevision += 1
-                    SyncDiagnostics.record(
-                        operation = "resolve_deleted",
-                        message = "解析删除曲 ${resolution.resolved.size} 首，未收录 ${resolution.unresolvableIds.size} 首",
-                        sampleSkippedIds = resolution.unresolvableIds.sorted()
-                    )
-                }
-            }
+        val cnSnapshot = storeCNBaseline(fetchedSongs)
+        if (serverRegion == MaimaiConstants.ServerRegion.CN) {
+            applySnapshot(cnSnapshot, epoch = regionEpoch)
+        } else {
+            zetarakuCatalog?.let { applyZetarakuCatalog(it, region = serverRegion, epoch = regionEpoch) }
         }
 
         val normalizedIdentityId = identityId.lowercase(Locale.ROOT)
@@ -3151,31 +3113,15 @@ class DataStore(context: Context) {
         searchHistory = emptyList()
     }
 
-    fun filteredSongs(criteria: SongFilterCriteria): List<SongData> {
-        val pool = if (serverRegion == MaimaiConstants.ServerRegion.CN &&
-            deletedSongsById.isNotEmpty() &&
-            playedSongIds.isNotEmpty()
-        ) {
-            val combined = songs.toMutableList()
-            for (songId in playedSongIds) {
-                if (!songsById.containsKey(songId)) {
-                    deletedSongsById[songId]?.let { combined.add(it) }
-                }
-            }
-            combined
-        } else {
-            songs
-        }
-        return SongFilter.apply(
-            songs = pool,
+    fun filteredSongs(criteria: SongFilterCriteria): List<SongData> =
+        SongFilter.apply(
+            songs = songs,
             criteria = criteria,
             region = serverRegion,
             favoriteIds = favoriteIds,
             enableAliasSearch = enableAliasSearch,
-            enableCharterSearch = enableCharterSearch,
-            playedSongIds = playedSongIds
+            enableCharterSearch = enableCharterSearch
         )
-    }
 
     // Rating, Records & Counterpart Queries
 
@@ -3183,9 +3129,6 @@ class DataStore(context: Context) {
         val numeric = rawId.toIntOrNull()
         if (numeric != null) {
             songsById[numeric]?.let { return it }
-            if (serverRegion == MaimaiConstants.ServerRegion.CN) {
-                deletedSongsById[numeric]?.let { return it }
-            }
         }
         return songs.firstOrNull { it.id == rawId }
     }
@@ -3209,9 +3152,9 @@ class DataStore(context: Context) {
         if (song.numericId > 0) {
             val targetId = if (song.numericId < 10_000) song.numericId + 10_000 else song.numericId - 10_000
             val candidate = songsById[targetId]
-                ?: if (serverRegion == MaimaiConstants.ServerRegion.CN) deletedSongsById[targetId] else null
             if (candidate != null &&
                 !candidate.isUtage &&
+                candidate.isDisabled != true &&
                 candidate.title == song.title &&
                 candidate.isDX != song.isDX
             ) {
@@ -3220,6 +3163,7 @@ class DataStore(context: Context) {
         }
         return songs.firstOrNull { candidate ->
             !candidate.isUtage &&
+                candidate.isDisabled != true &&
                 candidate.isDX != song.isDX &&
                 candidate.title == song.title &&
                 candidate.basicInfo.genre == song.basicInfo.genre
@@ -3270,21 +3214,14 @@ class DataStore(context: Context) {
 
     fun best35AndBest15(): Best50Summary {
         val region = serverRegion
-        var matching = true
         val oldList = ArrayList<ProberRecord>()
         val newList = ArrayList<ProberRecord>()
 
         for (rec in records) {
-            val song = songsById[rec.songId]
-            if (song == null) {
-                if (deletedSongsById.containsKey(rec.songId) || rec.songId in unresolvableDeletedSongIds) {
-                    continue
-                }
-                if (region == MaimaiConstants.ServerRegion.CN || !cnSongsById.containsKey(rec.songId)) {
-                    matching = false
-                }
+            if (rec.type == "utage" || rec.levelIndex >= 10 || rec.songId >= 100_000) {
                 continue
             }
+            val song = songsById[rec.songId] ?: continue
             if (song.isUtage || song.isDisabled == true || song.chartArrayIndex(rec.levelIndex) == null) continue
             val projected = rec.projected(onto = song, region = region)
             if (song.basicInfo.isNew) {
@@ -3298,8 +3235,7 @@ class DataStore(context: Context) {
         newList.sortWith(recordComparator)
         return Best50Summary(
             b35 = oldList.take(35),
-            b15 = newList.take(15),
-            isMatching = matching
+            b15 = newList.take(15)
         )
     }
 
@@ -3310,6 +3246,16 @@ class DataStore(context: Context) {
         val raw = runCatching { prefs.getLong(key, -1L) }.getOrDefault(-1L)
         if (raw <= 0L) return null
         return if (raw < 100_000_000_000L) raw * 1000L else raw
+    }
+
+    private fun writeOptionalString(key: String, value: String?) {
+        val editor = prefs.edit()
+        if (value == null) {
+            editor.remove(key)
+        } else {
+            editor.putString(key, value)
+        }
+        editor.apply()
     }
 
     private fun writeOptionalEpochMs(key: String, value: Long?) {
@@ -3325,6 +3271,15 @@ class DataStore(context: Context) {
     companion object {
         private val SYNC_TIME_FORMATTER: DateTimeFormatter =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
+
+        fun migrateLegacyPlateScopeId(legacyIndex: Int, scopes: List<PlateCheckScope>): String? {
+            val legacyOrder = scopes.filter { it.id != "覇者" }
+            return if (legacyIndex in legacyOrder.indices) {
+                legacyOrder[legacyIndex].id
+            } else {
+                scopes.firstOrNull()?.id
+            }
+        }
 
         private val recordComparator = Comparator<ProberRecord> { lhs, rhs ->
             val raCmp = rhs.computedRating.compareTo(lhs.computedRating)
@@ -3348,21 +3303,38 @@ class DataStore(context: Context) {
 
         private fun buildSnapshotSync(list: List<SongData>): SongSnapshot {
             val enriched = SongData.mergingCounterpartAliases(list)
-            val sorted = enriched.sortedWith { a, b ->
-                val keyCmp = b.defaultSortKey.compareTo(a.defaultSortKey)
-                if (keyCmp != 0) keyCmp else b.id.compareTo(a.id)
-            }
+            val sorted = enriched.sortedWith(SongData.defaultSortComparator)
             val seenIds = HashSet<String>(sorted.size)
             val ordered = sorted.filter { seenIds.add(it.id) }
             val map = HashMap<Int, SongData>(ordered.size)
+            val byLevel = HashMap<String, MutableList<LevelCheckChartItem>>()
             for (song in ordered) {
                 if (song.numericId > 0) {
                     map[song.numericId] = song
                 }
+                if (!song.isUtage && song.isDisabled != true) {
+                    for (chart in song.resolvedCharts) {
+                        byLevel.getOrPut(chart.level) { mutableListOf() }
+                            .add(LevelCheckChartItem(song = song, chart = chart))
+                    }
+                }
+            }
+            val levelBuckets = HashMap<String, List<LevelCheckDSBucket>>(byLevel.size)
+            for ((level, items) in byLevel) {
+                val grouped = items.groupBy { (it.chart.ds * 10.0).roundToInt() }
+                levelBuckets[level] = grouped.keys
+                    .sortedDescending()
+                    .map { tenths ->
+                        LevelCheckDSBucket(
+                            ds = tenths / 10.0,
+                            items = grouped[tenths].orEmpty()
+                        )
+                    }
             }
             return SongSnapshot(
                 songs = ordered,
                 songsById = map,
+                levelCheckBuckets = levelBuckets,
                 maxNotes = MaxNotesStats.compute(ordered)
             )
         }

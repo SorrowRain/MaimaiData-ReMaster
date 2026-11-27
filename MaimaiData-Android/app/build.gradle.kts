@@ -42,8 +42,8 @@ android {
         applicationId = "dev.sorrowrain.maimaidata"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.2.0"
+        versionCode = 7
+        versionName = "1.2.1"
 
         buildConfigField("String", "SYNC_SERVICE_HOST", "\"${escapeBuildConfigLiteral(syncServiceHost)}\"")
         buildConfigField("String", "SYNC_SERVICE_ACCESS_KEY", "\"${escapeBuildConfigLiteral(syncServiceAccessKey)}\"")

@@ -27,7 +27,7 @@
   - 每个本地成绩档案拥有独立的 UUID（小写），并可同时绑定 **国服直连 (`selfHosted`)**、**落雪咖啡屋 (`lxns`)**、**水鱼查分器 (`divingFish`)** 三个渠道，共享同一份本地成绩单，支持按档案独立设置自定义名称 (`customNickname`) 与 B50 玩家图片名称 (`b50PlayerName`)。
   - **加密隔离存储与内置直连配置**：闭源同步后端域名与密钥于编译期通过 `Local.xcconfig`（iOS `Info.plist`）/ `local.properties`（Android `BuildConfig`）注入并由 `SyncServiceConfig` 解析，界面不暴露任何服务器地址/密钥输入；启动时主动清理历史遗留的 `self_hosted_endpoint_v1` 槽位。档案元数据存入 `player_identities_v3`，各渠道密钥/令牌分别隔离存入 `identity_sh_<uuid>` / `identity_lxns_<uuid>` / `identity_df_<uuid>`（iOS Keychain / AndroidKeyStore AES-256-GCM）。读取安全存储失败时触发 `loadFailed` 写保护锁，禁止覆写档案与凭据。
   - **成绩与趋势快照隔离**：本地成绩缓存按档案 UUID 隔离为 `records_identity_<uuid>.json`（由 v2 `ScoreProfile` 1:1 无启发式升级而来），每次同步后仅在国服曲库已加载时追加纯净国服 `cnSongsById` B50 趋势快照至 `history_identity_<uuid>.jsonl`（`SyncHistoryStore`，写入前修复残缺尾行，首次完整同步标记 `isBadgeBaseline = true`）；历史遗留全局 `customNickname` 通过 `migrateLegacyB50Nickname` 自动迁移至所有未设置自定义名称的档案（无覆写）；各档案通过 `hasMixedScoreSources` 标记防止解绑或切端后丢失其它渠道成绩。
-  - **已删除国服曲目解析层与纯净国服上传过滤**：同步结果包含国服当前曲库缺失且 ID 已打过的曲目时，仅在国服曲库新鲜确认后通过 Zetaraku / DXDataIdMap 解析还原基础元信息（跳过 `regions.cn == true` 与 `CiRCLE`/`CiRCLE PLUS`/`MAGiCAL` 版本曲目，避免国服新曲误判删除）并缓存为 `deleted_cn_songs.json`（列表与详情标注「已删除」，国服 Rating 快照与上传自动跳过），仅展示 `playedSongIds` 中命中的删除曲；绑定查分器写入云端前严格 Fail-Closed 校验 `cnSongsById` 非空且单曲可上传（水鱼写回需先成功拉取 `music_data` 曲名映射；排除 `0%`、已删除曲与 `isDisabled` 谱面），并在 `WritebackSummary` 中统计跳过条数。
+  - **严格按当前区服曲库展示与纯净国服上传过滤**：三个区服（国服/国际服/日服）均严格以当前服务器有效曲库为准，曲目列表隐藏所有 `isDisabled == true` 曲目，B50 与排序列表自动过滤屏蔽不在当前区服曲库中的删除曲或跨服曲目（不再展示删除曲占位或曲库不匹配警告）；绑定查分器写入云端前仍严格 Fail-Closed 校验 `cnSongsById` 非空且单曲可上传（水鱼写回需先成功拉取 `music_data` 曲名映射；排除 `0%`、已删除曲与 `isDisabled` 谱面），并在 `WritebackSummary` 中统计跳过条数。
 - **同步模式、多端并发合并与管理层级**：
   1. **统一同步调度 (`SyncPlan` / `pullMergedProbers`)**：
      - 已绑定国服直连时，「同步成绩」默认执行国服直连 **快速同步**；仅绑定双查分器且未绑定国服直连时，并发拉取落雪与水鱼成绩并执行本地最优合并 (`PULL_MERGED`)，单一渠道失败仍保留另一端成功结果。
@@ -54,5 +54,8 @@
    - 国际服（`intl`）：`CiRCLE PLUS` + `CiRCLE`（及未来 `MAGiCAL`）计入 B15，`AP / AP+` 单曲 Rating 额外 `+1`。
    - 只要存在激活成绩档案（`isLoggedIn`），三个区服下的歌曲详情页「分段 Rating 对照」均完整展示三列（`达成率 / 等级`、`单曲分`、`B50 可加`）。
 2. **三区服牌子进度表**：
-   - 国服直接读取 `plate_rules.json` 官方规则 + 当代在稼动版本预览。
-   - 日服与国际服完整支持旧框 `真`（排除 `70` `ジングルベル`）、`超`～`紫`、`菫`（排除 `853` `前前前世`）、`白`～`輝`、`舞 / 覇者`（排除 `前前前世`，且仅开放旧框时代 65 首 `Re:MASTER` = 国服 59 首 `∪ [146, 668, 731, 792, 826, 827]`），以及 DX 时代每半代一牌（`熊`、`華`、`爽`、`煌`、`宙`、`星`、`祭`、`祝`、`双`、`宴`、`鏡`、`彩`、`丸`、`廻`）与当代新作预览。
+   - **国服官方规则解析**：读取 `plate_rules.json`（由 `/api/v0/maimai/plate/list` 的 `required` 提取）+ 当代在稼动版本预览。解析 `required` 时严格按 `req.difficulties` 归类（`{4}` 归入 `Re:MASTER`，`⊆ {0,1,2,3}` 归入 `Basic..Master`，兼容任意配列顺序），并在旧缓存含 `"舞 / 覇者 · 旧框全曲"` 时规范化为独立牌子。
+   - **`舞` 与 `覇者` 拆分**：三区服均将旧框全曲拆分为 **「`舞 · 旧框全曲`」（SSS / FC / AP / FSD 目标，含旧框 `Re:MASTER`）** 与 **「`覇者 · 旧框全曲`」（Clear 目标，达成条件为 `achievements >= 80.0%`，同样覆盖 `Basic..Master` + 旧框 `Re:MASTER`）**；历史偏好下标按非 `覇者` 顺序无损迁移至持久化 `scope.id`。`真 · maimai ~ PLUS` 无「将」牌，`hasJiangBadge = false` 时底部注明 `真代无「将」牌，SSS 仅作统计`。
+   - **日服与国际服范围**：完整支持旧框 `真`（排除 `70` `ジングルベル`）、`超`～`紫`、`菫`（排除 `853` `前前前世`）、`白`～`輝`、`舞`、`覇者`（排除 `前前前世`，且仅开放旧框时代 65 首 `Re:MASTER` = 国服 59 首 `∪ [146, 668, 731, 792, 826, 827]`），以及 DX 时代每半代一牌（`熊`、`華`、`爽`、`煌`、`宙`、`星`、`祭`、`祝`、`双`、`宴`、`鏡`、`彩`、`丸`、`廻`）与当代新作预览。
+   - **单难度统计、难度下拉与三态谱面编码**：完成度统计卡片在「仅看未达成」旁保留难度切换下拉（默认 `MAS`，需白谱的牌子包含 `Re:MAS`），顶部首数与 4 格统计按钮按当前选定难度的谱面数统计；单曲方块按「未游玩全亮无遮罩 -> 已游玩未达成 34% 暗罩（仅 SSS/CLEAR 模式叠 `52×24` 评级图，FC/AP/FSD 模式不画评级图与低阶标）-> 已达成 60% 暗罩 + 对应徽标（`52×24` / `32×32`）+ 右下角绿色完成对勾」编码，`Re:MASTER` 使用外紫 + 内淡紫白双层 3pt/3dp 边框以与 `Master` 明确区分。
+3. **三区服曲库默认排序**：国服（LXNS 谱面级 `release_date` 回退歌曲 `release_date`）与日服/国际服（Zetaraku `releaseDate`，跨版本新增 DX 谱或国际服版本覆盖回退对应版本首日）统一按 **上线日期 (`YYYY-MM-DD`) 倒序** 排列，同日按 `defaultSortKey` / `numericId` 倒序稳定兜底；老版本本地国服缓存缺失 `release_date` 时启动自动触发一次增量同步回填。

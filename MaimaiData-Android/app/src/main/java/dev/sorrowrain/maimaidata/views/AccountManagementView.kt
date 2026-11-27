@@ -55,7 +55,7 @@ fun AccountManagementScreen(
     var warningMessage by remember { mutableStateOf<String?>(null) }
     val isMultiProfile = store.identities.size > 1
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(title = "成绩档案", onBack = onBack)
@@ -76,8 +76,7 @@ fun AccountManagementScreen(
                 ) {
                     if (store.credentialStoreLoadFailed) {
                         AppCard(
-                            padding = AppTheme.cardPadding,
-                            tint = AppTheme.warning
+                            padding = AppTheme.cardPadding
                         ) {
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
@@ -130,7 +129,6 @@ fun AccountManagementScreen(
 
                                     AppInsetRow(
                                         title = identity.primaryDisplayName,
-                                        subtitle = identity.boundChannelsSummary,
                                         showsChevron = true,
                                         modifier = Modifier
                                             .appInsetRowHighlight(isCurrent)

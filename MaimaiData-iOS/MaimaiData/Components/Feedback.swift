@@ -114,10 +114,7 @@ struct SyncStatusBanner: View {
     var body: some View {
         let isLoading = store.isLoadingLocalData || store.isSyncingSongs
         if isLoading || store.syncNotice != nil {
-            AppCard(
-                padding: AppTheme.compactCardPadding,
-                tint: isLoading ? AppTheme.accent : AppTheme.warning
-            ) {
+            AppCard(padding: AppTheme.compactCardPadding) {
                 VStack(alignment: .leading, spacing: AppTheme.Space.s) {
                     HStack(alignment: .center, spacing: AppTheme.itemSpacing) {
                         if isLoading {
@@ -161,5 +158,19 @@ struct SyncStatusBanner: View {
             }
             .accessibilityElement(children: .contain)
         }
+    }
+}
+
+/// Centered loading indicator paired with a secondary caption (mirrors Android `AppLoadingState`).
+struct AppLoadingState: View {
+    let message: String
+    var topPadding: CGFloat = AppTheme.Space.xl
+
+    var body: some View {
+        ProgressView(message)
+            .font(AppTheme.Typography.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.top, topPadding)
     }
 }

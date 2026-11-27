@@ -11,11 +11,18 @@ enum AppTheme {
     // MARK: - Brand & Accent Colors
     static let accent = Color(hex: 0x1668DC)
     static let accentBright = Color(hex: 0x2B88FF)
+    /// Elevated dark-mode blue for text over sheetCard/raised surfaces (`#4EA1FF`).
+    static let accentBrightElevated = Color(hex: 0x4EA1FF)
     /// High-contrast brand blue for foreground text (dark mode automatically uses `accentBright`).
     static let accentText = Color.adaptive(light: accent, dark: accentBright)
+    static let accentTextElevated = Color.adaptive(light: accent, dark: accentBrightElevated)
     static let favoritePink = Palette.noteBreak
     static let destructive = Color(.systemRed)
     static let warning = Color(.systemOrange)
+
+    static func accentText(for surfaceLevel: AppSurfaceLevel) -> Color {
+        surfaceLevel == .sheet ? accentTextElevated : accentText
+    }
 
     // MARK: - Semantic Palette (game terms + shared surfaces; values are locked)
     enum Palette {
@@ -27,6 +34,12 @@ enum AppTheme {
 
         // Chart / delta
         static let chartRemaster = Color(hex: 0x762D8C)
+        /// Solid lavender-white Re:MASTER surface & deep-purple text in dark mode (single source of truth).
+        static let remasterDarkFill = Color(hex: 0xECE2F4)
+        static let remasterDarkText = Color(hex: 0x43155F)
+        static let remasterDarkSubtleFill = Color(hex: 0xECE2F4).opacity(0.20)
+        static let remasterDarkSubtleText = Color(hex: 0xF0E8F7)
+        static let remasterDarkSubtleBorder = Color(hex: 0xECE2F4).opacity(0.55)
         static let deltaUp = Color(hex: 0xE53935)
         static let deltaDown = Color(hex: 0x1E8E3E)
 
@@ -79,21 +92,32 @@ enum AppTheme {
         static let genreUtageText = Color(hex: 0x8F1863)
         static let genreOtherText = Color(hex: 0x125BB8)
 
-        // Checklist stat pills
+        // Checklist stat pills (solid fill tokens darken SSS/AP for >= 4.5:1 white text contrast)
         static let statSSS = Color(hex: 0xB46900)
+        static let statSSSFill = Color(hex: 0xA35F00)
         static let statFC = Color(hex: 0x237818)
         static let statAP = Color(hex: 0xC85A00)
+        static let statAPFill = Color(hex: 0xB55000)
         static let statFSD = Color(hex: 0x0A6BA1)
 
         // Level progress header tint
         static let progressAccent = noteHold
 
-        // Shared surfaces, page gradients & hairlines
-        static let surfaceDark = Color(hex: 0x172135)
-        static let hairline = Color(hex: 0x0F2952)
+        // Neutral dark & light surfaces
+        static let pageDark = Color(hex: 0x0F0F10)
+        static let surfaceDark = Color(hex: 0x1A1A1C)
+        static let insetDark = Color(hex: 0x242427)
+        static let sheetDark = Color(hex: 0x1C1C1E)
+        static let sheetCardDark = Color(hex: 0x2A2A2D)
+        static let sheetInsetDark = Color(hex: 0x343437)
+        static let raisedDark = Color(hex: 0x2E2E32)
+
+        static let pageLight = Color(hex: 0xF2F2F7)
+        static let sheetLight = Color(hex: 0xF2F2F7)
+        static let sheetBackground = Color.adaptive(light: sheetLight, dark: sheetDark)
+
+        static let hairline = Color.black
         static let genreGameCardFill = Color(hex: 0x398428)
-        static let pageDarkGradient = [Color(hex: 0x0B1120), Color(hex: 0x0F172A), Color(hex: 0x111827)]
-        static let pageLightGradient = [Color(hex: 0xE8F0FC), Color(hex: 0xF1F5FB), Color(hex: 0xEDF2FA)]
     }
 
     // MARK: - Spacing & Sizing
@@ -159,37 +183,49 @@ enum AppTheme {
     }
 }
 
+enum AppSurfaceLevel: Equatable {
+    case page
+    case sheet
+}
+
+private struct AppSurfaceLevelKey: EnvironmentKey {
+    static let defaultValue: AppSurfaceLevel = .page
+}
+
+extension EnvironmentValues {
+    var appSurfaceLevel: AppSurfaceLevel {
+        get { self[AppSurfaceLevelKey.self] }
+        set { self[AppSurfaceLevelKey.self] = newValue }
+    }
+}
+
 struct AppPageBackground: View {
     @Environment(\.colorScheme) private var colorScheme
-    var tint: Color = AppTheme.accent
 
     var body: some View {
-        LinearGradient(
-            colors: colorScheme == .dark
-                ? AppTheme.Palette.pageDarkGradient
-                : AppTheme.Palette.pageLightGradient,
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .overlay(alignment: .top) {
-            LinearGradient(
-                colors: [
-                    tint.opacity(colorScheme == .dark ? 0.16 : 0.10),
-                    .clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 260)
-        }
-        .ignoresSafeArea()
+        (colorScheme == .dark ? AppTheme.Palette.pageDark : AppTheme.Palette.pageLight)
+            .ignoresSafeArea()
     }
 }
 
 extension View {
-    func appPageBackground(tint: Color = AppTheme.accent) -> some View {
+    func appPageBackground() -> some View {
         background {
-            AppPageBackground(tint: tint)
+            AppPageBackground()
         }
+    }
+
+    func appSurfaceLevel(_ level: AppSurfaceLevel) -> some View {
+        environment(\.appSurfaceLevel, level)
+    }
+
+    func appSheetContainer() -> some View {
+        appSurfaceLevel(.sheet)
+            .presentationBackground(AppTheme.Palette.sheetBackground)
+    }
+
+    /// Cap Dynamic Type size inside dense multi-column grids / badge rows so layout holds cleanly.
+    func appDenseDynamicType() -> some View {
+        dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 }

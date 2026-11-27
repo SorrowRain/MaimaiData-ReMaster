@@ -19,6 +19,7 @@ struct AppCapsuleLabel: View {
     @Environment(\.colorScheme) private var colorScheme
     let text: String
     var tint: Color = AppTheme.accent
+    var isNeutral: Bool? = nil
     var style: Style = .count
     var onRemove: (() -> Void)? = nil
 
@@ -37,7 +38,7 @@ struct AppCapsuleLabel: View {
     private var capsuleBody: some View {
         let isDark = colorScheme == .dark
         let spec = resolvedSpec
-        let isNeutral = tint == .secondary
+        let useNeutral = isNeutral ?? (tint == .secondary || style.isCount)
 
         return HStack(spacing: AppTheme.Space.xs) {
             if let prefix = spec.prefix {
@@ -47,6 +48,7 @@ struct AppCapsuleLabel: View {
             Text(text)
                 .font(spec.font)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .contentTransition(.numericText())
             if onRemove != nil {
                 Image(systemName: "xmark")
@@ -54,20 +56,25 @@ struct AppCapsuleLabel: View {
                     .opacity(0.75)
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, spec.hPadding)
         .padding(.vertical, spec.vPadding)
         .background(
-            tint.opacity(isNeutral ? 0.10 : (isDark ? max(spec.bgOpacity, 0.22) : spec.bgOpacity)),
+            useNeutral
+                ? Color.primary.opacity(isDark ? 0.10 : 0.06)
+                : tint.opacity(isDark ? max(spec.bgOpacity, 0.22) : spec.bgOpacity),
             in: Capsule()
         )
         .overlay(
             Capsule().strokeBorder(
-                tint.opacity(isDark && spec.strokeOpacity > 0 ? max(spec.strokeOpacity, 0.42) : spec.strokeOpacity),
+                useNeutral
+                    ? Color.primary.opacity(spec.strokeOpacity > 0 ? 0.18 : 0)
+                    : tint.opacity(isDark && spec.strokeOpacity > 0 ? max(spec.strokeOpacity, 0.42) : spec.strokeOpacity),
                 lineWidth: spec.strokeOpacity > 0 ? 0.8 : 0
             )
         )
         .foregroundStyle(
-            isNeutral
+            useNeutral
                 ? Color.secondary
                 : (isDark ? tint.brightened(toAtLeast: 1.0, maxSaturation: 0.5) : tint)
         )
@@ -94,6 +101,13 @@ struct AppCapsuleLabel: View {
         case .metric(let prefix):
             return Spec(font: AppTheme.Typography.heroTitle, hPadding: 10, vPadding: 4, bgOpacity: 0.12, strokeOpacity: 0, prefix: prefix)
         }
+    }
+}
+
+private extension AppCapsuleLabel.Style {
+    var isCount: Bool {
+        if case .count = self { return true }
+        return false
     }
 }
 
@@ -167,7 +181,10 @@ struct AppValueBadge: View {
         Text(text)
             .font(AppTheme.Typography.captionMetaBold)
             .foregroundStyle(isActive ? AppTheme.accentText : .secondary)
-            .frame(width: 44, height: 24)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 44, minHeight: 24)
             .background(
                 isActive
                     ? AppTheme.accent.opacity(isDark ? 0.22 : 0.13)
@@ -177,36 +194,45 @@ struct AppValueBadge: View {
     }
 }
 
-/// Statistic tile: caption title above value, tinted background (supports optional active selection state).
+/// Statistic tile: caption title above value, tinted background (solid active fill, translucent unselected fill).
 struct AppStatTile: View {
     @Environment(\.colorScheme) private var colorScheme
     let title: String
     let value: String
     let tint: Color
+    var fillTint: Color? = nil
     var isSelected: Bool = false
 
     var body: some View {
         let isDark = colorScheme == .dark
-        let fillOpacity: Double = isSelected ? (isDark ? 0.26 : 0.18) : (isDark ? 0.11 : 0.08)
-        let strokeOpacity: Double = isSelected ? (isDark ? 0.90 : 0.78) : 0.22
+        let shape = RoundedRectangle(cornerRadius: AppTheme.Radius.tile, style: .continuous)
+        let activeFill = fillTint ?? tint
+        let unselectedTitleColor = isDark
+            ? tint.brightened(toAtLeast: 0.95, maxSaturation: 0.6)
+            : tint
 
         VStack(spacing: 3) {
             Text(title)
                 .font(AppTheme.Typography.caption2Bold)
-                .foregroundStyle(isDark ? tint.brightened(toAtLeast: 0.95, maxSaturation: 0.6) : tint)
+                .foregroundStyle(isSelected ? Color.white : unselectedTitleColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             Text(value)
                 .font(AppTheme.Typography.captionMeta)
-                .foregroundStyle(.primary)
+                .foregroundStyle(isSelected ? Color.white.opacity(0.95) : .primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .contentTransition(.numericText())
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 44)
         .padding(.vertical, AppTheme.Space.s)
-        .background(tint.opacity(fillOpacity), in: RoundedRectangle(cornerRadius: AppTheme.Radius.tile, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.tile, style: .continuous)
-                .strokeBorder(tint.opacity(strokeOpacity), lineWidth: isSelected ? 1.8 : 1)
+        .padding(.horizontal, AppTheme.Space.xs)
+        .background(
+            isSelected ? activeFill : tint.opacity(isDark ? 0.14 : 0.10),
+            in: shape
         )
-        .contentShape(RoundedRectangle(cornerRadius: AppTheme.Radius.tile, style: .continuous))
+        .contentShape(shape)
+        .appDenseDynamicType()
     }
 }
 
@@ -220,17 +246,17 @@ struct DifficultyLevelBadge: View {
         let isDark = colorScheme == .dark
         let shape = RoundedRectangle(cornerRadius: AppTheme.Radius.badge, style: .continuous)
         let fgColor: Color = if isRemaster {
-            isDark ? AppTheme.Palette.boardMainRemaster : AppTheme.Palette.chartRemaster
+            isDark ? AppTheme.Palette.remasterDarkText : AppTheme.Palette.chartRemaster
         } else {
             difficulty.readableForeground
         }
         let bgColor: Color = if isRemaster {
-            isDark ? difficulty.color.opacity(0.24) : Color.white
+            isDark ? AppTheme.Palette.remasterDarkFill : Color.white
         } else {
             difficulty.solidFill(isDark: isDark)
         }
         let strokeColor: Color = if isRemaster {
-            isDark ? AppTheme.Palette.boardMainRemaster.opacity(0.65) : difficulty.color
+            isDark ? difficulty.color.opacity(0.45) : difficulty.color
         } else {
             Color.black.opacity(0.08)
         }
@@ -405,35 +431,30 @@ struct FilterCapsuleChip: View {
     let action: () -> Void
 
     var body: some View {
+        let unselectedFill: Color = colorScheme == .dark
+            ? Color.white.opacity(0.07)
+            : AppTheme.Palette.hairline.opacity(0.055)
+        let strokeColor: Color = isSelected
+            ? Color.white.opacity(0.28)
+            : (colorScheme == .dark
+                ? Color.white.opacity(0.14)
+                : AppTheme.Palette.hairline.opacity(0.08))
+
         Button(action: action) {
             Text(title)
                 .font(AppTheme.Typography.tag)
+                .lineLimit(1)
                 .padding(.horizontal, AppTheme.Space.m)
                 .padding(.vertical, 7)
                 .background(
-                    isSelected
-                        ? AnyShapeStyle(selectedColor.gradient)
-                        : AnyShapeStyle(
-                            colorScheme == .dark
-                                ? Color.white.opacity(0.07)
-                                : AppTheme.Palette.hairline.opacity(0.055)
-                        ),
+                    isSelected ? AnyShapeStyle(selectedColor.gradient) : AnyShapeStyle(unselectedFill),
                     in: Capsule()
                 )
-                .overlay(
-                    Capsule().strokeBorder(
-                        isSelected
-                            ? Color.white.opacity(0.28)
-                            : (colorScheme == .dark
-                                ? Color.white.opacity(0.14)
-                                : AppTheme.Palette.hairline.opacity(0.08)),
-                        lineWidth: 1
-                    )
-                )
+                .overlay(Capsule().strokeBorder(strokeColor, lineWidth: 1))
                 .foregroundStyle(isSelected ? .white : .primary)
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ScalePressButtonStyle())
         .accessibilityValue(isSelected ? "已选中" : "未选中")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

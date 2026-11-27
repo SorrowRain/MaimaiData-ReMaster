@@ -24,7 +24,8 @@ enum LXNSCatalogConverter {
         "白": ("白", "白 · MiLK", "maimai_milk"),
         "雪": ("雪", "雪 · MiLK PLUS", "maimai_milk_plus"),
         "輝": ("輝", "輝 · FiNALE", "maimai_finale"),
-        "覇者/舞": ("舞", "舞 / 覇者 · 旧框全曲", "maimai_finale"),
+        "覇者/舞": ("舞", "舞 · 旧框全曲", "maimai_finale"),
+        "舞/覇者": ("舞", "舞 · 旧框全曲", "maimai_finale"),
         "熊/華": ("熊華", "熊 / 華 · 舞萌DX", "maimaidx_cn"),
         "爽/煌": ("爽煌", "爽 / 煌 · 舞萌DX 2021", "maimaidx_2021"),
         "宙/星": ("宙星", "宙 / 星 · 舞萌DX 2022", "maimaidx_2022"),
@@ -156,6 +157,7 @@ enum LXNSCatalogConverter {
                         type: MaimaiConstants.chartTypeDX,
                         alias: resolvedAliases,
                         comment: comment,
+                        releaseDate: u.releaseDate ?? song.releaseDate,
                         isDisabled: isDisabledFlag
                     )
                 )
@@ -193,6 +195,7 @@ enum LXNSCatalogConverter {
                         title: song.title,
                         type: MaimaiConstants.chartTypeSD,
                         alias: resolvedAliases,
+                        releaseDate: stdDiffs.first?.releaseDate ?? song.releaseDate,
                         isDisabled: isDisabledFlag
                     )
                 )
@@ -230,6 +233,7 @@ enum LXNSCatalogConverter {
                         title: song.title,
                         type: MaimaiConstants.chartTypeDX,
                         alias: resolvedAliases,
+                        releaseDate: dxDiffs.first?.releaseDate ?? song.releaseDate,
                         isDisabled: isDisabledFlag
                     )
                 )
@@ -261,20 +265,37 @@ enum LXNSCatalogConverter {
         for plate in response.plates {
             guard plate.genre == "実績",
                   let reqs = plate.required,
-                  let firstReq = reqs.first else { continue }
+                  !reqs.isEmpty else { continue }
             let name = plate.name
             let isVersionPlate = (name == "覇者") || validSuffixes.contains(where: { name.hasSuffix($0) })
             guard isVersionPlate else { continue }
 
-            let b2mIds = (firstReq.songs ?? []).map { normalizeSongId(id: $0.id, type: $0.type) }
+            var b2mIds: [Int] = []
+            var b2mSet = Set<Int>()
+            var remIds: [Int] = []
+            var remSet = Set<Int>()
+            for req in reqs {
+                let ids = (req.songs ?? []).map { normalizeSongId(id: $0.id, type: $0.type) }
+                guard !ids.isEmpty else { continue }
+                let diffs = Set(req.difficulties ?? [])
+                if diffs == [4] {
+                    for id in ids where remSet.insert(id).inserted { remIds.append(id) }
+                } else if !diffs.isEmpty && diffs.isSubset(of: [0, 1, 2, 3]) {
+                    for id in ids where b2mSet.insert(id).inserted { b2mIds.append(id) }
+                } else if diffs.contains(4) {
+                    for id in ids {
+                        if b2mSet.insert(id).inserted { b2mIds.append(id) }
+                        if remSet.insert(id).inserted { remIds.append(id) }
+                    }
+                } else if b2mIds.isEmpty {
+                    for id in ids where b2mSet.insert(id).inserted { b2mIds.append(id) }
+                } else {
+                    for id in ids where remSet.insert(id).inserted { remIds.append(id) }
+                }
+            }
             guard b2mIds.count > 1 else { continue }
-            let remIds: [Int] = reqs.count > 1
-                ? (reqs[1].songs ?? []).map { normalizeSongId(id: $0.id, type: $0.type) }
-                : []
 
             let prefix = (name == "覇者") ? "覇者" : String(name.prefix(1))
-            let b2mSet = Set(b2mIds)
-            let remSet = Set(remIds)
 
             if let idx = drafts.firstIndex(where: { $0.b2mSet == b2mSet && $0.remSet == remSet }) {
                 if !drafts[idx].prefixes.contains(prefix) {
@@ -450,21 +471,66 @@ enum LXNSCatalogConverter {
     ) -> [PlateCheckScope] {
         switch region {
         case .cn:
-            return cnPlateGroups.map { group in
-                PlateCheckScope(
-                    id: group.id,
-                    title: group.title,
-                    versionAsset: group.resolvedVersionAsset,
-                    rule: .explicitIds(
-                        basicToMaster: Set(group.basicToMasterSongIds),
-                        remaster: Set(group.remasterSongIds)
-                    )
+            var seenHasya = false
+            return cnPlateGroups.flatMap { group -> [PlateCheckScope] in
+                let rule: PlateCheckScope.Rule = .explicitIds(
+                    basicToMaster: Set(group.basicToMasterSongIds),
+                    remaster: Set(group.remasterSongIds)
                 )
+                if group.id == "覇者" {
+                    guard !seenHasya else { return [] }
+                    seenHasya = true
+                    return [
+                        PlateCheckScope(
+                            id: "覇者",
+                            title: "覇者 · 旧框全曲",
+                            versionAsset: "maimai_finale",
+                            rule: rule,
+                            goal: .clear,
+                            hasJiangBadge: false
+                        )
+                    ]
+                }
+                let normalizedTitle = (group.id == "舞" && group.title.contains("覇者"))
+                    ? "舞 · 旧框全曲"
+                    : group.title
+                let hasJiang = group.id != "真" && (group.badges.isEmpty || group.badges.contains { $0.hasSuffix("将") })
+                var result = [
+                    PlateCheckScope(
+                        id: group.id,
+                        title: normalizedTitle,
+                        versionAsset: group.resolvedVersionAsset,
+                        rule: rule,
+                        goal: .standard,
+                        hasJiangBadge: hasJiang
+                    )
+                ]
+                if !seenHasya && (group.id == "舞" || group.badges.contains("覇者")) {
+                    seenHasya = true
+                    result.append(
+                        PlateCheckScope(
+                            id: "覇者",
+                            title: "覇者 · 旧框全曲",
+                            versionAsset: "maimai_finale",
+                            rule: rule,
+                            goal: .clear,
+                            hasJiangBadge: false
+                        )
+                    )
+                }
+                return result
             }
 
         case .intl, .jp:
             let cnMaiRemasterIds = Set(cnPlateGroups.first(where: { $0.id == "舞" })?.remasterSongIds ?? [])
             let sdRemasterIds = cnMaiRemasterIds.union(additionalOverseasSdRemasterIds)
+            let maiClassicRule: PlateCheckScope.Rule = .versions(
+                includedVersions: MaimaiConstants.overseasClassicVersions,
+                excludedIds: [853],
+                excludedStandardTitles: ["前前前世"],
+                sdRemasterIds: sdRemasterIds,
+                sdRemasterFallbackTitles: additionalOverseasSdRemasterTitles
+            )
 
             var scopes: [PlateCheckScope] = [
                 PlateCheckScope(
@@ -475,7 +541,8 @@ enum LXNSCatalogConverter {
                         includedVersions: ["maimai", "maimai PLUS"],
                         excludedIds: [70],
                         excludedStandardTitles: ["ジングルベル"]
-                    )
+                    ),
+                    hasJiangBadge: false
                 ),
                 PlateCheckScope(id: "超", title: "超 · GreeN", versionAsset: "maimai_green", rule: .versions(includedVersions: ["GreeN"])),
                 PlateCheckScope(id: "檄", title: "檄 · GreeN PLUS", versionAsset: "maimai_green_plus", rule: .versions(includedVersions: ["GreeN PLUS"])),
@@ -499,15 +566,19 @@ enum LXNSCatalogConverter {
                 PlateCheckScope(id: "輝", title: "輝 · FiNALE", versionAsset: "maimai_finale", rule: .versions(includedVersions: ["FiNALE"])),
                 PlateCheckScope(
                     id: "舞",
-                    title: "舞 / 覇者 · 旧框全曲",
+                    title: "舞 · 旧框全曲",
                     versionAsset: "maimai_finale",
-                    rule: .versions(
-                        includedVersions: MaimaiConstants.overseasClassicVersions,
-                        excludedIds: [853],
-                        excludedStandardTitles: ["前前前世"],
-                        sdRemasterIds: sdRemasterIds,
-                        sdRemasterFallbackTitles: additionalOverseasSdRemasterTitles
-                    )
+                    rule: maiClassicRule,
+                    goal: .standard,
+                    hasJiangBadge: true
+                ),
+                PlateCheckScope(
+                    id: "覇者",
+                    title: "覇者 · 旧框全曲",
+                    versionAsset: "maimai_finale",
+                    rule: maiClassicRule,
+                    goal: .clear,
+                    hasJiangBadge: false
                 ),
                 PlateCheckScope(id: "熊", title: "熊 · でらっくす", versionAsset: "maimaidx", rule: .versions(includedVersions: ["maimaiでらっくす"])),
                 PlateCheckScope(id: "華", title: "華 · でらっくす PLUS", versionAsset: "maimaidx_plus", rule: .versions(includedVersions: ["maimaiでらっくす PLUS"])),

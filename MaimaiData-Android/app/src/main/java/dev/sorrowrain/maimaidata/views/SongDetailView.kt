@@ -60,8 +60,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -70,6 +72,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sorrowrain.maimaidata.components.AppAutoShrinkText
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppEmptyState
 import dev.sorrowrain.maimaidata.components.AppErrorDialog
@@ -95,6 +98,7 @@ import dev.sorrowrain.maimaidata.models.RatingCalculator
 import dev.sorrowrain.maimaidata.models.ResolvedChart
 import dev.sorrowrain.maimaidata.models.SongData
 import dev.sorrowrain.maimaidata.services.LocalDataStore
+import dev.sorrowrain.maimaidata.theme.AppDenseFontScale
 import dev.sorrowrain.maimaidata.theme.AppPageBackground
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import dev.sorrowrain.maimaidata.theme.LocalIsDarkTheme
@@ -131,7 +135,7 @@ fun SongDetailScreen(
     var lastResolvedSong by remember { mutableStateOf<SongData?>(null) }
     val catalogRevision = store.catalogRevision
 
-    val song: SongData? = remember(activeSongId, catalogRevision, store.songsById, store.songs, store.deletedSongsById) {
+    val song: SongData? = remember(activeSongId, catalogRevision, store.songsById, store.songs) {
         store.songById(activeSongId)
             ?: lastResolvedSong?.let { prev ->
                 store.songs.firstOrNull {
@@ -154,8 +158,10 @@ fun SongDetailScreen(
     var showCoverZoom by rememberSaveable { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    val haptic = LocalHapticFeedback.current
     val copyToClipboard: (String, String) -> Unit = { value, label ->
         if (value.isNotBlank()) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             clipboard?.setPrimaryClip(ClipData.newPlainText(label, value))
             toastState.show("已复制$label：$value")
@@ -204,7 +210,7 @@ fun SongDetailScreen(
     val isFav = store.isFavorite(song)
     val counterpart = store.counterpartSong(song)
 
-    AppPageBackground(tint = genreColors.bg) {
+    AppPageBackground {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 topBar = {
@@ -429,14 +435,6 @@ private fun SongHeroHeaderCard(
                             onLongClick = { onCopyText(song.basicInfo.artist, "曲师") }
                         )
                     )
-
-                    if (song.isDisabled == true) {
-                        AppCapsuleLabel(
-                            text = "已删除",
-                            tint = Color.White,
-                            style = CapsuleStyle.Compact
-                        )
-                    }
                 }
             }
 
@@ -560,77 +558,80 @@ private fun DifficultySelectorRow(
     val isDark = LocalIsDarkTheme.current
     val chipShape = RoundedCornerShape(AppTheme.Radius.chip)
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-    ) {
-        chartsDesc.forEach { chart ->
-            val isSelected = chart.index == selectedChartIndex
-            val isRemaster = chart.difficulty == DifficultyType.REMASTER
-            val badgeTitle = if (song.isUtage) {
-                chart.kanji ?: chart.difficulty.shortName
-            } else {
-                chart.difficulty.shortName
-            }
+    AppDenseFontScale {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+        ) {
+            chartsDesc.forEach { chart ->
+                val isSelected = chart.index == selectedChartIndex
+                val isRemaster = chart.difficulty == DifficultyType.REMASTER
+                val badgeTitle = if (song.isUtage) {
+                    chart.kanji ?: chart.difficulty.shortName
+                } else {
+                    chart.difficulty.shortName
+                }
 
-            val bgColor = when {
-                isRemaster && isDark && !isSelected -> chart.difficulty.color.copy(alpha = 0.26f)
-                isRemaster && isSelected -> Color.White
-                isRemaster -> Color.White.copy(alpha = 0.65f)
-                isSelected -> chart.difficulty.solidFill(isDark)
-                else -> chart.difficulty.color.copy(alpha = if (isDark) 0.26f else 0.14f)
-            }
+                val bgColor = when {
+                    isRemaster && isDark && isSelected -> AppTheme.Palette.remasterDarkFill
+                    isRemaster && isDark -> AppTheme.Palette.remasterDarkSubtleFill
+                    isRemaster && isSelected -> Color.White
+                    isRemaster -> Color.White.copy(alpha = 0.65f)
+                    isSelected -> chart.difficulty.solidFill(isDark)
+                    else -> chart.difficulty.color.copy(alpha = if (isDark) 0.26f else 0.14f)
+                }
 
-            val fgColor = when {
-                isRemaster && isDark && !isSelected -> chart.difficulty.boardMainColor
-                isRemaster -> AppTheme.Palette.chartRemaster
-                isSelected -> chart.difficulty.readableForeground
-                isDark -> chart.difficulty.boardMainColor
-                else -> MaterialTheme.colorScheme.onSurface
-            }
+                val fgColor = when {
+                    isRemaster && isDark && isSelected -> AppTheme.Palette.remasterDarkText
+                    isRemaster && isDark -> AppTheme.Palette.remasterDarkSubtleText
+                    isRemaster -> AppTheme.Palette.chartRemaster
+                    isSelected -> chart.difficulty.readableForeground
+                    isDark -> chart.difficulty.boardMainColor
+                    else -> MaterialTheme.colorScheme.onSurface
+                }
 
-            val borderAlpha = when {
-                isSelected || isRemaster -> 1f
-                isDark -> 0.75f
-                else -> 0.45f
-            }
+                val borderColor = when {
+                    isRemaster && isDark && !isSelected -> AppTheme.Palette.remasterDarkSubtleBorder
+                    isSelected || isRemaster -> chart.difficulty.color
+                    isDark -> chart.difficulty.color.copy(alpha = 0.75f)
+                    else -> chart.difficulty.color.copy(alpha = 0.45f)
+                }
 
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(chipShape)
-                    .background(bgColor, chipShape)
-                    .border(
-                        width = if (isSelected) 2.dp else 1.dp,
-                        color = chart.difficulty.color.copy(alpha = borderAlpha),
-                        shape = chipShape
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(chipShape)
+                        .background(bgColor, chipShape)
+                        .border(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            color = borderColor,
+                            shape = chipShape
+                        )
+                        .semantics {
+                            selected = isSelected
+                            contentDescription = "$badgeTitle，等级 ${chart.level}"
+                        }
+                        .clickable(
+                            role = Role.Tab,
+                            onClick = { onSelectChart(chart.index) }
+                        )
+                        .padding(vertical = 9.dp, horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    AppAutoShrinkText(
+                        text = badgeTitle,
+                        style = AppTheme.AppTypography.captionBold,
+                        color = fgColor,
+                        minScale = 0.72f
                     )
-                    .semantics {
-                        selected = isSelected
-                        contentDescription = "$badgeTitle，等级 ${chart.level}"
-                    }
-                    .clickable(
-                        role = Role.Tab,
-                        onClick = { onSelectChart(chart.index) }
+                    AppAutoShrinkText(
+                        text = chart.level,
+                        style = AppTheme.AppTypography.badge,
+                        color = fgColor,
+                        minScale = 0.72f
                     )
-                    .padding(vertical = 9.dp, horizontal = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = badgeTitle,
-                    style = AppTheme.AppTypography.captionBold,
-                    color = fgColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = chart.level,
-                    style = AppTheme.AppTypography.badge,
-                    color = fgColor,
-                    maxLines = 1,
-                    softWrap = false
-                )
+                }
             }
         }
     }

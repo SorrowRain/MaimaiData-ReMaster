@@ -695,111 +695,35 @@ final class SyncEngineAndIdentityTests: XCTestCase {
         XCTAssertEqual(migrated.identities[1].customNickname, "已有名称")
     }
 
-    func testResolveDeletedCNSongsAndSongFilterPlayedDisabled() throws {
-        let regions = ZetarakuRegions(jp: false, intl: true, usa: false, cn: false)
-        let sheets = [
-            ZetarakuSheet(
-                type: "std",
-                difficulty: "basic",
-                level: "3",
-                levelValue: 3.0,
-                internalLevelValue: 3.0,
-                noteDesigner: "-",
-                noteCounts: ZetarakuNoteCounts(tap: 50, hold: 5, slide: 2, touch: nil, breakCount: 1, total: 58),
-                regions: regions,
-                regionOverrides: nil,
-                version: nil
-            ),
-            ZetarakuSheet(
-                type: "std",
-                difficulty: "advanced",
-                level: "6",
-                levelValue: 6.0,
-                internalLevelValue: 6.0,
-                noteDesigner: "-",
-                noteCounts: ZetarakuNoteCounts(tap: 90, hold: 8, slide: 6, touch: nil, breakCount: 2, total: 106),
-                regions: regions,
-                regionOverrides: nil,
-                version: nil
-            ),
-            ZetarakuSheet(
-                type: "std",
-                difficulty: "expert",
-                level: "10",
-                levelValue: 10.0,
-                internalLevelValue: 10.2,
-                noteDesigner: "CharterE",
-                noteCounts: ZetarakuNoteCounts(tap: 180, hold: 12, slide: 20, touch: nil, breakCount: 4, total: 216),
-                regions: regions,
-                regionOverrides: nil,
-                version: nil
-            ),
-            ZetarakuSheet(
-                type: "std",
-                difficulty: "master",
-                level: "13",
-                levelValue: 13.0,
-                internalLevelValue: 13.4,
-                noteDesigner: "CharterM",
-                noteCounts: ZetarakuNoteCounts(tap: 320, hold: 20, slide: 45, touch: nil, breakCount: 8, total: 393),
-                regions: regions,
-                regionOverrides: nil,
-                version: nil
-            )
-        ]
-        let zSong = ZetarakuSong(
-            songId: "revived_181",
-            category: "POPS＆アニメ",
-            title: "Revived Track",
-            artist: "Tester",
-            bpm: 150.0,
-            imageName: "revived_181.png",
-            version: "FESTiVAL",
-            releaseDate: nil,
-            comment: nil,
-            sheets: sheets
-        )
-        let catalog = ZetarakuCatalog(songs: [zSong])
-        let idMap = DXDataIdMap(
-            updatedAt: nil,
-            idsByKey: ["Revived Track|流行&动漫|\(MaimaiConstants.chartTypeSD)": 181]
-        )
-
-        let resolution = ZetarakuCatalogConverter.resolveDeletedCNSongs(
-            unknownIds: [181, 999_999],
-            catalog: catalog,
-            dxIdMap: idMap
-        )
-        XCTAssertEqual(resolution.resolved.count, 1)
-        XCTAssertEqual(resolution.unresolvableIds, [999_999])
-        let resolvedSong = try XCTUnwrap(resolution.resolved.first)
-        XCTAssertEqual(resolvedSong.id, "181")
-        XCTAssertEqual(resolvedSong.isDisabled, true)
-        XCTAssertEqual(resolvedSong.preferRemoteCover, true)
-        XCTAssertEqual(resolvedSong.ds, [3.0, 6.0, 10.2, 13.4])
-
+    func testSongFilterAlwaysHidesDisabledSongs() throws {
         let activeSong = try XCTUnwrap(try loadVectors().songs.first { !$0.isUtage })
-        let unplayedFiltered = SongFilter.apply(
-            SongFilterCriteria(),
-            to: [activeSong, resolvedSong],
-            favoriteIds: [],
-            enableAliasSearch: true,
-            enableCharterSearch: false,
-            region: .cn,
-            playedSongIds: []
+        let disabledSong = SongData(
+            basicInfo: activeSong.basicInfo,
+            charts: activeSong.charts,
+            ds: activeSong.ds,
+            oldDs: nil,
+            id: "181",
+            level: activeSong.level,
+            title: "Deleted Track",
+            type: activeSong.type,
+            alias: nil,
+            comment: nil,
+            remoteCoverName: nil,
+            preferRemoteCover: nil,
+            sortOrder: nil,
+            releaseDate: nil,
+            isDisabled: true
         )
-        XCTAssertEqual(unplayedFiltered.map(\.numericId), [activeSong.numericId])
 
-        let playedFiltered = SongFilter.apply(
+        let filtered = SongFilter.apply(
             SongFilterCriteria(),
-            to: [activeSong, resolvedSong],
+            to: [activeSong, disabledSong],
             favoriteIds: [],
             enableAliasSearch: true,
             enableCharterSearch: false,
-            region: .cn,
-            playedSongIds: [181]
+            region: .cn
         )
-        XCTAssertEqual(Set(playedFiltered.map(\.numericId)), [activeSong.numericId, 181])
+        XCTAssertEqual(filtered.map(\.numericId), [activeSong.numericId])
     }
 
     func testFailClosedWritebackWhenCNCatalogEmpty() throws {
@@ -866,79 +790,6 @@ final class SyncEngineAndIdentityTests: XCTestCase {
         XCTAssertEqual(recovered[0].customNickname, "")
         XCTAssertFalse(recovered[0].hasMixedScoreSources)
         XCTAssertNil(recovered[0].lastSyncMode)
-    }
-
-    func testResolveDeletedCNSongsSkipsActiveAndNewCNCircleSongs() throws {
-        let activeCNRegions = ZetarakuRegions(jp: true, intl: true, usa: false, cn: true)
-        let jpOnlyRegions = ZetarakuRegions(jp: true, intl: false, usa: false, cn: false)
-
-        let activeSong = ZetarakuSong(
-            songId: "active_cn_101",
-            category: "POPS＆アニメ",
-            title: "Active CN Track",
-            artist: "Tester",
-            bpm: 150.0,
-            imageName: "active_cn_101.png",
-            version: "FESTiVAL",
-            releaseDate: nil,
-            comment: nil,
-            sheets: [
-                ZetarakuSheet(
-                    type: "std",
-                    difficulty: "master",
-                    level: "13",
-                    levelValue: 13.0,
-                    internalLevelValue: 13.2,
-                    noteDesigner: "Charter",
-                    noteCounts: nil,
-                    regions: activeCNRegions,
-                    regionOverrides: nil,
-                    version: nil
-                )
-            ]
-        )
-        let circleSong = ZetarakuSong(
-            songId: "new_cn_circle_102",
-            category: "POPS＆アニメ",
-            title: "New CiRCLE Track",
-            artist: "Tester",
-            bpm: 160.0,
-            imageName: "new_cn_circle_102.png",
-            version: "CiRCLE",
-            releaseDate: nil,
-            comment: nil,
-            sheets: [
-                ZetarakuSheet(
-                    type: "dx",
-                    difficulty: "master",
-                    level: "13",
-                    levelValue: 13.0,
-                    internalLevelValue: 13.3,
-                    noteDesigner: "Charter",
-                    noteCounts: nil,
-                    regions: jpOnlyRegions,
-                    regionOverrides: nil,
-                    version: nil
-                )
-            ]
-        )
-
-        let catalog = ZetarakuCatalog(songs: [activeSong, circleSong])
-        let idMap = DXDataIdMap(
-            updatedAt: nil,
-            idsByKey: [
-                "Active CN Track|流行&动漫|\(MaimaiConstants.chartTypeSD)": 101,
-                "New CiRCLE Track|流行&动漫|\(MaimaiConstants.chartTypeDX)": 102
-            ]
-        )
-
-        let resolution = ZetarakuCatalogConverter.resolveDeletedCNSongs(
-            unknownIds: [101, 102],
-            catalog: catalog,
-            dxIdMap: idMap
-        )
-        XCTAssertTrue(resolution.resolved.isEmpty)
-        XCTAssertTrue(resolution.unresolvableIds.isEmpty)
     }
 
     func testSyncHistoryStoreRepairsTornLineBeforeAppending() throws {

@@ -16,13 +16,21 @@ object SongFilter {
         criteria: SongFilterCriteria,
         region: MaimaiConstants.ServerRegion
     ): SongFilterCriteria {
-        if (criteria.selectedVersions.isEmpty()) return criteria
-        val allowed = MaimaiConstants.searchVersionChips(region).toSet()
-        val pruned = criteria.selectedVersions.intersect(allowed)
-        return if (pruned == criteria.selectedVersions) {
+        val nextVersions = if (criteria.selectedVersions.isEmpty()) {
+            criteria.selectedVersions
+        } else {
+            val allowed = MaimaiConstants.searchVersionChips(region).toSet()
+            criteria.selectedVersions.intersect(allowed)
+        }
+        val nextDS = if (criteria.useExactDS) {
+            MaimaiConstants.clampExactDS(criteria.exactDS)
+        } else {
+            criteria.exactDS
+        }
+        return if (nextVersions == criteria.selectedVersions && nextDS == criteria.exactDS) {
             criteria
         } else {
-            criteria.copy(selectedVersions = pruned)
+            criteria.copy(selectedVersions = nextVersions, exactDS = nextDS)
         }
     }
 
@@ -32,8 +40,7 @@ object SongFilter {
         region: MaimaiConstants.ServerRegion = MaimaiConstants.ServerRegion.CN,
         favoriteIds: Set<String> = emptySet(),
         enableAliasSearch: Boolean = true,
-        enableCharterSearch: Boolean = false,
-        playedSongIds: Set<Int> = emptySet()
+        enableCharterSearch: Boolean = false
     ): List<SongData> {
         val query = normalizeSearchText(criteria.keyword)
         val queryNumericId = query.toIntOrNull()?.takeIf { it > 0 }
@@ -47,7 +54,7 @@ object SongFilter {
         val seqDiff = criteria.sortOption.filterDifficulty
 
         val filtered = songs.filter { song ->
-            if (song.isDisabled == true && song.numericId !in playedSongIds) {
+            if (song.isDisabled == true) {
                 return@filter false
             }
 
@@ -103,7 +110,7 @@ object SongFilter {
 
         return when (criteria.sortOption) {
             SongSortOption.DEFAULT_DESC ->
-                filtered.sortedByDescending { it.defaultSortKey }
+                filtered.sortedWith(SongData.defaultSortComparator)
             SongSortOption.EXPERT_ASC ->
                 filtered.sortedBy { it.ds.getOrElse(2) { 0.0 } }
             SongSortOption.EXPERT_DESC ->
@@ -128,7 +135,7 @@ object SongFilter {
         val bDs = b.ds.getOrElse(4) { 0.0 }
         val cmp = if (ascending) aDs.compareTo(bDs) else bDs.compareTo(aDs)
         if (cmp != 0) return cmp
-        return b.defaultSortKey.compareTo(a.defaultSortKey)
+        return SongData.defaultSortComparator.compare(a, b)
     }
 
     /** Normalizes full-width ASCII (`Ａ`..`Ｚ`, `０`..`９`, `　`) to half-width and lowercases. */

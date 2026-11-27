@@ -165,6 +165,7 @@ struct AppLabeledSliderRow: View {
     let range: ClosedRange<Double>
     var step: Double = 1
     var isActive: Bool = true
+    var enabled: Bool = true
     var accessibilityLabel: String? = nil
 
     var body: some View {
@@ -172,10 +173,14 @@ struct AppLabeledSliderRow: View {
             Text(label)
                 .font(AppTheme.Typography.inlineAction)
                 .foregroundStyle(.secondary)
-                .frame(width: 30, alignment: .leading)
-            AppValueBadge(text: valueText, isActive: isActive)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 30, alignment: .leading)
+            AppValueBadge(text: valueText, isActive: isActive && enabled)
             Slider(value: $value, in: range, step: step)
                 .tint(AppTheme.accent)
+                .disabled(!enabled)
+                .opacity(enabled ? 1 : 0.45)
                 .accessibilityLabel(accessibilityLabel ?? label)
                 .accessibilityValue(valueText)
         }

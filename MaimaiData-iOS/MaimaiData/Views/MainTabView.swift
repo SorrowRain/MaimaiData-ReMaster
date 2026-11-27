@@ -2,8 +2,8 @@ import SwiftUI
 
 struct MainTabView: View {
     @Environment(DataStore.self) private var store
-    @Environment(\.openURL) private var openURL
     @State private var selectedTab: Int = 0
+    @State private var updateSheetHeight: CGFloat = 320
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -39,14 +39,10 @@ struct MainTabView: View {
         ) { release in
             AppUpdateSheet(
                 release: release,
-                onPrimaryAction: {
-                    if IOSInstallChannel.current == .testFlight,
-                       let tfURL = URL(string: "itms-beta://") {
-                        openURL(tfURL)
-                    } else if let url = URL(string: release.htmlURL) {
-                        openURL(url)
+                onMeasuredHeight: { height in
+                    if height > 0, abs(updateSheetHeight - height) > 1 {
+                        updateSheetHeight = height
                     }
-                    store.availableAppUpdate = nil
                 },
                 onIgnore: {
                     store.ignoreAppUpdate(version: release.version)
@@ -55,17 +51,45 @@ struct MainTabView: View {
                     store.availableAppUpdate = nil
                 }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.height(max(240, updateSheetHeight))])
             .presentationDragIndicator(.visible)
+            .appSheetContainer()
         }
+    }
+}
+
+private struct SheetHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct NotesHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
 private struct AppUpdateSheet: View {
     let release: AppReleaseInfo
-    let onPrimaryAction: () -> Void
+    let onMeasuredHeight: (CGFloat) -> Void
     let onIgnore: () -> Void
     let onDismiss: () -> Void
+
+    @State private var measuredNotesHeight: CGFloat = 0
+
+    private var screenHeight: CGFloat {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        return scene?.screen.bounds.height ?? 844
+    }
+
+    private var maxNotesHeight: CGFloat {
+        min(300, screenHeight * 0.42)
+    }
 
     private enum NoteLine: Identifiable {
         case heading(id: Int, text: String)
@@ -109,98 +133,126 @@ private struct AppUpdateSheet: View {
         return output
     }
 
-    private var primaryTitle: String {
-        IOSInstallChannel.current == .testFlight ? "打开 TestFlight" : "前往下载"
-    }
-
     var body: some View {
+        let shouldScrollNotes = measuredNotesHeight > maxNotesHeight
         VStack(alignment: .leading, spacing: AppTheme.cardSpacing) {
             HStack(spacing: AppTheme.Space.s) {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.accentText(for: .sheet))
 
                 Text("发现新版本")
                     .font(AppTheme.Typography.cardTitle)
                     .foregroundStyle(.primary)
 
-                AppCapsuleLabel(text: "v\(release.version)", style: .count)
+                AppCapsuleLabel(text: "v\(release.version)", isNeutral: false, style: .count)
 
                 Spacer(minLength: 0)
-
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭")
             }
 
-            ScrollView {
-                AppCard(padding: AppTheme.cardPadding) {
-                    if parsedNotes.isEmpty {
-                        Text("已有新版本发布，建议更新以获得最新功能与体验优化。")
-                            .font(AppTheme.Typography.body)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        VStack(alignment: .leading, spacing: AppTheme.Space.s) {
-                            ForEach(Array(parsedNotes.enumerated()), id: \.element.id) { index, line in
-                                switch line {
-                                case let .heading(_, text):
-                                    Text(text)
-                                        .font(AppTheme.Typography.subheadlineBold)
-                                        .foregroundStyle(.primary)
-                                        .padding(.top, index == 0 ? 0 : AppTheme.Space.xs)
-                                case let .bullet(_, text):
-                                    HStack(alignment: .top, spacing: AppTheme.Space.s) {
-                                        Text("•")
-                                            .font(AppTheme.Typography.body)
-                                            .foregroundStyle(AppTheme.accentText)
-                                        Text(text)
-                                            .font(AppTheme.Typography.body)
-                                            .foregroundStyle(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                case let .text(_, text):
-                                    Text(text)
-                                        .font(AppTheme.Typography.body)
-                                        .foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
+            AppCard(padding: AppTheme.cardPadding) {
+                Group {
+                    if shouldScrollNotes {
+                        ScrollView {
+                            notesContent
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .scrollIndicators(.visible)
+                        .frame(height: maxNotesHeight)
+                    } else {
+                        notesContent
                     }
                 }
             }
-            .scrollIndicators(.hidden)
 
-            VStack(spacing: AppTheme.Space.s) {
+            Text("请前往 TestFlight 更新至最新版本")
+                .font(AppTheme.Typography.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            VStack(spacing: AppTheme.Space.xs) {
                 AppPrimaryButton(
-                    title: primaryTitle,
-                    icon: "arrow.down.circle.fill",
-                    action: onPrimaryAction
+                    title: "知道了",
+                    action: onDismiss
                 )
 
-                HStack(spacing: AppTheme.Space.l) {
-                    Button("忽略此版本", action: onIgnore)
+                Button(action: onIgnore) {
+                    Text("忽略此版本")
                         .font(AppTheme.Typography.rowTitle)
                         .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Button("稍后提醒", action: onDismiss)
-                        .font(AppTheme.Typography.rowTitle)
-                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
-                .padding(.horizontal, AppTheme.Space.xs)
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, AppTheme.pagePadding)
-        .padding(.top, AppTheme.Space.l)
+        .padding(.top, AppTheme.Space.xl)
         .padding(.bottom, AppTheme.Space.m)
-        .appPageBackground()
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: SheetHeightPreferenceKey.self,
+                    value: min(proxy.size.height, screenHeight * 0.85)
+                )
+            }
+        }
+        .onPreferenceChange(SheetHeightPreferenceKey.self) { height in
+            onMeasuredHeight(height)
+        }
+    }
+
+    @ViewBuilder
+    private var notesContent: some View {
+        Group {
+            if parsedNotes.isEmpty {
+                Text("已有新版本发布，建议更新以获得最新功能与体验优化。")
+                    .font(AppTheme.Typography.body)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: AppTheme.Space.s) {
+                    ForEach(Array(parsedNotes.enumerated()), id: \.element.id) { index, line in
+                        switch line {
+                        case let .heading(_, text):
+                            Text(text)
+                                .font(AppTheme.Typography.subheadlineBold)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, index == 0 ? 0 : AppTheme.Space.xs)
+                        case let .bullet(_, text):
+                            HStack(alignment: .top, spacing: AppTheme.Space.s) {
+                                Text("•")
+                                    .font(AppTheme.Typography.body)
+                                    .foregroundStyle(AppTheme.accentText(for: .sheet))
+                                Text(text)
+                                    .font(AppTheme.Typography.body)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        case let .text(_, text):
+                            Text(text)
+                                .font(AppTheme.Typography.body)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: NotesHeightPreferenceKey.self,
+                    value: proxy.size.height
+                )
+            }
+        }
+        .onPreferenceChange(NotesHeightPreferenceKey.self) { height in
+            if abs(measuredNotesHeight - height) > 1 {
+                measuredNotesHeight = height
+            }
+        }
     }
 }

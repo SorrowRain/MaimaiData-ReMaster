@@ -2,15 +2,27 @@ import SwiftUI
 
 struct VersionCheckView: View {
     @Environment(DataStore.self) private var store
-    @State private var displayMode: CheckDisplayMode = .sss
-    @State private var onlyUnfinished: Bool = false
-    @State private var selectedDifficulty: DifficultyType = .master
-    @State private var groupedSongs: [LevelGroup] = []
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var scopeCache: ScopeCache = .empty
+    @State private var showDifficultyPopover = false
 
     private struct LevelGroup: Identifiable {
-        var id: String { level }
+        let id: String
         let level: String
         let songs: [SongData]
+    }
+
+    private struct ScopeCache {
+        let cacheKey: String
+        let songsByDifficulty: [DifficultyType: [SongData]]
+        let groupedByDifficulty: [DifficultyType: [LevelGroup]]
+
+        static let empty = ScopeCache(
+            cacheKey: "",
+            songsByDifficulty: [:],
+            groupedByDifficulty: [:]
+        )
     }
 
     private var scopes: [PlateCheckScope] {
@@ -20,115 +32,242 @@ struct VersionCheckView: View {
     private var activeScope: PlateCheckScope {
         let items = scopes
         guard !items.isEmpty else {
-            return PlateCheckScope.fallback
+            return .fallback
         }
-        let idx = min(max(0, store.activeVersionCheckIndex), items.count - 1)
-        return items[idx]
+        if let savedId = store.activeVersionCheckScopeId,
+           let matched = items.first(where: { $0.id == savedId }) {
+            return matched
+        }
+        return items[0]
     }
 
-    private var availableDifficulties: [DifficultyType] {
-        if activeScope.supportsRemaster {
+    private func availableDifficulties(for scope: PlateCheckScope) -> [DifficultyType] {
+        if scope.supportsRemaster {
             return [.basic, .advanced, .expert, .master, .remaster]
         }
         return [.basic, .advanced, .expert, .master]
     }
 
-    private func rebuildGroups() {
-        if !availableDifficulties.contains(selectedDifficulty) {
-            selectedDifficulty = .master
-        }
+    private func rebuildCache() {
         let scope = activeScope
-        let diff = selectedDifficulty
-        let diffIdx = diff.rawValue
+        let key = "\(scope.id)|\(store.serverRegion.rawValue)|\(store.catalogRevision)|\(store.plateCatalog?.updatedAt ?? "")"
+        guard scopeCache.cacheKey != key else { return }
 
-        let filtered = store.songs.filter { scope.contains($0, difficulty: diff) }
-        let sorted = filtered.sorted { ($0.ds[safe: diffIdx] ?? 0) > ($1.ds[safe: diffIdx] ?? 0) }
-        let dict = Dictionary(grouping: sorted) { $0.level[safe: diffIdx] ?? "?" }
-        groupedSongs = dict.keys.sorted { MaimaiConstants.levelSortOrder($0) > MaimaiConstants.levelSortOrder($1) }
-            .map { LevelGroup(level: $0, songs: dict[$0] ?? []) }
+        let diffs = availableDifficulties(for: scope)
+        if !diffs.contains(store.versionCheckDifficulty) {
+            store.versionCheckDifficulty = .master
+        }
+
+        var songsByDiff: [DifficultyType: [SongData]] = [:]
+        var groupedByDiff: [DifficultyType: [LevelGroup]] = [:]
+
+        for diff in diffs {
+            let diffIdx = diff.rawValue
+            let filtered = store.songs.filter { scope.contains($0, difficulty: diff) }
+            let sorted = filtered.sorted { ($0.ds[safe: diffIdx] ?? 0) > ($1.ds[safe: diffIdx] ?? 0) }
+            songsByDiff[diff] = sorted
+
+            let dict = Dictionary(grouping: sorted) { $0.level[safe: diffIdx] ?? "?" }
+            groupedByDiff[diff] = dict.keys
+                .sorted { MaimaiConstants.levelSortOrder($0) > MaimaiConstants.levelSortOrder($1) }
+                .map { LevelGroup(id: "\(scope.id)_\(diffIdx)_\($0)", level: $0, songs: dict[$0] ?? []) }
+        }
+
+        scopeCache = ScopeCache(
+            cacheKey: key,
+            songsByDifficulty: songsByDiff,
+            groupedByDifficulty: groupedByDiff
+        )
     }
 
     var body: some View {
-        let diffIdx = selectedDifficulty.rawValue
-        let diffTint = selectedDifficulty.color
-        let items = scopes
-        let clampedSelection = Binding<Int>(
-            get: {
-                guard !items.isEmpty else { return 0 }
-                return min(max(0, store.activeVersionCheckIndex), items.count - 1)
-            },
-            set: { newValue in
-                store.activeVersionCheckIndex = newValue
+        @Bindable var storeBindable = store
+        let scope = activeScope
+        let diffs = availableDifficulties(for: scope)
+        let effectiveDifficulty: DifficultyType = diffs.contains(store.versionCheckDifficulty)
+            ? store.versionCheckDifficulty
+            : .master
+        let effectiveMode: CheckDisplayMode = scope.goal == .clear
+            ? .clear
+            : (store.checklistDisplayMode == .clear ? .sss : store.checklistDisplayMode)
+        let diffIdx = effectiveDifficulty.rawValue
+        let diffTint = effectiveDifficulty.color
+
+        let scopeSelection = Binding<String>(
+            get: { scope.id },
+            set: { newId in
+                store.activeVersionCheckScopeId = newId
+                rebuildCache()
             }
         )
 
-        let allSongs = groupedSongs.flatMap(\.songs)
-        let matchedRecords = allSongs.compactMap { store.record(forSongId: $0.numericId, difficultyIndex: diffIdx) }
-        let stats = ChecklistStats(records: matchedRecords, totalCount: allSongs.count)
+        let activeSongs = scopeCache.songsByDifficulty[effectiveDifficulty] ?? []
+        let activeMatchedRecords = activeSongs.compactMap {
+            store.record(forSongId: $0.numericId, difficultyIndex: diffIdx)
+        }
+        let activeStats = ChecklistStats(
+            records: activeMatchedRecords,
+            totalCount: activeSongs.count
+        )
 
-        let visibleGroups: [LevelGroup] = onlyUnfinished
-            ? groupedSongs.compactMap { group in
+        let activeGroups = scopeCache.groupedByDifficulty[effectiveDifficulty] ?? []
+        let visibleGroups: [LevelGroup] = store.checklistOnlyUnfinished
+            ? activeGroups.compactMap { group in
                 let remaining = group.songs.filter { song in
-                    !displayMode.isCompleted(store.record(forSongId: song.numericId, difficultyIndex: diffIdx))
+                    !effectiveMode.isCompleted(store.record(forSongId: song.numericId, difficultyIndex: diffIdx))
                 }
-                return remaining.isEmpty ? nil : LevelGroup(level: group.level, songs: remaining)
+                return remaining.isEmpty ? nil : LevelGroup(id: group.id, level: group.level, songs: remaining)
             }
-            : groupedSongs
+            : activeGroups
+
+        let countSummary = "共 \(activeSongs.count) 首"
+
+        let footnoteText: String? = (!scope.hasJiangBadge && scope.goal == .standard)
+            ? "真代无「将」牌，SSS 仅作统计"
+            : nil
 
         ScrollView {
-            VStack(spacing: AppTheme.cardSpacing) {
-                AppCard(padding: AppTheme.cardPadding, tint: diffTint) {
-                    HStack(spacing: AppTheme.Space.m) {
-                        Image(activeScope.versionAsset)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 92, height: 36, alignment: .center)
+            LazyVStack(spacing: AppTheme.cardSpacing) {
+                AppCard(padding: AppTheme.cardPadding) {
+                    if dynamicTypeSize >= .xxLarge {
+                        VStack(alignment: .leading, spacing: AppTheme.Space.s) {
+                            HStack(spacing: AppTheme.Space.m) {
+                                Image(scope.versionAsset)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 76, height: 34, alignment: .leading)
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(activeScope.title)
-                                .font(AppTheme.Typography.rowTitle)
-                                .lineLimit(1)
-                            Text("共 \(allSongs.count) 首歌曲")
-                                .font(AppTheme.Typography.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                                Spacer(minLength: AppTheme.Space.s)
 
-                        Spacer(minLength: AppTheme.Space.xs)
-
-                        Menu {
-                            Picker("牌子", selection: clampedSelection) {
-                                ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
-                                    Text(item.title).tag(idx)
+                                Menu {
+                                    Picker("牌子", selection: scopeSelection) {
+                                        ForEach(scopes) { item in
+                                            Text(item.title).tag(item.id)
+                                        }
+                                    }
+                                } label: {
+                                    AppMenuCapsule(title: "切换牌子")
                                 }
                             }
-                        } label: {
-                            AppMenuCapsule(title: "切换牌子")
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(scope.title)
+                                    .font(AppTheme.Typography.rowTitle)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                Text(countSummary)
+                                    .font(AppTheme.Typography.caption)
+                                    .foregroundStyle(.secondary)
+                                    .contentTransition(.numericText())
+                            }
+                        }
+                    } else {
+                        HStack(alignment: .center, spacing: AppTheme.Space.m) {
+                            Image(scope.versionAsset)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 76, height: 34, alignment: .center)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(scope.title)
+                                    .font(AppTheme.Typography.rowTitle)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.88)
+                                Text(countSummary)
+                                    .font(AppTheme.Typography.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .contentTransition(.numericText())
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Menu {
+                                Picker("牌子", selection: scopeSelection) {
+                                    ForEach(scopes) { item in
+                                        Text(item.title).tag(item.id)
+                                    }
+                                }
+                            } label: {
+                                AppMenuCapsule(title: "切换牌子")
+                            }
+                            .fixedSize()
                         }
                     }
                 }
 
                 ChecklistStatsHeader(
-                    stats: stats,
-                    displayMode: $displayMode,
-                    onlyUnfinished: $onlyUnfinished
-                ) {
-                    Menu {
-                        Picker("难度", selection: $selectedDifficulty) {
-                            ForEach(availableDifficulties, id: \.self) { diff in
-                                Text(diff.shortName).tag(diff)
+                    stats: activeStats,
+                    displayMode: Binding(
+                        get: { effectiveMode },
+                        set: { next in
+                            if scope.goal != .clear {
+                                store.checklistDisplayMode = next
                             }
                         }
+                    ),
+                    onlyUnfinished: $storeBindable.checklistOnlyUnfinished,
+                    isClearGoal: scope.goal == .clear,
+                    footnote: footnoteText
+                ) {
+                    Button {
+                        showDifficultyPopover = true
                     } label: {
-                        AppMenuCapsule(title: selectedDifficulty.shortName, tint: diffTint)
+                        AppMenuCapsule(title: effectiveDifficulty.shortName, tint: diffTint)
+                    }
+                    .buttonStyle(ScalePressButtonStyle())
+                    .popover(isPresented: $showDifficultyPopover, arrowEdge: .top) {
+                        let isDark = colorScheme == .dark
+                        VStack(spacing: 4) {
+                            ForEach(diffs, id: \.self) { diff in
+                                let isSelected = diff == effectiveDifficulty
+                                let isRemaster = diff == .remaster
+                                let pillFill: Color = if isSelected {
+                                    if isRemaster {
+                                        isDark ? AppTheme.Palette.remasterDarkFill : Color.white
+                                    } else {
+                                        diff.solidFill(isDark: isDark)
+                                    }
+                                } else {
+                                    Color.clear
+                                }
+                                let pillFg: Color = if isSelected {
+                                    if isRemaster {
+                                        isDark ? AppTheme.Palette.remasterDarkText : AppTheme.Palette.chartRemaster
+                                    } else {
+                                        diff.readableForeground
+                                    }
+                                } else {
+                                    .primary
+                                }
+                                Button {
+                                    store.versionCheckDifficulty = diff
+                                    showDifficultyPopover = false
+                                } label: {
+                                    Text(diff.shortName)
+                                        .font(isSelected ? AppTheme.Typography.captionBold : AppTheme.Typography.body)
+                                        .foregroundStyle(pillFg)
+                                        .frame(width: 92, height: 34)
+                                        .background(pillFill, in: Capsule())
+                                        .overlay {
+                                            if isSelected && isRemaster {
+                                                Capsule().strokeBorder(diff.color, lineWidth: 1.2)
+                                            }
+                                        }
+                                        .contentShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(8)
+                        .fixedSize(horizontal: true, vertical: true)
+                        .presentationCornerRadius(16)
+                        .presentationCompactAdaptation(.popover)
                     }
                 }
 
                 if store.isSyncingSongs && store.songs.isEmpty {
-                    ProgressView("正在同步\(store.serverRegion.shortName)曲库…")
-                        .font(AppTheme.Typography.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, AppTheme.Space.xl)
+                    AppLoadingState(message: "正在同步\(store.serverRegion.shortName)曲库…")
                 } else if store.songs.isEmpty {
                     ContentUnavailableView(
                         "暂无\(store.serverRegion.shortName)曲库数据",
@@ -136,9 +275,9 @@ struct VersionCheckView: View {
                         description: Text("请前往「设置与数据 → 数据同步与存储」点击检查更新")
                     )
                     .padding(.top, AppTheme.Space.xl)
-                } else if visibleGroups.isEmpty && !allSongs.isEmpty {
+                } else if visibleGroups.isEmpty && !activeGroups.isEmpty {
                     ContentUnavailableView(
-                        "已全部达成 \(displayMode.title)",
+                        "已全部达成 \(effectiveMode.title)",
                         systemImage: "checkmark.seal.fill",
                         description: Text("当前筛选下全部谱面均已达成该目标")
                     )
@@ -146,16 +285,16 @@ struct VersionCheckView: View {
                 } else {
                     ForEach(visibleGroups) { group in
                         AppSectionCard(title: "Level \(group.level)") {
-                            AppCapsuleLabel(text: "\(group.songs.count) 首", tint: diffTint)
+                            AppCapsuleLabel(text: "\(group.songs.count) 首", tint: diffTint, isNeutral: false)
                         } content: {
                             ChecklistSongGrid {
                                 ForEach(group.songs) { song in
-                                    NavigationLink(value: SongDetailRoute(song: song, initialDifficulty: selectedDifficulty)) {
+                                    NavigationLink(value: SongDetailRoute(song: song, initialDifficulty: effectiveDifficulty)) {
                                         ChecklistSongTile(
                                             song: song,
                                             record: store.record(forSongId: song.numericId, difficultyIndex: diffIdx),
-                                            borderColor: diffTint,
-                                            displayMode: displayMode,
+                                            difficulty: effectiveDifficulty,
+                                            displayMode: effectiveMode,
                                             region: store.serverRegion
                                         )
                                     }
@@ -170,16 +309,16 @@ struct VersionCheckView: View {
             .padding(.vertical, AppTheme.Space.m)
         }
         .appPageBackground()
-        .sensoryFeedback(.selection, trigger: store.activeVersionCheckIndex)
-        .sensoryFeedback(.selection, trigger: selectedDifficulty)
+        .sensoryFeedback(.selection, trigger: scope.id)
+        .sensoryFeedback(.selection, trigger: effectiveDifficulty)
         .navigationTitle("牌子进度表")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            rebuildGroups()
+            rebuildCache()
         }
-        .onChange(of: store.activeVersionCheckIndex) { _, _ in rebuildGroups() }
-        .onChange(of: selectedDifficulty) { _, _ in rebuildGroups() }
-        .onChange(of: store.serverRegion) { _, _ in rebuildGroups() }
-        .onChange(of: store.catalogRevision) { _, _ in rebuildGroups() }
+        .onChange(of: store.activeVersionCheckScopeId) { _, _ in rebuildCache() }
+        .onChange(of: store.plateCatalog) { _, _ in rebuildCache() }
+        .onChange(of: store.serverRegion) { _, _ in rebuildCache() }
+        .onChange(of: store.catalogRevision) { _, _ in rebuildCache() }
     }
 }

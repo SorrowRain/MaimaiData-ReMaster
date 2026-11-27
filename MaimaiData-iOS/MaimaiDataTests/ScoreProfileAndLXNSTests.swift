@@ -341,16 +341,30 @@ final class ScoreProfileAndLXNSTests: XCTestCase {
         let jpShin = try XCTUnwrap(jpScopes.first { $0.id == "真" })
         XCTAssertTrue(jpShin.contains(trueLove, difficulty: .master))
         XCTAssertFalse(jpShin.contains(jingleBells, difficulty: .master))
+        XCTAssertFalse(jpShin.hasJiangBadge)
 
-        let jpMai = try XCTUnwrap(jpScopes.first { $0.id == "舞" })
+        let maiIdx = try XCTUnwrap(jpScopes.firstIndex { $0.id == "舞" })
+        let jpMai = jpScopes[maiIdx]
+        XCTAssertEqual(jpMai.title, "舞 · 旧框全曲")
+        XCTAssertEqual(jpMai.goal, .standard)
+        XCTAssertTrue(jpMai.hasJiangBadge)
+        XCTAssertEqual(jpScopes[maiIdx + 1].id, "覇者")
+        let jpHasya = jpScopes[maiIdx + 1]
+        XCTAssertEqual(jpHasya.title, "覇者 · 旧框全曲")
+        XCTAssertEqual(jpHasya.goal, .clear)
+        XCTAssertFalse(jpHasya.hasJiangBadge)
         // ジングルベル still counts toward 舞 / 覇者, while 前前前世 is excluded
         XCTAssertTrue(jpMai.contains(jingleBells, difficulty: .master))
         XCTAssertFalse(jpMai.contains(zenzenzense, difficulty: .master))
+        XCTAssertTrue(jpHasya.contains(jingleBells, difficulty: .master))
+        XCTAssertFalse(jpHasya.contains(zenzenzense, difficulty: .master))
         // ヒバナ (792, or synthetic `zeta_std_hibana` offline) is an SD-era Re:MASTER, whereas 500 is a DX-era added Re:MASTER
         let offlineHibana = makeOverseasSong(id: "zeta_std_hibana", title: "ヒバナ", from: "MiLK", chartCount: 5)
         XCTAssertTrue(jpMai.contains(hibana, difficulty: .remaster))
         XCTAssertTrue(jpMai.contains(offlineHibana, difficulty: .remaster))
         XCTAssertFalse(jpMai.contains(dxEraRemaster, difficulty: .remaster))
+        XCTAssertTrue(jpHasya.contains(hibana, difficulty: .remaster))
+        XCTAssertFalse(jpHasya.contains(dxEraRemaster, difficulty: .remaster))
 
         XCTAssertTrue(jpScopes.contains { $0.title == "彩 · PRiSM PLUS" })
         XCTAssertTrue(jpScopes.contains { $0.title == "丸 · CiRCLE" })
@@ -378,5 +392,83 @@ final class ScoreProfileAndLXNSTests: XCTestCase {
         )
         XCTAssertTrue(futureScopes.contains { $0.title == "廻 · CiRCLE PLUS" })
         XCTAssertTrue(futureScopes.contains { $0.title == "魔 · MAGiCAL" })
+    }
+
+    func testPlateExtractionHandlesReversedRequirementsClearGoalAndLegacyIndexMigration() throws {
+        let reqSongsB2M = [
+            LXNSPlateRequiredSong(id: 8, title: "True Love Song", type: "standard"),
+            LXNSPlateRequiredSong(id: 70, title: "Jingle Bells", type: "standard")
+        ]
+        let reqSongsRem = [
+            LXNSPlateRequiredSong(id: 792, title: "Hibana", type: "standard")
+        ]
+        let reversedRequired = [
+            LXNSPlateRequirement(difficulties: [4], rate: nil, fc: nil, fs: nil, songs: reqSongsRem),
+            LXNSPlateRequirement(difficulties: [0, 1, 2, 3], rate: nil, fc: nil, fs: nil, songs: reqSongsB2M)
+        ]
+        let plateResponse = LXNSPlateListResponse(plates: [
+            LXNSPlate(id: 1, name: "舞極", description: "旧框全曲", genre: "実績", required: reversedRequired),
+            LXNSPlate(id: 2, name: "覇者", description: "旧框全曲", genre: "実績", required: reversedRequired)
+        ])
+
+        let extracted = LXNSCatalogConverter.extractPlateCatalog(from: plateResponse, updatedAt: "2026-11-27")
+        XCTAssertEqual(extracted.groups.count, 1)
+        let maiGroup = try XCTUnwrap(extracted.groups.first)
+        XCTAssertEqual(maiGroup.id, "舞")
+        XCTAssertEqual(maiGroup.title, "舞 · 旧框全曲")
+        XCTAssertEqual(maiGroup.basicToMasterSongIds, [8, 70])
+        XCTAssertEqual(maiGroup.remasterSongIds, [792])
+
+        // Even when an older disk cache still holds `"舞 / 覇者 · 旧框全曲"`, CN scopes normalize and split cleanly
+        let staleCacheGroups = [
+            CNPlateRuleGroup(
+                id: "真",
+                title: "真 · maimai ~ PLUS",
+                versionAsset: "maimai",
+                badges: ["真極", "真将", "真神", "真舞舞"],
+                basicToMasterSongIds: [8],
+                remasterSongIds: []
+            ),
+            CNPlateRuleGroup(
+                id: "舞",
+                title: "舞 / 覇者 · 旧框全曲",
+                versionAsset: "maimai_finale",
+                badges: ["覇者", "舞極", "舞将"],
+                basicToMasterSongIds: [8, 70],
+                remasterSongIds: [792]
+            ),
+            CNPlateRuleGroup(
+                id: "熊華",
+                title: "熊 / 華 · 舞萌DX",
+                versionAsset: "maimaidx_cn",
+                badges: ["熊極", "熊将"],
+                basicToMasterSongIds: [11001],
+                remasterSongIds: []
+            )
+        ]
+        let cnScopes = LXNSCatalogConverter.buildPlateScopes(
+            for: .cn,
+            cnPlateGroups: staleCacheGroups,
+            activeSongs: []
+        )
+        XCTAssertEqual(cnScopes.map(\.id), ["真", "舞", "覇者", "熊華"])
+        XCTAssertFalse(cnScopes[0].hasJiangBadge)
+        XCTAssertEqual(cnScopes[1].title, "舞 · 旧框全曲")
+        XCTAssertEqual(cnScopes[1].goal, .standard)
+        XCTAssertEqual(cnScopes[2].title, "覇者 · 旧框全曲")
+        XCTAssertEqual(cnScopes[2].goal, .clear)
+        XCTAssertFalse(cnScopes[2].hasJiangBadge)
+
+        // Legacy index migration skips newly inserted 覇者 so pre-upgrade index 2 ("熊華") stays "熊華"
+        XCTAssertEqual(DataStore.migrateLegacyPlateScopeId(legacyIndex: 1, scopes: cnScopes), "舞")
+        XCTAssertEqual(DataStore.migrateLegacyPlateScopeId(legacyIndex: 2, scopes: cnScopes), "熊華")
+
+        // CLEAR goal threshold check: 79.9999% < 80.0% <= 80.0000%
+        let belowClear = ProberRecord(achievements: 79.9999, ds: 13.0, fc: "", fs: "", level: "13", levelIndex: 3, ra: 0, rate: "a", songId: 8, title: "A", type: "SD")
+        let atClear = ProberRecord(achievements: 80.0, ds: 13.0, fc: "", fs: "", level: "13", levelIndex: 3, ra: 0, rate: "aa", songId: 70, title: "B", type: "SD")
+        XCTAssertFalse(CheckDisplayMode.clear.isCompleted(belowClear))
+        XCTAssertTrue(CheckDisplayMode.clear.isCompleted(atClear))
+        let stats = ChecklistStats(records: [belowClear, atClear], totalCount: 2)
+        XCTAssertEqual(stats.clearCount, 1)
     }
 }

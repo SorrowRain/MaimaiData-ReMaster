@@ -14,6 +14,7 @@ struct SongData: Codable, Identifiable, Hashable {
     var remoteCoverName: String? = nil
     var preferRemoteCover: Bool? = nil
     var sortOrder: Int? = nil
+    var releaseDate: String? = nil
     var isDisabled: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -30,11 +31,35 @@ struct SongData: Codable, Identifiable, Hashable {
         case remoteCoverName = "remote_cover"
         case preferRemoteCover = "prefer_remote_cover"
         case sortOrder = "sort_order"
+        case releaseDate = "release_date"
         case isDisabled = "is_disabled"
     }
 
     var numericId: Int { Int(id) ?? 0 }
     var defaultSortKey: Int { sortOrder ?? numericId }
+    var releaseDateSortKey: Int { Self.parseReleaseDateKey(releaseDate) }
+
+    static func parseReleaseDateKey(_ raw: String?) -> Int {
+        guard let raw, raw.count >= 10 else { return 0 }
+        let parts = raw.prefix(10).split(separator: "-")
+        guard parts.count == 3,
+              let y = Int(parts[0]),
+              let m = Int(parts[1]),
+              let d = Int(parts[2]),
+              y >= 2000, (1...12).contains(m), (1...31).contains(d) else {
+            return 0
+        }
+        return y * 10_000 + m * 100 + d
+    }
+
+    static func isOrderedBeforeInDefaultSort(_ a: SongData, _ b: SongData) -> Bool {
+        let aDate = a.releaseDateSortKey
+        let bDate = b.releaseDateSortKey
+        if aDate != bDate { return aDate > bDate }
+        if a.defaultSortKey != b.defaultSortKey { return a.defaultSortKey > b.defaultSortKey }
+        if a.numericId != b.numericId { return a.numericId > b.numericId }
+        return a.id > b.id
+    }
     var baseJacketId: Int {
         let rem = numericId % 10000
         return rem > 0 ? rem : numericId

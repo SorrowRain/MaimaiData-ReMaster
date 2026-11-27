@@ -12,7 +12,6 @@ import dev.sorrowrain.maimaidata.models.ScoreAuthMethod
 import dev.sorrowrain.maimaidata.models.ScoreProfile
 import dev.sorrowrain.maimaidata.models.ScoreProfileSecret
 import dev.sorrowrain.maimaidata.models.ScoreProvider
-import dev.sorrowrain.maimaidata.models.SelfHostedEndpointConfig
 import dev.sorrowrain.maimaidata.models.SelfHostedSecret
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString

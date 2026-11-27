@@ -22,6 +22,7 @@ data class SongData(
     @SerialName("remote_cover") val remoteCoverName: String? = null,
     @SerialName("prefer_remote_cover") val preferRemoteCover: Boolean? = null,
     @SerialName("sort_order") val sortOrder: Int? = null,
+    @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("is_disabled") val isDisabled: Boolean? = null
 ) {
     val numericId: Int
@@ -29,6 +30,9 @@ data class SongData(
 
     val defaultSortKey: Int
         get() = sortOrder ?: numericId
+
+    val releaseDateSortKey: Int
+        get() = parseReleaseDateKey(releaseDate)
 
     val baseJacketId: Int
         get() {
@@ -147,6 +151,27 @@ data class SongData(
     )
 
     companion object {
+        fun parseReleaseDateKey(raw: String?): Int {
+            if (raw == null || raw.length < 10) return 0
+            val parts = raw.substring(0, 10).split('-')
+            if (parts.size != 3) return 0
+            val y = parts[0].toIntOrNull() ?: return 0
+            val m = parts[1].toIntOrNull() ?: return 0
+            val d = parts[2].toIntOrNull() ?: return 0
+            if (y < 2000 || m !in 1..12 || d !in 1..31) return 0
+            return y * 10_000 + m * 100 + d
+        }
+
+        val defaultSortComparator: Comparator<SongData> = Comparator { a, b ->
+            val dateCmp = b.releaseDateSortKey.compareTo(a.releaseDateSortKey)
+            if (dateCmp != 0) return@Comparator dateCmp
+            val keyCmp = b.defaultSortKey.compareTo(a.defaultSortKey)
+            if (keyCmp != 0) return@Comparator keyCmp
+            val numCmp = b.numericId.compareTo(a.numericId)
+            if (numCmp != 0) return@Comparator numCmp
+            b.id.compareTo(a.id)
+        }
+
         private fun zetarakuCoverUrl(fileName: String?): String? {
             if (fileName.isNullOrEmpty()) return null
             val encoded = URLEncoder.encode(fileName, Charsets.UTF_8.name()).replace("+", "%20")

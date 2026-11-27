@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchFilterSheet: View {
     @Environment(DataStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var criteria: SongFilterCriteria
 
     @State private var draft: SongFilterCriteria = SongFilterCriteria()
@@ -10,6 +11,8 @@ struct SearchFilterSheet: View {
     @State private var levelSliderIndex: Double = 0
     /// 0 = 关闭 (Off), 1...10 = .0 ... .9
     @State private var decSliderIndex: Double = 0
+    /// Preserves the user's chosen decimal index across `14.x <-> 15.0` moves.
+    @State private var preferredDecIdx: Int = 0
 
     private var currentLevelIndex: Int {
         min(max(0, Int(levelSliderIndex.rounded())), MaimaiConstants.allLevels.count - 1)
@@ -20,12 +23,16 @@ struct SearchFilterSheet: View {
     }
 
     private var baseIntegerLevel: Int {
-        guard currentLevelIndex > 0 else { return 1 }
-        let raw = MaimaiConstants.allLevels[currentLevelIndex].replacingOccurrences(of: "+", with: "")
-        return Int(raw) ?? 1
+        MaimaiConstants.baseIntegerLevel(forLevelIndex: currentLevelIndex)
+    }
+
+    private var isLargeFont: Bool {
+        dynamicTypeSize >= .xxLarge
     }
 
     var body: some View {
+        let isLevel15 = currentLevelIndex > 0 && baseIntegerLevel >= MaimaiConstants.maxLevelInteger
+
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppTheme.cardSpacing) {
@@ -56,13 +63,14 @@ struct SearchFilterSheet: View {
                                     syncFromSliders(changedDecimal: false)
                                 }
 
-                                // 第二条：小数（最左关闭，往右 .0 ~ .9）
+                                // 第二条：小数（最左关闭，往右 .0 ~ .9；15 级锁 .0 / OFF）
                                 AppLabeledSliderRow(
                                     label: "小数",
                                     valueText: secondSliderLabelText,
                                     value: $decSliderIndex,
                                     range: 0...10,
                                     isActive: currentDecIndex > 0,
+                                    enabled: !isLevel15,
                                     accessibilityLabel: "定数小数位筛选"
                                 )
                                 .onChange(of: decSliderIndex) { _, _ in
@@ -123,43 +131,59 @@ struct SearchFilterSheet: View {
                 .padding(.horizontal, AppTheme.pagePadding)
                 .padding(.vertical, AppTheme.Space.m)
             }
-            .appPageBackground()
             .sensoryFeedback(.selection, trigger: currentLevelIndex)
             .sensoryFeedback(.selection, trigger: currentDecIndex)
             .navigationTitle("筛选与排序")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { dismiss() }
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                HStack(spacing: AppTheme.Space.m) {
-                    AppSecondaryButton(title: "重置选项", action: resetDraft)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    AppInsetDivider()
+                    Group {
+                        if isLargeFont {
+                            VStack(spacing: AppTheme.Space.s) {
+                                AppPrimaryButton(title: "应用筛选", icon: "checkmark") {
+                                    criteria = SongFilter.prunedCriteria(draft, for: store.serverRegion)
+                                    dismiss()
+                                }
+                                AppSecondaryButton(title: "重置选项", action: resetDraft)
+                            }
+                        } else {
+                            HStack(spacing: AppTheme.Space.m) {
+                                AppSecondaryButton(title: "重置选项", action: resetDraft)
 
-                    AppPrimaryButton(title: "应用筛选", icon: "checkmark") {
-                        criteria = draft
-                        dismiss()
+                                AppPrimaryButton(title: "应用筛选", icon: "checkmark") {
+                                    criteria = SongFilter.prunedCriteria(draft, for: store.serverRegion)
+                                    dismiss()
+                                }
+                            }
+                        }
                     }
+                    .padding(.horizontal, AppTheme.pagePadding)
+                    .padding(.top, AppTheme.itemSpacing)
+                    .padding(.bottom, AppTheme.Space.s)
                 }
-                .padding(.horizontal, AppTheme.pagePadding)
-                .padding(.top, AppTheme.itemSpacing)
-                .padding(.bottom, AppTheme.Space.s)
+                .background(AppTheme.Palette.sheetBackground)
             }
             .onAppear {
-                draft = criteria
-                if criteria.useExactDS {
-                    let tenths = Int((criteria.exactDS * 10).rounded())
-                    let intPart = max(1, min(15, tenths / 10))
-                    let decPart = max(0, min(9, tenths % 10))
+                draft = SongFilter.prunedCriteria(criteria, for: store.serverRegion)
+                if draft.useExactDS {
+                    let (intPart, decPart) = MaimaiConstants.splitExactDS(draft.exactDS)
                     levelSliderIndex = Double(MaimaiConstants.allLevels.firstIndex(of: "\(intPart)") ?? 1)
                     decSliderIndex = Double(decPart + 1)
+                    preferredDecIdx = decPart + 1
                 } else {
-                    levelSliderIndex = Double(MaimaiConstants.allLevels.firstIndex(of: criteria.selectedLevel) ?? 0)
+                    levelSliderIndex = Double(MaimaiConstants.allLevels.firstIndex(of: draft.selectedLevel) ?? 0)
                     decSliderIndex = 0
+                    preferredDecIdx = 0
                 }
             }
         }
+        .appSheetContainer()
     }
 
     private var firstSliderLabelText: String {
@@ -172,6 +196,7 @@ struct SearchFilterSheet: View {
 
     private var secondSliderLabelText: String {
         guard currentDecIndex > 0 else { return "OFF" }
+        if baseIntegerLevel >= MaimaiConstants.maxLevelInteger { return ".0" }
         return ".\(currentDecIndex - 1)"
     }
 
@@ -186,17 +211,28 @@ struct SearchFilterSheet: View {
     }
 
     private func syncFromSliders(changedDecimal: Bool) {
-        if changedDecimal && currentDecIndex > 0 && currentLevelIndex == 0 {
-            // 若直接拨动小数滑块而第一条还在 Off，自动将第一条拨到 1
-            levelSliderIndex = 1
-        }
-        if !changedDecimal && currentLevelIndex == 0 && currentDecIndex > 0 {
-            // 若将第一条拨回最左 Off，同时关闭小数滑块
-            decSliderIndex = 0
+        if changedDecimal {
+            if !(currentLevelIndex > 0 && baseIntegerLevel >= MaimaiConstants.maxLevelInteger) {
+                preferredDecIdx = currentDecIndex
+                if currentDecIndex > 0 && currentLevelIndex == 0 {
+                    // 若直接拨动小数滑块而第一条还在 Off，自动将第一条拨到 1
+                    levelSliderIndex = 1
+                }
+            }
+        } else if currentLevelIndex == 0 {
+            preferredDecIdx = 0
         }
 
         let lvIdx = currentLevelIndex
-        let decIdx = currentDecIndex
+        let intVal = MaimaiConstants.baseIntegerLevel(forLevelIndex: lvIdx)
+        let decIdx = MaimaiConstants.effectiveFilterDecimalIndex(
+            levelIndex: lvIdx,
+            baseIntLevel: intVal,
+            preferredDecIdx: preferredDecIdx
+        )
+        if currentDecIndex != decIdx {
+            decSliderIndex = Double(decIdx)
+        }
 
         if lvIdx == 0 {
             draft.useExactDS = false
@@ -206,9 +242,7 @@ struct SearchFilterSheet: View {
             draft.selectedLevel = MaimaiConstants.allLevels[lvIdx]
         } else {
             draft.useExactDS = true
-            let intVal = baseIntegerLevel
-            let decVal = decIdx - 1
-            draft.exactDS = Double(intVal) + Double(decVal) / 10.0
+            draft.exactDS = MaimaiConstants.composeExactDS(intPart: intVal, decPart: decIdx - 1)
             draft.selectedLevel = "\(intVal)"
         }
     }
@@ -220,6 +254,7 @@ struct SearchFilterSheet: View {
         draft = reset
         levelSliderIndex = 0
         decSliderIndex = 0
+        preferredDecIdx = 0
     }
 
     private func toggle(_ set: inout Set<String>, value: String) {

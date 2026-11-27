@@ -350,6 +350,7 @@ struct ChecklistStats: Equatable {
     let fcCount: Int
     let apCount: Int
     let fsdCount: Int
+    let clearCount: Int
     let totalCount: Int
 
     init(records: [ProberRecord], totalCount: Int) {
@@ -357,6 +358,7 @@ struct ChecklistStats: Equatable {
         self.fcCount = records.filter { !$0.fc.isEmpty }.count
         self.apCount = records.filter { $0.fc == "ap" || $0.fc == "app" }.count
         self.fsdCount = records.filter { $0.fs == "fsd" || $0.fs == "fsdp" }.count
+        self.clearCount = records.filter { $0.achievements >= 80 }.count
         self.totalCount = totalCount
     }
 }

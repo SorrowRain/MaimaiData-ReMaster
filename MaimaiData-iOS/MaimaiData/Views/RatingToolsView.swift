@@ -73,7 +73,7 @@ struct RatingToolsView: View {
         let summary = store.best35AndBest15()
         let isLoggedIn = store.isLoggedIn
 
-        return AppCard(padding: AppTheme.cardPadding, tint: AppTheme.accent) {
+        return AppCard(padding: AppTheme.cardPadding) {
             VStack(alignment: .leading, spacing: AppTheme.Space.m) {
                 HStack(alignment: .center, spacing: AppTheme.Space.s) {
                     if store.identities.count == 1, let identity = store.activeIdentity {

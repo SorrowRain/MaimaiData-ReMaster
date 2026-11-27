@@ -48,38 +48,33 @@ struct FlowLayout: Layout {
 
 struct AppCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appSurfaceLevel) private var surfaceLevel
     var padding: CGFloat = AppTheme.cardPadding
-    var tint: Color? = nil
+    var useRaisedSurface: Bool = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
+        let darkFill: Color = if useRaisedSurface {
+            AppTheme.Palette.raisedDark
+        } else if surfaceLevel == .sheet {
+            AppTheme.Palette.sheetCardDark
+        } else {
+            AppTheme.Palette.surfaceDark
+        }
+
         content()
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                colorScheme == .dark
-                    ? AppTheme.Palette.surfaceDark
-                    : Color.white.opacity(0.92),
+                colorScheme == .dark ? darkFill : Color.white,
                 in: shape
             )
             .overlay {
-                if let tint {
-                    shape.fill(
-                        LinearGradient(
-                            colors: [tint.opacity(colorScheme == .dark ? 0.10 : 0.055), .clear],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .allowsHitTesting(false)
-                }
-            }
-            .overlay {
                 shape.strokeBorder(
                     colorScheme == .dark
-                        ? Color.white.opacity(0.09)
-                        : AppTheme.Palette.hairline.opacity(0.08),
+                        ? Color.white.opacity(0.07)
+                        : Color.black.opacity(0.06),
                     lineWidth: 1
                 )
             }
@@ -87,6 +82,7 @@ struct AppCard<Content: View>: View {
 }
 
 struct AppSectionHeader<Trailing: View>: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String
     var subtitle: String? = nil
     @ViewBuilder let trailing: () -> Trailing
@@ -102,6 +98,24 @@ struct AppSectionHeader<Trailing: View>: View {
     }
 
     var body: some View {
+        if dynamicTypeSize >= .xxLarge && Trailing.self != EmptyView.self {
+            VStack(alignment: .leading, spacing: AppTheme.Space.s) {
+                titleBlock()
+                HStack {
+                    Spacer(minLength: 0)
+                    trailing()
+                }
+            }
+        } else {
+            HStack(alignment: .center, spacing: AppTheme.Space.s) {
+                titleBlock()
+                Spacer(minLength: AppTheme.Space.s)
+                trailing()
+            }
+        }
+    }
+
+    private func titleBlock() -> some View {
         HStack(alignment: .center, spacing: AppTheme.Space.s) {
             Capsule()
                 .fill(AppTheme.accent.gradient)
@@ -117,9 +131,6 @@ struct AppSectionHeader<Trailing: View>: View {
                         .foregroundStyle(.secondary)
                 }
             }
-
-            Spacer(minLength: AppTheme.Space.s)
-            trailing()
         }
     }
 }
@@ -169,17 +180,21 @@ struct AppSectionCard<Trailing: View, Content: View>: View {
 
 struct AppInsetGroup<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.appSurfaceLevel) private var surfaceLevel
     var padding: CGFloat = 0
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: AppTheme.Radius.inset, style: .continuous)
+        let darkFill = surfaceLevel == .sheet
+            ? AppTheme.Palette.sheetInsetDark
+            : AppTheme.Palette.insetDark
         content()
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 colorScheme == .dark
-                    ? Color.white.opacity(0.045)
+                    ? darkFill
                     : AppTheme.Palette.hairline.opacity(0.04),
                 in: shape
             )

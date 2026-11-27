@@ -3,12 +3,12 @@ package dev.sorrowrain.maimaidata.views
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,6 +34,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.sorrowrain.maimaidata.components.AppAutoShrinkText
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppInsetGroup
@@ -45,8 +46,10 @@ import dev.sorrowrain.maimaidata.components.AppTextField
 import dev.sorrowrain.maimaidata.components.AppTopBar
 import dev.sorrowrain.maimaidata.components.CapsuleStyle
 import dev.sorrowrain.maimaidata.components.RatingTierTable
+import dev.sorrowrain.maimaidata.models.MaimaiConstants
 import dev.sorrowrain.maimaidata.models.RatingCalculator
 import dev.sorrowrain.maimaidata.services.LocalDataStore
+import dev.sorrowrain.maimaidata.theme.AppDenseFontScale
 import dev.sorrowrain.maimaidata.theme.AppPageBackground
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import java.util.Locale
@@ -62,7 +65,7 @@ fun RatingCalculatorScreen(
 
     // Single-song calculator state (1..15 + .0 .. .9, default 14.8)
     var intPart by rememberSaveable { mutableIntStateOf(14) }
-    var decPart by rememberSaveable { mutableIntStateOf(8) }
+    var preferredDecPart by rememberSaveable { mutableIntStateOf(8) }
     var customAchiInput by rememberSaveable { mutableStateOf("") }
 
     // Target total rating reverse state
@@ -72,7 +75,9 @@ fun RatingCalculatorScreen(
     }
     var targetError by remember { mutableStateOf<String?>(null) }
 
-    val selectedDS = intPart.coerceIn(1, 15) + decPart.coerceIn(0, 9) / 10.0
+    val clampedIntPart = intPart.coerceIn(MaimaiConstants.MIN_LEVEL_INTEGER, MaimaiConstants.MAX_LEVEL_INTEGER)
+    val effectiveDecPart = MaimaiConstants.effectiveDecimalDigit(clampedIntPart, preferredDecPart)
+    val selectedDS = MaimaiConstants.composeExactDS(clampedIntPart, effectiveDecPart)
 
     val trimmedCustom = customAchiInput.trim()
     val parsedCustomAchi = trimmedCustom.toDoubleOrNull()?.takeIf { it >= 0.0 }
@@ -108,7 +113,7 @@ fun RatingCalculatorScreen(
         }
     }
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(
@@ -163,19 +168,24 @@ fun RatingCalculatorScreen(
                                 ) {
                                     AppLabeledSliderRow(
                                         label = "整数",
-                                        valueText = "$intPart",
-                                        value = intPart,
+                                        valueText = "$clampedIntPart",
+                                        value = clampedIntPart,
                                         onValueChange = { intPart = it },
-                                        valueRange = 1..15,
+                                        valueRange = MaimaiConstants.MIN_LEVEL_INTEGER..MaimaiConstants.MAX_LEVEL_INTEGER,
                                         accessibilityLabel = "定数整数部分"
                                     )
 
                                     AppLabeledSliderRow(
                                         label = "小数",
-                                        valueText = ".$decPart",
-                                        value = decPart,
-                                        onValueChange = { decPart = it },
+                                        valueText = ".$effectiveDecPart",
+                                        value = effectiveDecPart,
+                                        onValueChange = { next ->
+                                            if (clampedIntPart < MaimaiConstants.MAX_LEVEL_INTEGER) {
+                                                preferredDecPart = next
+                                            }
+                                        },
                                         valueRange = 0..9,
+                                        enabled = clampedIntPart < MaimaiConstants.MAX_LEVEL_INTEGER,
                                         accessibilityLabel = "定数小数部分"
                                     )
                                 }
@@ -283,45 +293,8 @@ fun RatingCalculatorScreen(
 
                             if (targetRows.isNotEmpty()) {
                                 AppInsetGroup {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(
-                                                horizontal = AppTheme.Space.m,
-                                                vertical = AppTheme.Space.s
-                                            ),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "定数",
-                                            style = AppTheme.AppTypography.caption2Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.width(48.dp)
-                                        )
-                                        Text(
-                                            text = "所需达成率",
-                                            style = AppTheme.AppTypography.caption2Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(
-                                            text = "单曲 Ra",
-                                            style = AppTheme.AppTypography.caption2Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = TextAlign.End,
-                                            modifier = Modifier.width(64.dp)
-                                        )
-                                        Text(
-                                            text = "50首总计",
-                                            style = AppTheme.AppTypography.caption2Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = TextAlign.End,
-                                            modifier = Modifier.width(72.dp)
-                                        )
-                                    }
-
-                                    targetRows.forEach { row ->
-                                        AppInsetDivider()
+                                    AppDenseFontScale {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -329,34 +302,97 @@ fun RatingCalculatorScreen(
                                                     horizontal = AppTheme.Space.m,
                                                     vertical = AppTheme.Space.s
                                                 ),
-                                            verticalAlignment = Alignment.CenterVertically
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)
                                         ) {
-                                            Text(
-                                                text = String.format(Locale.US, "%.1f", row.level),
-                                                style = AppTheme.AppTypography.captionMeta,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.width(48.dp)
+                                            AppAutoShrinkText(
+                                                text = "定数",
+                                                style = AppTheme.AppTypography.caption2Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                minScale = 0.75f,
+                                                modifier = Modifier
+                                                    .weight(0.65f)
+                                                    .defaultMinSize(minWidth = 40.dp)
                                             )
-                                            Text(
-                                                text = row.achievementText,
-                                                style = AppTheme.AppTypography.captionMono,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.weight(1f)
+                                            AppAutoShrinkText(
+                                                text = "所需达成率",
+                                                style = AppTheme.AppTypography.caption2Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                minScale = 0.75f,
+                                                modifier = Modifier.weight(1.35f)
                                             )
-                                            Text(
-                                                text = "${row.singleRating}",
-                                                style = AppTheme.AppTypography.captionMeta,
-                                                color = AppTheme.accentText,
-                                                textAlign = TextAlign.End,
-                                                modifier = Modifier.width(64.dp)
-                                            )
-                                            Text(
-                                                text = "${row.totalRating}",
-                                                style = AppTheme.AppTypography.captionMono,
+                                            AppAutoShrinkText(
+                                                text = "单曲 Ra",
+                                                style = AppTheme.AppTypography.caption2Bold,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 textAlign = TextAlign.End,
-                                                modifier = Modifier.width(72.dp)
+                                                minScale = 0.75f,
+                                                modifier = Modifier
+                                                    .weight(0.85f)
+                                                    .defaultMinSize(minWidth = 54.dp)
                                             )
+                                            AppAutoShrinkText(
+                                                text = "50首总计",
+                                                style = AppTheme.AppTypography.caption2Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                textAlign = TextAlign.End,
+                                                minScale = 0.75f,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .defaultMinSize(minWidth = 64.dp)
+                                            )
+                                        }
+
+                                        targetRows.forEach { row ->
+                                            AppInsetDivider()
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(
+                                                        horizontal = AppTheme.Space.m,
+                                                        vertical = AppTheme.Space.s
+                                                    ),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)
+                                            ) {
+                                                AppAutoShrinkText(
+                                                    text = String.format(Locale.US, "%.1f", row.level),
+                                                    style = AppTheme.AppTypography.captionMeta,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    minScale = 0.8f,
+                                                    modifier = Modifier
+                                                        .weight(0.65f)
+                                                        .defaultMinSize(minWidth = 40.dp)
+                                                )
+                                                AppAutoShrinkText(
+                                                    text = row.achievementText,
+                                                    style = AppTheme.AppTypography.captionMono,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    minScale = 0.75f,
+                                                    modifier = Modifier.weight(1.35f)
+                                                )
+                                                AppAutoShrinkText(
+                                                    text = "${row.singleRating}",
+                                                    style = AppTheme.AppTypography.captionMeta,
+                                                    color = AppTheme.accentText,
+                                                    textAlign = TextAlign.End,
+                                                    minScale = 0.8f,
+                                                    modifier = Modifier
+                                                        .weight(0.85f)
+                                                        .defaultMinSize(minWidth = 54.dp)
+                                                )
+                                                AppAutoShrinkText(
+                                                    text = "${row.totalRating}",
+                                                    style = AppTheme.AppTypography.captionMono,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    textAlign = TextAlign.End,
+                                                    minScale = 0.8f,
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .defaultMinSize(minWidth = 64.dp)
+                                                )
+                                            }
+                                        }
                                         }
                                     }
                                 }

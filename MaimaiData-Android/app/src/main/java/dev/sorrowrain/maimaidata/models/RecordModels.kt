@@ -254,6 +254,7 @@ data class ChecklistStats(
     val fcCount: Int,
     val apCount: Int,
     val fsdCount: Int,
+    val clearCount: Int,
     val totalCount: Int
 ) {
     constructor(records: List<ProberRecord>, totalCount: Int) : this(
@@ -261,6 +262,7 @@ data class ChecklistStats(
         fcCount = records.count { it.fc.isNotEmpty() },
         apCount = records.count { it.fc == "ap" || it.fc == "app" },
         fsdCount = records.count { it.fs == "fsd" || it.fs == "fsdp" },
+        clearCount = records.count { it.achievements >= 80.0 },
         totalCount = totalCount
     )
 }

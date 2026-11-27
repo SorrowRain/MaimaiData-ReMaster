@@ -347,7 +347,19 @@ private struct DataAndStorageSettingsView: View {
         .task {
             await refreshCacheSize()
         }
-        .errorAlert("同步结果", message: $storeBindable.statusMessage)
+        .onAppear {
+            if let notice = store.catalogSyncToast {
+                toast.show(notice, duration: 2.0)
+                store.catalogSyncToast = nil
+            }
+        }
+        .onChange(of: store.catalogSyncToast) { _, notice in
+            if let notice {
+                toast.show(notice, duration: 2.0)
+                store.catalogSyncToast = nil
+            }
+        }
+        .errorAlert("同步结果", message: $storeBindable.catalogSyncMessage)
     }
 
     private func refreshCacheSize() async {
@@ -362,6 +374,7 @@ private struct DataAndStorageSettingsView: View {
 
 private struct AboutView: View {
     @Environment(DataStore.self) private var store
+    @State private var toast = ToastState()
     let versionText: String
 
     private static let repoURL = URL(string: "https://github.com/SorrowRain/MaimaiData-ReMaster")!
@@ -376,7 +389,7 @@ private struct AboutView: View {
 
         ScrollView {
             VStack(spacing: AppTheme.cardSpacing) {
-                AppCard(padding: AppTheme.cardPadding, tint: AppTheme.accent) {
+                AppCard(padding: AppTheme.cardPadding) {
                     VStack(spacing: AppTheme.Space.s) {
                         Image("app_logo")
                             .resizable()
@@ -416,7 +429,7 @@ private struct AboutView: View {
                                 }
                             }
 
-                            Divider()
+                            AppInsetDivider()
 
                             externalLinkRow(
                                 title: "GitHub 开源仓库",
@@ -424,7 +437,7 @@ private struct AboutView: View {
                                 url: Self.repoURL
                             )
 
-                            Divider()
+                            AppInsetDivider()
 
                             externalLinkRow(
                                 title: "版本发布与下载",
@@ -432,7 +445,7 @@ private struct AboutView: View {
                                 url: Self.releasesURL
                             )
 
-                            Divider()
+                            AppInsetDivider()
 
                             externalLinkRow(
                                 title: "问题反馈与建议",
@@ -452,7 +465,7 @@ private struct AboutView: View {
                                 url: Self.licenseURL
                             )
 
-                            Divider()
+                            AppInsetDivider()
 
                             externalValueRow(
                                 title: "开发者",
@@ -469,7 +482,20 @@ private struct AboutView: View {
         .appPageBackground()
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
-        .errorAlert("版本检查", message: $storeBindable.statusMessage)
+        .statusToast(toast)
+        .onAppear {
+            if let notice = store.appUpdateToast {
+                toast.show(notice, duration: 2.2)
+                store.appUpdateToast = nil
+            }
+        }
+        .onChange(of: store.appUpdateToast) { _, notice in
+            if let notice {
+                toast.show(notice, duration: 2.2)
+                store.appUpdateToast = nil
+            }
+        }
+        .errorAlert("版本检查", message: $storeBindable.appUpdateMessage)
     }
 
     private func externalLinkRow(title: String, subtitle: String, url: URL) -> some View {

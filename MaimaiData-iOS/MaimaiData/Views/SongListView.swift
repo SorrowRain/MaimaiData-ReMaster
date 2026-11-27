@@ -1,78 +1,133 @@
 import SwiftUI
 
+private struct SearchBarHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 54
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct SongListView: View {
     @Environment(DataStore.self) private var store
+    @Environment(\.colorScheme) private var colorScheme
     @State private var criteria = SongFilterCriteria()
     @State private var displayedSongs: [SongData] = []
     @State private var showFilterSheet = false
     @State private var showSearchHistory = false
+    @State private var searchBarHeight: CGFloat = 54
     @FocusState private var isSearchFocused: Bool
+
+    private struct FilterRefreshKey: Equatable {
+        let catalogRevision: Int
+        let favorites: Set<String>
+        let aliasSearch: Bool
+        let charterSearch: Bool
+    }
+
+    private var filterRefreshKey: FilterRefreshKey {
+        FilterRefreshKey(
+            catalogRevision: store.catalogRevision,
+            favorites: criteria.onlyFavorites ? store.favoriteIds : [],
+            aliasSearch: criteria.keyword.isEmpty ? false : store.enableAliasSearch,
+            charterSearch: criteria.keyword.isEmpty ? false : store.enableCharterSearch
+        )
+    }
 
     private func refreshDisplayedSongs() {
         displayedSongs = store.filteredSongs(criteria: criteria)
     }
 
     var body: some View {
+        let shouldShowSearchHistory = showSearchHistory
+            && criteria.keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !store.searchHistory.isEmpty
+
         NavigationStack {
-            ZStack(alignment: .top) {
+            ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: AppTheme.itemSpacing) {
-                        SyncStatusBanner(store: store)
+                    VStack(spacing: 0) {
+                        Color.clear
+                            .frame(height: AppTheme.itemSpacing)
+                            .id("song_list_top")
 
-                        if criteria.isActive {
-                            activeFilterSummaryCard
-                                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
-                        }
+                        LazyVStack(spacing: AppTheme.itemSpacing) {
+                            SyncStatusBanner(store: store)
 
-                        if store.isLoadingLocalData && displayedSongs.isEmpty {
-                            ProgressView("正在读取曲库…")
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 56)
-                        } else if displayedSongs.isEmpty {
-                            ContentUnavailableView(
-                                criteria.onlyFavorites && store.favoriteIds.isEmpty ? "还没有收藏歌曲" : "未找到匹配曲目",
-                                systemImage: criteria.onlyFavorites && store.favoriteIds.isEmpty ? "heart" : "magnifyingglass",
-                                description: Text(
-                                    criteria.onlyFavorites && store.favoriteIds.isEmpty
-                                        ? "在曲目详情页点击右上角心形按钮即可收藏"
-                                        : "试试修改关键词或重置筛选条件"
+                            if criteria.isActive {
+                                activeFilterSummaryCard
+                            }
+
+                            if (store.isLoadingLocalData || store.isSyncingSongs) && store.songs.isEmpty {
+                                AppLoadingState(
+                                    message: store.isLoadingLocalData
+                                        ? "正在读取曲库…"
+                                        : "正在同步\(store.serverRegion.shortName)曲库…",
+                                    topPadding: 56
                                 )
-                            )
-                            .padding(.top, 48)
-                        } else {
-                            ForEach(displayedSongs) { song in
-                                NavigationLink(value: song) {
-                                    SongRowView(song: song, isFavorite: store.isFavorite(song))
+                            } else if displayedSongs.isEmpty {
+                                ContentUnavailableView(
+                                    criteria.onlyFavorites && store.favoriteIds.isEmpty ? "还没有收藏歌曲" : "未找到匹配曲目",
+                                    systemImage: criteria.onlyFavorites && store.favoriteIds.isEmpty ? "heart" : "magnifyingglass",
+                                    description: Text(
+                                        criteria.onlyFavorites && store.favoriteIds.isEmpty
+                                            ? "在曲目详情页点击右上角心形按钮即可收藏"
+                                            : "试试修改关键词或重置筛选条件"
+                                    )
+                                )
+                                .padding(.top, 48)
+                            } else {
+                                ForEach(displayedSongs) { song in
+                                    NavigationLink(value: song) {
+                                        SongRowView(song: song, isFavorite: store.isFavorite(song))
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
+                        .padding(.horizontal, AppTheme.pagePadding)
+                        .padding(.bottom, AppTheme.itemSpacing)
                     }
-                    .padding(.horizontal, AppTheme.pagePadding)
-                    .padding(.vertical, AppTheme.itemSpacing)
                 }
                 .scrollDismissesKeyboard(.immediately)
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    Color.clear.frame(height: 54)
-                }
-
-                VStack(spacing: 2) {
                     searchInputBar
-
-                    if showSearchHistory && !store.searchHistory.isEmpty {
+                        .background {
+                            GeometryReader { geo in
+                                Color.clear.preference(key: SearchBarHeightKey.self, value: geo.size.height)
+                            }
+                        }
+                }
+                .onPreferenceChange(SearchBarHeightKey.self) { height in
+                    if height > 0, abs(searchBarHeight - height) > 0.5 {
+                        searchBarHeight = height
+                    }
+                }
+                .overlay(alignment: .top) {
+                    if shouldShowSearchHistory {
                         searchHistoryCard
-                            .background(
-                                .ultraThinMaterial,
-                                in: RoundedRectangle(cornerRadius: AppTheme.Radius.card, style: .continuous)
-                            )
                             .padding(.horizontal, AppTheme.pagePadding)
-                            .shadow(color: .black.opacity(0.10), radius: 12, y: 6)
-                            .transition(
-                                .asymmetric(
-                                    insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                    removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
-                                )
+                            .padding(.top, searchBarHeight + 8)
+                            .shadow(
+                                color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10),
+                                radius: 12,
+                                y: 6
                             )
+                            .transition(.opacity.combined(with: .offset(y: -6)))
+                            .zIndex(1)
+                    }
+                }
+                .animation(.easeOut(duration: 0.18), value: shouldShowSearchHistory)
+                .onChange(of: criteria) { _, _ in
+                    refreshDisplayedSongs()
+                    proxy.scrollTo("song_list_top", anchor: .top)
+                }
+                .onChange(of: store.serverRegion) { _, newRegion in
+                    let pruned = SongFilter.prunedCriteria(criteria, for: newRegion)
+                    if pruned != criteria {
+                        criteria = pruned
+                    } else {
+                        refreshDisplayedSongs()
+                        proxy.scrollTo("song_list_top", anchor: .top)
                     }
                 }
             }
@@ -135,30 +190,9 @@ struct SongListView: View {
                 }
             }
             .onChange(of: isSearchFocused) { _, focused in
-                withAnimation(.spring(duration: 0.22, bounce: 0)) {
-                    showSearchHistory = focused
-                }
+                showSearchHistory = focused
             }
-            .onChange(of: criteria) { _, _ in refreshDisplayedSongs() }
-            .onChange(of: store.catalogRevision) { _, _ in refreshDisplayedSongs() }
-            .onChange(of: store.playedSongIds) { _, _ in refreshDisplayedSongs() }
-            .onChange(of: store.serverRegion) { _, newRegion in
-                let pruned = SongFilter.prunedCriteria(criteria, for: newRegion)
-                if pruned != criteria {
-                    criteria = pruned
-                } else {
-                    refreshDisplayedSongs()
-                }
-            }
-            .onChange(of: store.favoriteIds) { _, _ in
-                if criteria.onlyFavorites { refreshDisplayedSongs() }
-            }
-            .onChange(of: store.enableAliasSearch) { _, _ in
-                if !criteria.keyword.isEmpty { refreshDisplayedSongs() }
-            }
-            .onChange(of: store.enableCharterSearch) { _, _ in
-                if !criteria.keyword.isEmpty { refreshDisplayedSongs() }
-            }
+            .onChange(of: filterRefreshKey) { _, _ in refreshDisplayedSongs() }
         }
     }
 
@@ -199,12 +233,12 @@ struct SongListView: View {
         }
         .appGlassCapsule()
         .padding(.horizontal, AppTheme.pagePadding)
-        .padding(.top, 6)
-        .padding(.bottom, 6)
+        .padding(.top, AppTheme.itemSpacing)
+        .padding(.bottom, 0)
     }
 
     private var searchHistoryCard: some View {
-        AppCard(padding: AppTheme.compactCardPadding, tint: AppTheme.accent) {
+        AppCard(padding: AppTheme.compactCardPadding, useRaisedSurface: true) {
             VStack(alignment: .leading, spacing: AppTheme.Space.s) {
                 HStack {
                     Text("最近搜索")
@@ -235,7 +269,7 @@ struct SongListView: View {
     }
 
     private var activeFilterSummaryCard: some View {
-        AppCard(padding: AppTheme.compactCardPadding, tint: AppTheme.accent) {
+        AppCard(padding: AppTheme.compactCardPadding) {
             VStack(alignment: .leading, spacing: AppTheme.Space.s) {
                 HStack {
                     Text("已筛选 \(displayedSongs.count) 首曲目")
@@ -309,7 +343,7 @@ private struct SongRowView: View {
 
     var body: some View {
         let colors = MaimaiConstants.genreColors(for: song.basicInfo.genre)
-        AppCard(padding: AppTheme.compactCardPadding, tint: colors.bg) {
+        AppCard(padding: AppTheme.compactCardPadding) {
             HStack(alignment: .center, spacing: AppTheme.Space.m) {
                 SongCoverBadgeView(
                     song: song,
@@ -339,14 +373,8 @@ private struct SongRowView: View {
                     }
                     .padding(.bottom, 5)
 
-                    HStack(spacing: 6) {
-                        GenreCapsuleTag(genre: song.basicInfo.genre)
-                        if song.isDisabled == true {
-                            AppCapsuleLabel(text: "已删除", tint: .secondary, style: .compact)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.bottom, 7)
+                    GenreCapsuleTag(genre: song.basicInfo.genre)
+                        .padding(.bottom, 7)
 
                     FlowLayout(spacing: 5, lineSpacing: 4) {
                         ForEach(song.resolvedCharts) { chart in

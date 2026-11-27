@@ -71,7 +71,7 @@ struct SongDetailView: View {
             .padding(.horizontal, AppTheme.pagePadding)
             .padding(.vertical, AppTheme.Space.m)
         }
-        .appPageBackground(tint: genreColors.bg)
+        .appPageBackground()
         .navigationTitle("曲目详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -136,17 +136,13 @@ struct SongDetailView: View {
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.trailing, counterpart != nil ? 56 : 0)
-                        .onLongPressGesture { copyText(currentSong.title, label: "歌曲名") }
+                        .modifier(CopyableContextModifier(value: currentSong.title, label: "歌曲名", onCopy: copyText))
 
                     Text(currentSong.basicInfo.artist)
                         .font(AppTheme.Typography.body)
                         .foregroundStyle(.white.opacity(0.92))
                         .fixedSize(horizontal: false, vertical: true)
-                        .onLongPressGesture { copyText(currentSong.basicInfo.artist, label: "曲师") }
-
-                    if currentSong.isDisabled == true {
-                        AppCapsuleLabel(text: "已删除", tint: .white, style: .compact)
-                    }
+                        .modifier(CopyableContextModifier(value: currentSong.basicInfo.artist, label: "曲师", onCopy: copyText))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -161,11 +157,13 @@ struct SongDetailView: View {
                     value: MaimaiConstants.shortGenreDisplayName(for: currentSong.basicInfo.genre)
                 )
                 factPill(label: "歌曲 ID", value: currentSong.numericId > 0 ? currentSong.id : "—")
-                    .onLongPressGesture {
-                        if currentSong.numericId > 0 {
-                            copyText(currentSong.id, label: "歌曲 ID")
-                        }
-                    }
+                    .modifier(
+                        CopyableContextModifier(
+                            value: currentSong.numericId > 0 ? currentSong.id : nil,
+                            label: "歌曲 ID",
+                            onCopy: copyText
+                        )
+                    )
             }
         }
         .padding(AppTheme.cardPadding)
@@ -259,8 +257,12 @@ struct SongDetailView: View {
                     VStack(spacing: 2) {
                         Text(badgeTitle)
                             .font(AppTheme.Typography.captionBold)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                         Text(chart.level)
                             .font(AppTheme.Typography.badge)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
@@ -268,7 +270,7 @@ struct SongDetailView: View {
                     .foregroundStyle(tabForeground(isSelected: isSelected, chart: chart))
                     .overlay(
                         shape.strokeBorder(
-                            chart.difficulty.color.opacity(isSelected || isRemaster ? 1.0 : (colorScheme == .dark ? 0.75 : 0.45)),
+                            tabBorder(isSelected: isSelected, chart: chart),
                             lineWidth: isSelected ? 2 : 1
                         )
                     )
@@ -278,11 +280,14 @@ struct SongDetailView: View {
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
+        .appDenseDynamicType()
     }
 
     private func tabBackground(isSelected: Bool, chart: ResolvedChart) -> Color {
         if chart.difficulty == .remaster {
-            if colorScheme == .dark && !isSelected { return chart.difficulty.color.opacity(0.26) }
+            if colorScheme == .dark {
+                return isSelected ? AppTheme.Palette.remasterDarkFill : AppTheme.Palette.remasterDarkSubtleFill
+            }
             return isSelected ? Color.white : Color.white.opacity(0.65)
         }
         if isSelected { return chart.difficulty.solidFill(isDark: colorScheme == .dark) }
@@ -291,10 +296,20 @@ struct SongDetailView: View {
 
     private func tabForeground(isSelected: Bool, chart: ResolvedChart) -> Color {
         if chart.difficulty == .remaster {
-            return colorScheme == .dark && !isSelected ? chart.difficulty.boardMainColor : AppTheme.Palette.chartRemaster
+            if colorScheme == .dark {
+                return isSelected ? AppTheme.Palette.remasterDarkText : AppTheme.Palette.remasterDarkSubtleText
+            }
+            return AppTheme.Palette.chartRemaster
         }
         if isSelected { return chart.difficulty.readableForeground }
         return colorScheme == .dark ? chart.difficulty.boardMainColor : .primary
+    }
+
+    private func tabBorder(isSelected: Bool, chart: ResolvedChart) -> Color {
+        if chart.difficulty == .remaster && colorScheme == .dark {
+            return isSelected ? chart.difficulty.color : AppTheme.Palette.remasterDarkSubtleBorder
+        }
+        return chart.difficulty.color.opacity(isSelected || chart.difficulty == .remaster ? 1.0 : (colorScheme == .dark ? 0.75 : 0.45))
     }
 
     // MARK: - Segmented Tab Content
@@ -400,11 +415,13 @@ struct SongDetailView: View {
                                         .multilineTextAlignment(.trailing)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
-                                .onLongPressGesture {
-                                    if hasCharter {
-                                        copyText(chart.charter, label: "谱面作者")
-                                    }
-                                }
+                                .modifier(
+                                    CopyableContextModifier(
+                                        value: hasCharter ? chart.charter : nil,
+                                        label: "谱面作者",
+                                        onCopy: copyText
+                                    )
+                                )
 
                                 AppInsetDivider()
 
@@ -426,11 +443,7 @@ struct SongDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .contentShape(Rectangle())
-                        .onLongPressGesture {
-                            if let desc {
-                                copyText(desc, label: "谱面说明")
-                            }
-                        }
+                        .modifier(CopyableContextModifier(value: desc, label: "谱面说明", onCopy: copyText))
                 }
             }
 
@@ -447,7 +460,7 @@ struct SongDetailView: View {
                                 text: alias,
                                 style: .regular
                             )
-                            .onLongPressGesture { copyText(alias, label: "别名") }
+                            .modifier(CopyableContextModifier(value: alias, label: "别名", onCopy: copyText))
                         }
                     }
                 }
@@ -766,5 +779,27 @@ private struct ChartToleranceCard: View {
 
     private func pct(_ ratio: Double) -> String {
         String(format: "%.4f%%", ratio * 100)
+    }
+}
+
+private struct CopyableContextModifier: ViewModifier {
+    let value: String?
+    let label: String
+    let onCopy: (String, String) -> Void
+
+    func body(content: Content) -> some View {
+        if let value, !value.isEmpty {
+            content
+                .onLongPressGesture { onCopy(value, label) }
+                .contextMenu {
+                    Button {
+                        onCopy(value, label)
+                    } label: {
+                        Label("复制\(label)", systemImage: "doc.on.doc")
+                    }
+                }
+        } else {
+            content
+        }
     }
 }

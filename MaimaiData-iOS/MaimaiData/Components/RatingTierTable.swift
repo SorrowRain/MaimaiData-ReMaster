@@ -30,7 +30,7 @@ struct RatingTierTable: View {
                 .padding(.vertical, AppTheme.Space.s)
 
                 ForEach(rows) { row in
-                    Divider()
+                    AppInsetDivider()
                     tierRowView(row)
                 }
             }

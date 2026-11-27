@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -92,7 +91,7 @@ fun SettingsScreen(
     val activeProfileSummary = store.activeIdentity?.primaryDisplayName ?: "未添加"
     val shortVersionText = "v${BuildConfig.VERSION_NAME}"
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(title = "设置与数据")
@@ -241,8 +240,8 @@ fun SettingsScreen(
 
     AppErrorDialog(
         title = "同步结果",
-        message = store.statusMessage,
-        onDismiss = { store.statusMessage = null }
+        message = store.catalogSyncMessage,
+        onDismiss = { store.catalogSyncMessage = null }
     )
 }
 
@@ -252,7 +251,7 @@ fun ServerRegionSettingsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val regions = MaimaiConstants.ServerRegion.entries
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(
@@ -319,7 +318,7 @@ fun ServerRegionSettingsScreen(onBack: () -> Unit) {
 fun PreferencesSettingsScreen(onBack: () -> Unit) {
     val store = LocalDataStore.current
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(
@@ -378,11 +377,17 @@ fun DataAndStorageSettingsScreen(onBack: () -> Unit) {
         }
     }
 
+    LaunchedEffect(store.catalogSyncToast) {
+        val notice = store.catalogSyncToast ?: return@LaunchedEffect
+        toastState.show(notice, durationMs = 2000L)
+        store.catalogSyncToast = null
+    }
+
     val formattedCacheSize = remember(context, cacheBytes) {
         cacheBytes?.let { Formatter.formatFileSize(context, it) } ?: "计算中..."
     }
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(
@@ -504,8 +509,8 @@ fun DataAndStorageSettingsScreen(onBack: () -> Unit) {
 
     AppErrorDialog(
         title = "同步结果",
-        message = store.statusMessage,
-        onDismiss = { store.statusMessage = null }
+        message = store.catalogSyncMessage,
+        onDismiss = { store.catalogSyncMessage = null }
     )
 }
 
@@ -573,14 +578,21 @@ fun AboutScreen(onBack: () -> Unit) {
     val store = LocalDataStore.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val toastState = rememberToastState()
     val versionText = "v${BuildConfig.VERSION_NAME}"
     val iconShape = RoundedCornerShape(AppTheme.Radius.card)
+
+    LaunchedEffect(store.appUpdateToast) {
+        val notice = store.appUpdateToast ?: return@LaunchedEffect
+        toastState.show(notice, durationMs = 2200L)
+        store.appUpdateToast = null
+    }
 
     fun openExternalUrl(url: String) {
         ExternalLinkLauncher.open(context, url)
     }
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(
@@ -590,18 +602,21 @@ fun AboutScreen(onBack: () -> Unit) {
             },
             containerColor = Color.Transparent
         ) { innerPadding ->
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.m),
-                verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
             ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.m),
+                    verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
+                ) {
                 // 1. Minimalist App Identity Card
                 AppCard(
-                    padding = AppTheme.cardPadding,
-                    tint = AppTheme.accent
+                    padding = AppTheme.cardPadding
                 ) {
                     Column(
                         modifier = Modifier
@@ -770,13 +785,19 @@ fun AboutScreen(onBack: () -> Unit) {
                     }
                 }
             }
+
+                StatusToastHost(
+                    toastState = toastState,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
+            }
         }
     }
 
     AppErrorDialog(
         title = "版本检查",
-        message = store.statusMessage,
-        onDismiss = { store.statusMessage = null }
+        message = store.appUpdateMessage,
+        onDismiss = { store.appUpdateMessage = null }
     )
 }
 
@@ -788,7 +809,7 @@ fun AcknowledgmentsScreen(onBack: () -> Unit) {
         ExternalLinkLauncher.open(context, url)
     }
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(

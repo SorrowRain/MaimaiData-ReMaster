@@ -53,7 +53,7 @@ struct AccountManagementView: View {
     }
 
     private var credentialStoreWarningBanner: some View {
-        AppCard(padding: AppTheme.cardPadding, tint: AppTheme.warning) {
+        AppCard(padding: AppTheme.cardPadding) {
             VStack(alignment: .leading, spacing: AppTheme.Space.s) {
                 HStack(alignment: .center, spacing: AppTheme.Space.s) {
                     Text("安全存储读取受限")
@@ -107,7 +107,6 @@ struct AccountManagementView: View {
         return NavigationLink(value: IdentityDetailRoute(identityId: identity.id)) {
             AppInsetRow(
                 title: identity.primaryDisplayName,
-                subtitle: identity.boundChannelsSummary,
                 showsChevron: true
             ) {
                 if isCurrent {

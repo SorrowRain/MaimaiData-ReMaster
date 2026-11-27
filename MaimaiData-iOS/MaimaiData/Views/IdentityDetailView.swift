@@ -129,7 +129,7 @@ struct IdentityDetailView: View {
     // MARK: - Sections
 
     private func summaryCard(_ identity: PlayerIdentity) -> some View {
-        AppCard(padding: AppTheme.cardPadding, tint: AppTheme.accent) {
+        AppCard(padding: AppTheme.cardPadding) {
             VStack(alignment: .leading, spacing: AppTheme.Space.xs) {
                 HStack(alignment: .center, spacing: AppTheme.Space.s) {
                     Text(identity.primaryDisplayName)

@@ -23,7 +23,6 @@ import dev.sorrowrain.maimaidata.models.SyncPlan
 import dev.sorrowrain.maimaidata.models.WritebackChannelStatus
 import dev.sorrowrain.maimaidata.models.WritebackSummary
 import dev.sorrowrain.maimaidata.services.AccountCredentialStore
-import dev.sorrowrain.maimaidata.services.DXDataIdMap
 import dev.sorrowrain.maimaidata.services.MaimaiAPI
 import dev.sorrowrain.maimaidata.services.MaimaiAPIException
 import dev.sorrowrain.maimaidata.services.ScoreSyncEngine
@@ -31,12 +30,6 @@ import dev.sorrowrain.maimaidata.services.SongFilter
 import dev.sorrowrain.maimaidata.services.SyncDiagnostics
 import dev.sorrowrain.maimaidata.services.SyncHistoryStore
 import dev.sorrowrain.maimaidata.services.SyncServiceConfig
-import dev.sorrowrain.maimaidata.services.ZetarakuCatalog
-import dev.sorrowrain.maimaidata.services.ZetarakuCatalogConverter
-import dev.sorrowrain.maimaidata.services.ZetarakuNoteCounts
-import dev.sorrowrain.maimaidata.services.ZetarakuRegions
-import dev.sorrowrain.maimaidata.services.ZetarakuSheet
-import dev.sorrowrain.maimaidata.services.ZetarakuSong
 import kotlinx.serialization.Serializable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -733,94 +726,20 @@ class SyncEngineAndIdentityTests {
     }
 
     @Test
-    fun testResolveDeletedCNSongsAndSongFilterPlayedDisabled() {
-        val regions = ZetarakuRegions(jp = false, intl = true, usa = false, cn = false)
-        val sheets = listOf(
-            ZetarakuSheet(
-                type = "std",
-                difficulty = "basic",
-                level = "3",
-                levelValue = 3.0,
-                internalLevelValue = 3.0,
-                noteDesigner = "-",
-                noteCounts = ZetarakuNoteCounts(tap = 50, hold = 5, slide = 2, touch = null, breakCount = 1, total = 58),
-                regions = regions
-            ),
-            ZetarakuSheet(
-                type = "std",
-                difficulty = "advanced",
-                level = "6",
-                levelValue = 6.0,
-                internalLevelValue = 6.0,
-                noteDesigner = "-",
-                noteCounts = ZetarakuNoteCounts(tap = 90, hold = 8, slide = 6, touch = null, breakCount = 2, total = 106),
-                regions = regions
-            ),
-            ZetarakuSheet(
-                type = "std",
-                difficulty = "expert",
-                level = "10",
-                levelValue = 10.0,
-                internalLevelValue = 10.2,
-                noteDesigner = "CharterE",
-                noteCounts = ZetarakuNoteCounts(tap = 180, hold = 12, slide = 20, touch = null, breakCount = 4, total = 216),
-                regions = regions
-            ),
-            ZetarakuSheet(
-                type = "std",
-                difficulty = "master",
-                level = "13",
-                levelValue = 13.0,
-                internalLevelValue = 13.4,
-                noteDesigner = "CharterM",
-                noteCounts = ZetarakuNoteCounts(tap = 320, hold = 20, slide = 45, touch = null, breakCount = 8, total = 393),
-                regions = regions
-            )
-        )
-        val zSong = ZetarakuSong(
-            songId = "revived_181",
-            category = "POPS＆アニメ",
-            title = "Revived Track",
-            artist = "Tester",
-            bpm = 150.0,
-            imageName = "revived_181.png",
-            version = "FESTiVAL",
-            sheets = sheets
-        )
-        val catalog = ZetarakuCatalog(songs = listOf(zSong))
-        val idMap = DXDataIdMap(
-            idsByKey = mapOf("Revived Track|流行&动漫|${MaimaiConstants.CHART_TYPE_SD}" to 181)
-        )
-
-        val resolution = ZetarakuCatalogConverter.resolveDeletedCNSongs(
-            unknownIds = setOf(181, 999_999),
-            catalog = catalog,
-            dxIdMap = idMap
-        )
-        assertEquals(1, resolution.resolved.size)
-        assertEquals(setOf(999_999), resolution.unresolvableIds)
-        val resolvedSong = resolution.resolved.first()
-        assertEquals("181", resolvedSong.id)
-        assertEquals(true, resolvedSong.isDisabled)
-        assertEquals(true, resolvedSong.preferRemoteCover)
-        assertEquals(listOf(3.0, 6.0, 10.2, 13.4), resolvedSong.ds)
-
+    fun testSongFilterAlwaysHidesDisabledSongs() {
         val activeSong = loadVectors().songs.first { !it.isUtage }
-        val unplayedFiltered = SongFilter.apply(
-            songs = listOf(activeSong, resolvedSong),
-            criteria = SongFilterCriteria(),
-            region = MaimaiConstants.ServerRegion.CN,
-            playedSongIds = emptySet()
+        val disabledSong = activeSong.copy(
+            id = "181",
+            title = "Deleted Track",
+            isDisabled = true
         )
-        assertEquals(listOf(activeSong.numericId), unplayedFiltered.map { it.numericId })
 
-        val playedFiltered = SongFilter.apply(
-            songs = listOf(activeSong, resolvedSong),
+        val filtered = SongFilter.apply(
+            songs = listOf(activeSong, disabledSong),
             criteria = SongFilterCriteria(),
-            region = MaimaiConstants.ServerRegion.CN,
-            playedSongIds = setOf(181)
+            region = MaimaiConstants.ServerRegion.CN
         )
-        assertEquals(setOf(activeSong.numericId, 181), playedFiltered.map { it.numericId }.toSet())
+        assertEquals(listOf(activeSong.numericId), filtered.map { it.numericId })
     }
 
     @Test
@@ -890,72 +809,6 @@ class SyncEngineAndIdentityTests {
         assertEquals("", item.customNickname)
         assertFalse(item.hasMixedScoreSources)
         assertNull(item.lastSyncMode)
-    }
-
-    @Test
-    fun testResolveDeletedCNSongsSkipsActiveAndNewCNCircleSongs() {
-        val activeCNRegions = ZetarakuRegions(jp = true, intl = true, usa = false, cn = true)
-        val jpOnlyRegions = ZetarakuRegions(jp = true, intl = false, usa = false, cn = false)
-        val dummyCounts = ZetarakuNoteCounts(tap = 100, hold = 10, slide = 10, touch = null, breakCount = 2, total = 122)
-
-        val activeSong = ZetarakuSong(
-            songId = "active_cn_101",
-            category = "POPS＆アニメ",
-            title = "Active CN Track",
-            artist = "Tester",
-            bpm = 150.0,
-            imageName = "active_cn_101.png",
-            version = "FESTiVAL",
-            sheets = listOf(
-                ZetarakuSheet(
-                    type = "std",
-                    difficulty = "master",
-                    level = "13",
-                    levelValue = 13.0,
-                    internalLevelValue = 13.2,
-                    noteDesigner = "Charter",
-                    noteCounts = dummyCounts,
-                    regions = activeCNRegions
-                )
-            )
-        )
-        val circleSong = ZetarakuSong(
-            songId = "new_cn_circle_102",
-            category = "POPS＆アニメ",
-            title = "New CiRCLE Track",
-            artist = "Tester",
-            bpm = 160.0,
-            imageName = "new_cn_circle_102.png",
-            version = "CiRCLE",
-            sheets = listOf(
-                ZetarakuSheet(
-                    type = "dx",
-                    difficulty = "master",
-                    level = "13",
-                    levelValue = 13.0,
-                    internalLevelValue = 13.3,
-                    noteDesigner = "Charter",
-                    noteCounts = dummyCounts,
-                    regions = jpOnlyRegions
-                )
-            )
-        )
-
-        val catalog = ZetarakuCatalog(songs = listOf(activeSong, circleSong))
-        val idMap = DXDataIdMap(
-            idsByKey = mapOf(
-                "Active CN Track|流行&动漫|${MaimaiConstants.CHART_TYPE_SD}" to 101,
-                "New CiRCLE Track|流行&动漫|${MaimaiConstants.CHART_TYPE_DX}" to 102
-            )
-        )
-
-        val resolution = ZetarakuCatalogConverter.resolveDeletedCNSongs(
-            unknownIds = setOf(101, 102),
-            catalog = catalog,
-            dxIdMap = idMap
-        )
-        assertTrue(resolution.resolved.isEmpty())
-        assertTrue(resolution.unresolvableIds.isEmpty())
     }
 
     @Test

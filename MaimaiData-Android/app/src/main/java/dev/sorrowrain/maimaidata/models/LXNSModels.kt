@@ -126,6 +126,7 @@ data class LXNSSongDifficulty(
     @SerialName("level_value") val levelValue: Double,
     @SerialName("note_designer") val noteDesigner: String? = null,
     val version: Int? = null,
+    @SerialName("release_date") val releaseDate: String? = null,
     val notes: LXNSNotes? = null
 )
 
@@ -193,6 +194,7 @@ data class LXNSSongDifficultyUtage(
     @SerialName("level_value") val levelValue: Double? = null,
     @SerialName("note_designer") val noteDesigner: String? = null,
     val version: Int? = null,
+    @SerialName("release_date") val releaseDate: String? = null,
     val kanji: String? = null,
     val description: String? = null,
     @SerialName("is_buddy") val isBuddy: Boolean? = null,
@@ -263,8 +265,15 @@ data class PlateCheckScope(
     val id: String,
     val title: String,
     val versionAsset: String,
-    val rule: Rule
+    val rule: Rule,
+    val goal: Goal = Goal.STANDARD,
+    val hasJiangBadge: Boolean = true
 ) {
+    enum class Goal {
+        STANDARD,
+        CLEAR
+    }
+
     sealed class Rule {
         data class ExplicitIds(
             val basicToMaster: Set<Int>,
@@ -318,7 +327,9 @@ data class PlateCheckScope(
             id = "default",
             title = "真 · maimai ~ PLUS",
             versionAsset = "maimai",
-            rule = Rule.ExplicitIds(basicToMaster = emptySet(), remaster = emptySet())
+            rule = Rule.ExplicitIds(basicToMaster = emptySet(), remaster = emptySet()),
+            goal = Goal.STANDARD,
+            hasJiangBadge = false
         )
     }
 }

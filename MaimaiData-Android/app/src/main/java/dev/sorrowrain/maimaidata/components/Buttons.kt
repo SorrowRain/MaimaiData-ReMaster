@@ -1,9 +1,12 @@
 package dev.sorrowrain.maimaidata.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -32,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -183,12 +187,14 @@ fun AppInlineButton(
     enabled: Boolean = true,
     tint: Color = AppTheme.accent,
     isNeutral: Boolean = false,
+    isSolidActive: Boolean = false,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     TintedActionCapsuleSurface(
         tint = tint,
         isNeutral = isNeutral,
+        isSolidActive = isSolidActive,
         enabled = enabled && !isLoading,
         dimmed = !enabled,
         modifier = modifier,
@@ -258,6 +264,7 @@ fun AppMenuCapsule(
 private fun TintedActionCapsuleSurface(
     tint: Color,
     isNeutral: Boolean,
+    isSolidActive: Boolean = false,
     enabled: Boolean,
     dimmed: Boolean,
     modifier: Modifier = Modifier,
@@ -265,27 +272,28 @@ private fun TintedActionCapsuleSurface(
     content: @Composable RowScope.() -> Unit
 ) {
     val isDark = LocalIsDarkTheme.current
-    val useNeutral = isNeutral || tint == Color.Unspecified
+    val useNeutral = !isSolidActive && (isNeutral || tint == Color.Unspecified)
 
-    val fgColor = if (useNeutral) {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    } else if (isDark) {
-        tint.brightened(minimumBrightness = 0.92f, maxSaturation = 0.65f)
-    } else {
-        tint
+    val fgColor = when {
+        isSolidActive -> Color.White
+        useNeutral -> MaterialTheme.colorScheme.onSurfaceVariant
+        isDark -> tint.brightened(minimumBrightness = 0.92f, maxSaturation = 0.65f)
+        else -> tint
     }
 
-    val bgColor = if (useNeutral) {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDark) 0.10f else 0.06f)
-    } else {
-        tint.copy(alpha = if (isDark) 0.18f else 0.11f)
+    val bgColor = when {
+        isSolidActive -> tint
+        useNeutral -> MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDark) 0.10f else 0.06f)
+        else -> tint.copy(alpha = if (isDark) 0.18f else 0.11f)
     }
 
-    val strokeColor = if (useNeutral) {
-        MaterialTheme.colorScheme.outline.copy(alpha = if (isDark) 0.42f else 0.35f)
-    } else {
-        tint.copy(alpha = if (isDark) 0.35f else 0.22f)
+    val strokeColor = when {
+        isSolidActive -> Color.Transparent
+        useNeutral -> MaterialTheme.colorScheme.outline.copy(alpha = if (isDark) 0.42f else 0.35f)
+        else -> tint.copy(alpha = if (isDark) 0.35f else 0.22f)
     }
+
+    val interactionSource = remember { MutableInteractionSource() }
 
     CompositionLocalProvider(LocalContentColor provides fgColor) {
         Row(
@@ -293,8 +301,16 @@ private fun TintedActionCapsuleSurface(
                 .alpha(if (dimmed) 0.45f else 1f)
                 .clip(CircleShape)
                 .background(bgColor, CircleShape)
-                .border(0.8.dp, strokeColor, CircleShape)
+                .then(
+                    if (isSolidActive) {
+                        Modifier
+                    } else {
+                        Modifier.border(0.8.dp, strokeColor, CircleShape)
+                    }
+                )
                 .clickable(
+                    interactionSource = interactionSource,
+                    indication = LocalIndication.current,
                     enabled = enabled,
                     role = Role.Button,
                     onClick = onClick
@@ -308,7 +324,7 @@ private fun TintedActionCapsuleSurface(
 }
 
 /**
- * 36dp circular tonal icon button with required accessibility [contentDescription].
+ * 36dp circular tonal icon button inside a 48dp accessible hit target.
  */
 @Composable
 fun AppCircleIconButton(
@@ -320,31 +336,45 @@ fun AppCircleIconButton(
     onClick: () -> Unit
 ) {
     val isDark = LocalIsDarkTheme.current
+    val interactionSource = remember { MutableInteractionSource() }
     val borderColor = if (isDark) {
         MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
     } else {
         MaterialTheme.colorScheme.outlineVariant
     }
 
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
+    Box(
         modifier = modifier
-            .size(36.dp)
-            .alpha(if (enabled) 1f else 0.42f),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = tint,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, borderColor)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(18.dp)
-            )
+        Surface(
+            modifier = Modifier
+                .size(36.dp)
+                .alpha(if (enabled) 1f else 0.42f)
+                .clip(CircleShape)
+                .indication(interactionSource, LocalIndication.current),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = tint,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            border = BorderStroke(1.dp, borderColor)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }

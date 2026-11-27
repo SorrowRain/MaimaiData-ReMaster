@@ -129,17 +129,6 @@ enum MaimaiConstants {
     /// Filter chips mirror grouped version chips for CN (derived from `cnVersionRegistry`).
     static let searchVersions: [String] = classicEraChips + cnVersionRegistry.filter { !$0.isClassicEra }.map(\.name)
 
-    static func checklistVersions(for region: ServerRegion) -> [(name: String, asset: String)] {
-        switch region {
-        case .cn:
-            return cnVersions
-        case .intl:
-            return jpVersionRegistry.filter(\.isIntlAvailableByDefault).map { ($0.name, $0.asset) }
-        case .jp:
-            return jpVersions
-        }
-    }
-
     static func searchVersionChips(for region: ServerRegion) -> [String] {
         switch region {
         case .cn:
@@ -322,6 +311,45 @@ enum MaimaiConstants {
         }
         let safeRate = validRankKeys.contains(lower) ? lower : "d"
         return "mmd_rank_\(rankIconTheme(for: region).rawValue)_\(safeRate)"
+    }
+
+    /// Single source of truth for chart constant (`ds`) range & Level-15 decimal locking across filter/calculator UIs.
+    static let minConstantDS: Double = 1.0
+    static let maxConstantDS: Double = 15.0
+    static let minLevelInteger: Int = 1
+    static let maxLevelInteger: Int = 15
+
+    static func clampExactDS(_ ds: Double) -> Double {
+        min(max(minConstantDS, ds), maxConstantDS)
+    }
+
+    static func splitExactDS(_ ds: Double) -> (intPart: Int, decPart: Int) {
+        let tenths = Int((clampExactDS(ds) * 10.0).rounded())
+        let intPart = min(max(minLevelInteger, tenths / 10), maxLevelInteger)
+        let decPart = intPart >= maxLevelInteger ? 0 : min(max(0, tenths % 10), 9)
+        return (intPart, decPart)
+    }
+
+    static func effectiveDecimalDigit(forInt intPart: Int, preferred: Int) -> Int {
+        intPart >= maxLevelInteger ? 0 : min(max(0, preferred), 9)
+    }
+
+    static func effectiveFilterDecimalIndex(levelIndex: Int, baseIntLevel: Int, preferredDecIdx: Int) -> Int {
+        if levelIndex == 0 { return 0 }
+        if baseIntLevel >= maxLevelInteger { return preferredDecIdx > 0 ? 1 : 0 }
+        return min(max(0, preferredDecIdx), 10)
+    }
+
+    static func composeExactDS(intPart: Int, decPart: Int) -> Double {
+        let clampedInt = min(max(minLevelInteger, intPart), maxLevelInteger)
+        let effectiveDec = effectiveDecimalDigit(forInt: clampedInt, preferred: decPart)
+        return clampExactDS(Double(clampedInt) + Double(effectiveDec) / 10.0)
+    }
+
+    static func baseIntegerLevel(forLevelIndex index: Int) -> Int {
+        guard index > 0, allLevels.indices.contains(index) else { return minLevelInteger }
+        let raw = allLevels[index].replacingOccurrences(of: "+", with: "")
+        return Int(raw) ?? minLevelInteger
     }
 
     /// Resolves the version logo asset and fallback label for the active game server.

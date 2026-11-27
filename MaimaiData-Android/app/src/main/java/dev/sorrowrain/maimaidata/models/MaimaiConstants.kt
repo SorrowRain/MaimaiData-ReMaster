@@ -122,12 +122,6 @@ object MaimaiConstants {
 
     val searchVersions: List<String> = classicEraChips + cnVersionRegistry.filterNot { it.isClassicEra }.map { it.name }
 
-    fun checklistVersions(region: ServerRegion): List<VersionAsset> = when (region) {
-        ServerRegion.CN -> cnVersions
-        ServerRegion.INTL -> jpVersionRegistry.filter { it.isIntlAvailableByDefault }.map { VersionAsset(it.name, it.asset) }
-        ServerRegion.JP -> jpVersions
-    }
-
     fun searchVersionChips(region: ServerRegion): List<String> = when (region) {
         ServerRegion.CN -> searchVersions
         ServerRegion.INTL -> {
@@ -142,6 +136,41 @@ object MaimaiConstants {
                 .map { it.name }
             classicEraChips + dxNames
         }
+    }
+
+    /** Single source of truth for chart constant (`ds`) range & Level-15 decimal locking across filter/calculator UIs. */
+    const val MIN_CONSTANT_DS = 1.0
+    const val MAX_CONSTANT_DS = 15.0
+    const val MIN_LEVEL_INTEGER = 1
+    const val MAX_LEVEL_INTEGER = 15
+
+    fun clampExactDS(ds: Double): Double = ds.coerceIn(MIN_CONSTANT_DS, MAX_CONSTANT_DS)
+
+    fun splitExactDS(ds: Double): Pair<Int, Int> {
+        val tenths = kotlin.math.round(clampExactDS(ds) * 10.0).toInt()
+        val intPart = (tenths / 10).coerceIn(MIN_LEVEL_INTEGER, MAX_LEVEL_INTEGER)
+        val decPart = if (intPart >= MAX_LEVEL_INTEGER) 0 else (tenths % 10).coerceIn(0, 9)
+        return intPart to decPart
+    }
+
+    fun effectiveDecimalDigit(intPart: Int, preferred: Int): Int =
+        if (intPart >= MAX_LEVEL_INTEGER) 0 else preferred.coerceIn(0, 9)
+
+    fun effectiveFilterDecimalIndex(levelIndex: Int, baseIntLevel: Int, preferredDecIdx: Int): Int = when {
+        levelIndex == 0 -> 0
+        baseIntLevel >= MAX_LEVEL_INTEGER -> if (preferredDecIdx > 0) 1 else 0
+        else -> preferredDecIdx.coerceIn(0, 10)
+    }
+
+    fun composeExactDS(intPart: Int, decPart: Int): Double {
+        val clampedInt = intPart.coerceIn(MIN_LEVEL_INTEGER, MAX_LEVEL_INTEGER)
+        val effectiveDec = effectiveDecimalDigit(clampedInt, decPart)
+        return clampExactDS(clampedInt + effectiveDec / 10.0)
+    }
+
+    fun baseIntegerLevel(levelIndex: Int): Int {
+        if (levelIndex <= 0 || levelIndex !in allLevels.indices) return MIN_LEVEL_INTEGER
+        return allLevels[levelIndex].replace("+", "").toIntOrNull() ?: MIN_LEVEL_INTEGER
     }
 
     /** Parses level string (`"14+"` -> `14.5`, `"13"` -> `13.0`) for consistent sorting. */

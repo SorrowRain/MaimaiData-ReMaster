@@ -77,7 +77,7 @@ fun RatingToolsScreen(
     }
     val isLoggedIn = store.isLoggedIn
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(title = "Rating 与查分")
@@ -98,8 +98,7 @@ fun RatingToolsScreen(
                 ) {
                     // 1. Player & Rating Summary Card
                     AppCard(
-                        padding = AppTheme.cardPadding,
-                        tint = AppTheme.accent
+                        padding = AppTheme.cardPadding
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),

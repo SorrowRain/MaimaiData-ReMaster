@@ -56,7 +56,8 @@ object LXNSCatalogConverter {
         "白" to PlateMeta("白", "白 · MiLK", "maimai_milk"),
         "雪" to PlateMeta("雪", "雪 · MiLK PLUS", "maimai_milk_plus"),
         "輝" to PlateMeta("輝", "輝 · FiNALE", "maimai_finale"),
-        "覇者/舞" to PlateMeta("舞", "舞 / 覇者 · 旧框全曲", "maimai_finale"),
+        "覇者/舞" to PlateMeta("舞", "舞 · 旧框全曲", "maimai_finale"),
+        "舞/覇者" to PlateMeta("舞", "舞 · 旧框全曲", "maimai_finale"),
         "熊/華" to PlateMeta("熊華", "熊 / 華 · 舞萌DX", "maimaidx_cn"),
         "爽/煌" to PlateMeta("爽煌", "爽 / 煌 · 舞萌DX 2021", "maimaidx_2021"),
         "宙/星" to PlateMeta("宙星", "宙 / 星 · 舞萌DX 2022", "maimaidx_2022"),
@@ -194,6 +195,7 @@ object LXNSCatalogConverter {
                     type = MaimaiConstants.CHART_TYPE_DX,
                     alias = resolvedAliases,
                     comment = comment,
+                    releaseDate = u.releaseDate ?: song.releaseDate,
                     isDisabled = isDisabledFlag
                 )
                 continue
@@ -229,6 +231,7 @@ object LXNSCatalogConverter {
                     title = song.title,
                     type = MaimaiConstants.CHART_TYPE_SD,
                     alias = resolvedAliases,
+                    releaseDate = stdDiffs.first().releaseDate ?: song.releaseDate,
                     isDisabled = isDisabledFlag
                 )
             }
@@ -264,6 +267,7 @@ object LXNSCatalogConverter {
                     title = song.title,
                     type = MaimaiConstants.CHART_TYPE_DX,
                     alias = resolvedAliases,
+                    releaseDate = dxDiffs.first().releaseDate ?: song.releaseDate,
                     isDisabled = isDisabledFlag
                 )
             }
@@ -296,23 +300,43 @@ object LXNSCatalogConverter {
 
         for (plate in response.plates) {
             if (plate.genre != "実績") continue
-            val reqs = plate.required ?: continue
-            val firstReq = reqs.firstOrNull() ?: continue
+            val reqs = plate.required?.takeIf { it.isNotEmpty() } ?: continue
             val name = plate.name
             val isVersionPlate = (name == "覇者") || validSuffixes.any { name.endsWith(it) }
             if (!isVersionPlate) continue
 
-            val b2mIds = firstReq.songs.orEmpty().map { normalizeSongId(it.id, it.type) }
-            if (b2mIds.size <= 1) continue
-            val remIds = if (reqs.size > 1) {
-                reqs[1].songs.orEmpty().map { normalizeSongId(it.id, it.type) }
-            } else {
-                emptyList()
+            val b2mIds = mutableListOf<Int>()
+            val b2mSet = HashSet<Int>()
+            val remIds = mutableListOf<Int>()
+            val remSet = HashSet<Int>()
+            for (req in reqs) {
+                val ids = req.songs.orEmpty().map { normalizeSongId(it.id, it.type) }
+                if (ids.isEmpty()) continue
+                val diffs = req.difficulties.orEmpty().toSet()
+                when {
+                    diffs == setOf(4) -> {
+                        for (id in ids) if (remSet.add(id)) remIds += id
+                    }
+                    diffs.isNotEmpty() && diffs.all { it in 0..3 } -> {
+                        for (id in ids) if (b2mSet.add(id)) b2mIds += id
+                    }
+                    4 in diffs -> {
+                        for (id in ids) {
+                            if (b2mSet.add(id)) b2mIds += id
+                            if (remSet.add(id)) remIds += id
+                        }
+                    }
+                    b2mIds.isEmpty() -> {
+                        for (id in ids) if (b2mSet.add(id)) b2mIds += id
+                    }
+                    else -> {
+                        for (id in ids) if (remSet.add(id)) remIds += id
+                    }
+                }
             }
+            if (b2mIds.size <= 1) continue
 
             val prefix = if (name == "覇者") "覇者" else name.take(1)
-            val b2mSet = b2mIds.toSet()
-            val remSet = remIds.toSet()
 
             val existing = drafts.firstOrNull { it.b2mSet == b2mSet && it.remSet == remSet }
             if (existing != null) {
@@ -474,21 +498,69 @@ object LXNSCatalogConverter {
         zetarakuVersions: List<ZetarakuVersionEntry>? = null
     ): List<PlateCheckScope> {
         if (region == MaimaiConstants.ServerRegion.CN) {
-            return cnPlateGroups.map { group ->
-                PlateCheckScope(
-                    id = group.id,
-                    title = group.title,
-                    versionAsset = group.resolvedVersionAsset,
-                    rule = PlateCheckScope.Rule.ExplicitIds(
-                        basicToMaster = group.basicToMasterSongIds.toSet(),
-                        remaster = group.remasterSongIds.toSet()
-                    )
+            var seenHasya = false
+            return cnPlateGroups.flatMap { group ->
+                val rule = PlateCheckScope.Rule.ExplicitIds(
+                    basicToMaster = group.basicToMasterSongIds.toSet(),
+                    remaster = group.remasterSongIds.toSet()
                 )
+                if (group.id == "覇者") {
+                    if (seenHasya) return@flatMap emptyList()
+                    seenHasya = true
+                    return@flatMap listOf(
+                        PlateCheckScope(
+                            id = "覇者",
+                            title = "覇者 · 旧框全曲",
+                            versionAsset = "maimai_finale",
+                            rule = rule,
+                            goal = PlateCheckScope.Goal.CLEAR,
+                            hasJiangBadge = false
+                        )
+                    )
+                }
+                val normalizedTitle = if (group.id == "舞" && "覇者" in group.title) {
+                    "舞 · 旧框全曲"
+                } else {
+                    group.title
+                }
+                val hasJiang = group.id != "真" && (group.badges.isEmpty() || group.badges.any { it.endsWith("将") })
+                buildList {
+                    add(
+                        PlateCheckScope(
+                            id = group.id,
+                            title = normalizedTitle,
+                            versionAsset = group.resolvedVersionAsset,
+                            rule = rule,
+                            goal = PlateCheckScope.Goal.STANDARD,
+                            hasJiangBadge = hasJiang
+                        )
+                    )
+                    if (!seenHasya && (group.id == "舞" || "覇者" in group.badges)) {
+                        seenHasya = true
+                        add(
+                            PlateCheckScope(
+                                id = "覇者",
+                                title = "覇者 · 旧框全曲",
+                                versionAsset = "maimai_finale",
+                                rule = rule,
+                                goal = PlateCheckScope.Goal.CLEAR,
+                                hasJiangBadge = false
+                            )
+                        )
+                    }
+                }
             }
         }
 
         val cnMaiRemasterIds = cnPlateGroups.firstOrNull { it.id == "舞" }?.remasterSongIds?.toSet().orEmpty()
         val sdRemasterIds = cnMaiRemasterIds union additionalOverseasSdRemasterIds
+        val maiClassicRule = PlateCheckScope.Rule.Versions(
+            includedVersions = MaimaiConstants.overseasClassicVersions,
+            excludedIds = setOf(853),
+            excludedStandardTitles = setOf("前前前世"),
+            sdRemasterIds = sdRemasterIds,
+            sdRemasterFallbackTitles = additionalOverseasSdRemasterTitles
+        )
 
         val scopes = mutableListOf(
             PlateCheckScope(
@@ -499,7 +571,8 @@ object LXNSCatalogConverter {
                     includedVersions = setOf("maimai", "maimai PLUS"),
                     excludedIds = setOf(70),
                     excludedStandardTitles = setOf("ジングルベル")
-                )
+                ),
+                hasJiangBadge = false
             ),
             PlateCheckScope("超", "超 · GreeN", "maimai_green", PlateCheckScope.Rule.Versions(setOf("GreeN"))),
             PlateCheckScope("檄", "檄 · GreeN PLUS", "maimai_green_plus", PlateCheckScope.Rule.Versions(setOf("GreeN PLUS"))),
@@ -523,15 +596,19 @@ object LXNSCatalogConverter {
             PlateCheckScope("輝", "輝 · FiNALE", "maimai_finale", PlateCheckScope.Rule.Versions(setOf("FiNALE"))),
             PlateCheckScope(
                 id = "舞",
-                title = "舞 / 覇者 · 旧框全曲",
+                title = "舞 · 旧框全曲",
                 versionAsset = "maimai_finale",
-                rule = PlateCheckScope.Rule.Versions(
-                    includedVersions = MaimaiConstants.overseasClassicVersions,
-                    excludedIds = setOf(853),
-                    excludedStandardTitles = setOf("前前前世"),
-                    sdRemasterIds = sdRemasterIds,
-                    sdRemasterFallbackTitles = additionalOverseasSdRemasterTitles
-                )
+                rule = maiClassicRule,
+                goal = PlateCheckScope.Goal.STANDARD,
+                hasJiangBadge = true
+            ),
+            PlateCheckScope(
+                id = "覇者",
+                title = "覇者 · 旧框全曲",
+                versionAsset = "maimai_finale",
+                rule = maiClassicRule,
+                goal = PlateCheckScope.Goal.CLEAR,
+                hasJiangBadge = false
             ),
             PlateCheckScope("熊", "熊 · でらっくす", "maimaidx", PlateCheckScope.Rule.Versions(setOf("maimaiでらっくす"))),
             PlateCheckScope("華", "華 · でらっくす PLUS", "maimaidx_plus", PlateCheckScope.Rule.Versions(setOf("maimaiでらっくす PLUS"))),

@@ -5,8 +5,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -15,18 +13,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.remember
 
 val LocalIsDarkTheme = staticCompositionLocalOf { false }
+
+enum class AppSurfaceLevel {
+    Page,
+    Sheet
+}
+
+val LocalSurfaceLevel = staticCompositionLocalOf { AppSurfaceLevel.Page }
 
 /**
  * Global Material 3 + maimai DX domain design tokens (1:1 locked palette with iOS `AppTheme.swift`).
@@ -35,6 +41,7 @@ object AppTheme {
     // Brand & Accent Colors
     val accent = Color(0xFF1668DC)
     val accentBright = Color(0xFF2B88FF)
+    val accentBrightElevated = Color(0xFF4EA1FF)
     val favoritePink = Palette.noteBreak
     val destructive = Color(0xFFDC2626)
     val destructiveDark = Color(0xFFF87171)
@@ -44,7 +51,11 @@ object AppTheme {
     val accentText: Color
         @Composable
         @ReadOnlyComposable
-        get() = if (LocalIsDarkTheme.current) accentBright else accent
+        get() = when {
+            !LocalIsDarkTheme.current -> accent
+            LocalSurfaceLevel.current == AppSurfaceLevel.Sheet -> accentBrightElevated
+            else -> accentBright
+        }
 
     val destructiveText: Color
         @Composable
@@ -65,6 +76,12 @@ object AppTheme {
 
         // Chart / delta
         val chartRemaster = Color(0xFF762D8C)
+        /** Solid lavender-white Re:MASTER surface & deep-purple text in dark mode (single source of truth). */
+        val remasterDarkFill = Color(0xFFECE2F4)
+        val remasterDarkText = Color(0xFF43155F)
+        val remasterDarkSubtleFill = Color(0xFFECE2F4).copy(alpha = 0.20f)
+        val remasterDarkSubtleText = Color(0xFFF0E8F7)
+        val remasterDarkSubtleBorder = Color(0xFFECE2F4).copy(alpha = 0.55f)
         val deltaUp = Color(0xFFE53935)
         val deltaDown = Color(0xFF1E8E3E)
 
@@ -127,21 +144,47 @@ object AppTheme {
         val genreOtherText = Color(0xFF125BB8)
         val genreGameCardFill = Color(0xFF398428)
 
-        // Checklist stat pills
+        // Checklist stat pills (solid fill tokens darken SSS/AP for >= 4.5:1 white text contrast)
         val statSSS = Color(0xFFB46900)
+        val statSSSFill = Color(0xFFA35F00)
         val statFC = Color(0xFF237818)
         val statAP = Color(0xFFC85A00)
+        val statAPFill = Color(0xFFB55000)
         val statFSD = Color(0xFF0A6BA1)
 
         val progressAccent = noteHold
 
-        // Surfaces & page backgrounds (Material 3 clean neutral-blue tonal surfaces)
+        // Neutral dark & light surfaces
+        val pageLight = Color(0xFFF2F2F7)
+        val pageDark = Color(0xFF0F0F10)
         val surfaceLight = Color(0xFFFFFFFF)
-        val surfaceDark = Color(0xFF172135)
-        val insetLight = Color(0xFFF3F6FC)
-        val insetDark = Color(0xFF101829)
-        val pageDarkGradient = listOf(Color(0xFF0B1120), Color(0xFF0F172A), Color(0xFF111827))
-        val pageLightGradient = listOf(Color(0xFFEFF4FC), Color(0xFFF5F8FD), Color(0xFFF1F5FB))
+        val surfaceDark = Color(0xFF1A1A1C)
+        val insetLight = Color(0xFFF5F5F7)
+        val insetDark = Color(0xFF242427)
+        val sheetLight = Color(0xFFF2F2F7)
+        val sheetDark = Color(0xFF1C1C1E)
+        val sheetCardDark = Color(0xFF2A2A2D)
+        val sheetInsetDark = Color(0xFF343437)
+        val raisedDark = Color(0xFF2E2E32)
+    }
+
+    /** Shared card surface color so `AppCard` and lazy-list sliced cards stay 100% consistent. */
+    fun cardSurfaceColor(
+        isDark: Boolean,
+        surfaceLevel: AppSurfaceLevel = AppSurfaceLevel.Page,
+        useRaisedSurface: Boolean = false
+    ): Color = when {
+        useRaisedSurface && isDark -> Palette.raisedDark
+        isDark && surfaceLevel == AppSurfaceLevel.Sheet -> Palette.sheetCardDark
+        isDark -> Palette.surfaceDark
+        else -> Palette.surfaceLight
+    }
+
+    /** Shared 1dp card hairline border color. */
+    fun cardBorderColor(isDark: Boolean): Color = if (isDark) {
+        Color.White.copy(alpha = 0.07f)
+    } else {
+        Color.Black.copy(alpha = 0.06f)
     }
 
     // Macro Layout Constants
@@ -215,35 +258,47 @@ private val LightColorScheme = lightColorScheme(
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFDCE4F2),
     onSecondaryContainer = Color(0xFF152238),
-    background = Color(0xFFF2F6FC),
-    onBackground = Color(0xFF0F172A),
+    background = AppTheme.Palette.pageLight,
+    onBackground = Color(0xFF141416),
     surface = AppTheme.Palette.surfaceLight,
-    onSurface = Color(0xFF0F172A),
+    onSurface = Color(0xFF141416),
     surfaceVariant = AppTheme.Palette.insetLight,
-    onSurfaceVariant = Color(0xFF526077),
-    outline = Color(0xFFCBD5E1),
-    outlineVariant = Color(0xFFE2E8F0),
+    onSurfaceVariant = Color(0xFF5F6368),
+    surfaceContainerLowest = AppTheme.Palette.surfaceLight,
+    surfaceContainerLow = AppTheme.Palette.sheetLight,
+    surfaceContainer = AppTheme.Palette.surfaceLight,
+    surfaceContainerHigh = AppTheme.Palette.surfaceLight,
+    surfaceContainerHighest = AppTheme.Palette.insetLight,
+    surfaceTint = Color.Transparent,
+    outline = Color(0xFFD1D5DB),
+    outlineVariant = Color(0xFFE5E7EB),
     error = AppTheme.destructive,
     onError = Color.White
 )
 
 private val DarkColorScheme = darkColorScheme(
     primary = AppTheme.accentBright,
-    onPrimary = Color(0xFF002D62),
-    primaryContainer = Color(0xFF103C78),
-    onPrimaryContainer = Color(0xFFD6E6FF),
-    secondary = Color(0xFFB3C5E2),
-    onSecondary = Color(0xFF1D2E47),
-    secondaryContainer = Color(0xFF283A56),
-    onSecondaryContainer = Color(0xFFD7E3F8),
-    background = Color(0xFF0B1120),
-    onBackground = Color(0xFFF1F5F9),
+    onPrimary = Color.White,
+    primaryContainer = AppTheme.Palette.raisedDark,
+    onPrimaryContainer = Color(0xFFF2F2F3),
+    secondary = Color(0xFFB4B4BA),
+    onSecondary = Color(0xFF1A1A1C),
+    secondaryContainer = AppTheme.Palette.sheetCardDark,
+    onSecondaryContainer = Color(0xFFF2F2F3),
+    background = AppTheme.Palette.pageDark,
+    onBackground = Color(0xFFF2F2F3),
     surface = AppTheme.Palette.surfaceDark,
-    onSurface = Color(0xFFF1F5F9),
+    onSurface = Color(0xFFF2F2F3),
     surfaceVariant = AppTheme.Palette.insetDark,
-    onSurfaceVariant = Color(0xFF94A3B8),
-    outline = Color(0xFF334155),
-    outlineVariant = Color(0xFF1E293B),
+    onSurfaceVariant = Color(0xFFA0A0A6),
+    surfaceContainerLowest = AppTheme.Palette.pageDark,
+    surfaceContainerLow = AppTheme.Palette.sheetDark,
+    surfaceContainer = AppTheme.Palette.raisedDark,
+    surfaceContainerHigh = AppTheme.Palette.sheetCardDark,
+    surfaceContainerHighest = AppTheme.Palette.raisedDark,
+    surfaceTint = Color.Transparent,
+    outline = Color(0xFF3A3A3F),
+    outlineVariant = Color(0xFF2A2A2D),
     error = AppTheme.destructiveDark,
     onError = Color(0xFF450A0A)
 )
@@ -266,7 +321,17 @@ fun MaimaiDataTheme(
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-    CompositionLocalProvider(LocalIsDarkTheme provides darkTheme) {
+    val baseDensity = LocalDensity.current
+    val cappedDensity = remember(baseDensity.density, baseDensity.fontScale) {
+        Density(
+            density = baseDensity.density,
+            fontScale = baseDensity.fontScale.coerceAtMost(1.3f)
+        )
+    }
+    CompositionLocalProvider(
+        LocalIsDarkTheme provides darkTheme,
+        LocalDensity provides cappedDensity
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = M3Typography,
@@ -276,8 +341,22 @@ fun MaimaiDataTheme(
 }
 
 @Composable
+fun AppDenseFontScale(
+    maxFontScale: Float = 1.15f,
+    content: @Composable () -> Unit
+) {
+    val baseDensity = LocalDensity.current
+    val capped = remember(baseDensity.density, baseDensity.fontScale, maxFontScale) {
+        Density(
+            density = baseDensity.density,
+            fontScale = baseDensity.fontScale.coerceAtMost(maxFontScale)
+        )
+    }
+    CompositionLocalProvider(LocalDensity provides capped, content = content)
+}
+
+@Composable
 fun AppPageBackground(
-    tint: Color = AppTheme.accent,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
@@ -285,26 +364,7 @@ fun AppPageBackground(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    colors = if (isDark) AppTheme.Palette.pageDarkGradient else AppTheme.Palette.pageLightGradient
-                )
-            )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(240.dp)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            tint.copy(alpha = if (isDark) 0.14f else 0.09f),
-                            Color.Transparent
-                        )
-                    )
-                )
-        )
-        content()
-    }
+            .background(if (isDark) AppTheme.Palette.pageDark else AppTheme.Palette.pageLight),
+        content = content
+    )
 }

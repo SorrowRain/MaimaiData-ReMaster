@@ -1,17 +1,27 @@
 package dev.sorrowrain.maimaidata
 
+import dev.sorrowrain.maimaidata.components.CheckDisplayMode
 import dev.sorrowrain.maimaidata.components.ToastState
 import dev.sorrowrain.maimaidata.models.CNPlateCatalog
+import dev.sorrowrain.maimaidata.models.CNPlateRuleGroup
+import dev.sorrowrain.maimaidata.models.ChecklistStats
 import dev.sorrowrain.maimaidata.models.DifficultyType
+import dev.sorrowrain.maimaidata.models.LXNSPlate
+import dev.sorrowrain.maimaidata.models.LXNSPlateListResponse
+import dev.sorrowrain.maimaidata.models.LXNSPlateRequiredSong
+import dev.sorrowrain.maimaidata.models.LXNSPlateRequirement
 import dev.sorrowrain.maimaidata.models.LXNSScore
 import dev.sorrowrain.maimaidata.models.LXNSSongListResponse
 import dev.sorrowrain.maimaidata.models.MaimaiConstants
+import dev.sorrowrain.maimaidata.models.PlateCheckScope
+import dev.sorrowrain.maimaidata.models.ProberRecord
 import dev.sorrowrain.maimaidata.models.RatingCalculator
 import dev.sorrowrain.maimaidata.models.SavedAccount
 import dev.sorrowrain.maimaidata.models.ScoreAuthMethod
 import dev.sorrowrain.maimaidata.models.ScoreProvider
 import dev.sorrowrain.maimaidata.models.SongData
 import dev.sorrowrain.maimaidata.services.AccountCredentialStore
+import dev.sorrowrain.maimaidata.services.DataStore
 import dev.sorrowrain.maimaidata.services.LXNSCatalogConverter
 import dev.sorrowrain.maimaidata.services.MaimaiAPI
 import dev.sorrowrain.maimaidata.services.MaimaiAPIException
@@ -403,15 +413,31 @@ class ScoreProfileAndLXNSTests {
         val jpShin = jpScopes.firstOrNull { it.id == "真" }!!
         assertTrue(jpShin.contains(trueLove, difficulty = DifficultyType.MASTER))
         assertFalse(jpShin.contains(jingleBells, difficulty = DifficultyType.MASTER))
+        assertFalse(jpShin.hasJiangBadge)
 
-        val jpMai = jpScopes.firstOrNull { it.id == "舞" }!!
+        val maiIdx = jpScopes.indexOfFirst { it.id == "舞" }
+        assertTrue(maiIdx >= 0)
+        val jpMai = jpScopes[maiIdx]
+        assertEquals("舞 · 旧框全曲", jpMai.title)
+        assertEquals(PlateCheckScope.Goal.STANDARD, jpMai.goal)
+        assertTrue(jpMai.hasJiangBadge)
+        val jpHasya = jpScopes[maiIdx + 1]
+        assertEquals("覇者", jpHasya.id)
+        assertEquals("覇者 · 旧框全曲", jpHasya.title)
+        assertEquals(PlateCheckScope.Goal.CLEAR, jpHasya.goal)
+        assertFalse(jpHasya.hasJiangBadge)
+
         assertTrue(jpMai.contains(jingleBells, difficulty = DifficultyType.MASTER))
         assertFalse(jpMai.contains(zenzenzense, difficulty = DifficultyType.MASTER))
+        assertTrue(jpHasya.contains(jingleBells, difficulty = DifficultyType.MASTER))
+        assertFalse(jpHasya.contains(zenzenzense, difficulty = DifficultyType.MASTER))
 
         val offlineHibana = makeOverseasSong(id = "zeta_std_hibana", title = "ヒバナ", from = "MiLK", chartCount = 5)
         assertTrue(jpMai.contains(hibana, difficulty = DifficultyType.REMASTER))
         assertTrue(jpMai.contains(offlineHibana, difficulty = DifficultyType.REMASTER))
         assertFalse(jpMai.contains(dxEraRemaster, difficulty = DifficultyType.REMASTER))
+        assertTrue(jpHasya.contains(hibana, difficulty = DifficultyType.REMASTER))
+        assertFalse(jpHasya.contains(dxEraRemaster, difficulty = DifficultyType.REMASTER))
 
         assertTrue(jpScopes.any { it.title == "彩 · PRiSM PLUS" })
         assertTrue(jpScopes.any { it.title == "丸 · CiRCLE" })
@@ -439,5 +465,84 @@ class ScoreProfileAndLXNSTests {
         )
         assertTrue(futureScopes.any { it.title == "廻 · CiRCLE PLUS" })
         assertTrue(futureScopes.any { it.title == "魔 · MAGiCAL" })
+    }
+
+    @Test
+    fun testPlateExtractionHandlesReversedRequirementsClearGoalAndLegacyIndexMigration() {
+        val reqSongsB2M = listOf(
+            LXNSPlateRequiredSong(id = 8, title = "True Love Song", type = "standard"),
+            LXNSPlateRequiredSong(id = 70, title = "Jingle Bells", type = "standard")
+        )
+        val reqSongsRem = listOf(
+            LXNSPlateRequiredSong(id = 792, title = "Hibana", type = "standard")
+        )
+        val reversedRequired = listOf(
+            LXNSPlateRequirement(difficulties = listOf(4), songs = reqSongsRem),
+            LXNSPlateRequirement(difficulties = listOf(0, 1, 2, 3), songs = reqSongsB2M)
+        )
+        val plateResponse = LXNSPlateListResponse(
+            plates = listOf(
+                LXNSPlate(id = 1, name = "舞極", description = "旧框全曲", genre = "実績", required = reversedRequired),
+                LXNSPlate(id = 2, name = "覇者", description = "旧框全曲", genre = "実績", required = reversedRequired)
+            )
+        )
+
+        val extracted = LXNSCatalogConverter.extractPlateCatalog(plateResponse, updatedAt = "2026-11-27")
+        assertEquals(1, extracted.groups.size)
+        val maiGroup = extracted.groups.first()
+        assertEquals("舞", maiGroup.id)
+        assertEquals("舞 · 旧框全曲", maiGroup.title)
+        assertEquals(listOf(8, 70), maiGroup.basicToMasterSongIds)
+        assertEquals(listOf(792), maiGroup.remasterSongIds)
+
+        // Even when an older disk cache still holds `"舞 / 覇者 · 旧框全曲"`, CN scopes normalize and split cleanly
+        val staleCacheGroups = listOf(
+            CNPlateRuleGroup(
+                id = "真",
+                title = "真 · maimai ~ PLUS",
+                versionAsset = "maimai",
+                badges = listOf("真極", "真将", "真神", "真舞舞"),
+                basicToMasterSongIds = listOf(8),
+                remasterSongIds = emptyList()
+            ),
+            CNPlateRuleGroup(
+                id = "舞",
+                title = "舞 / 覇者 · 旧框全曲",
+                versionAsset = "maimai_finale",
+                badges = listOf("覇者", "舞極", "舞将"),
+                basicToMasterSongIds = listOf(8, 70),
+                remasterSongIds = listOf(792)
+            ),
+            CNPlateRuleGroup(
+                id = "熊華",
+                title = "熊 / 華 · 舞萌DX",
+                versionAsset = "maimaidx_cn",
+                badges = listOf("熊極", "熊将"),
+                basicToMasterSongIds = listOf(11001),
+                remasterSongIds = emptyList()
+            )
+        )
+        val cnScopes = LXNSCatalogConverter.buildPlateScopes(
+            region = MaimaiConstants.ServerRegion.CN,
+            cnPlateGroups = staleCacheGroups,
+            activeSongs = emptyList()
+        )
+        assertEquals(listOf("真", "舞", "覇者", "熊華"), cnScopes.map { it.id })
+        assertFalse(cnScopes[0].hasJiangBadge)
+        assertEquals("舞 · 旧框全曲", cnScopes[1].title)
+        assertEquals(PlateCheckScope.Goal.STANDARD, cnScopes[1].goal)
+        assertEquals("覇者 · 旧框全曲", cnScopes[2].title)
+        assertEquals(PlateCheckScope.Goal.CLEAR, cnScopes[2].goal)
+        assertFalse(cnScopes[2].hasJiangBadge)
+
+        assertEquals("舞", DataStore.migrateLegacyPlateScopeId(legacyIndex = 1, scopes = cnScopes))
+        assertEquals("熊華", DataStore.migrateLegacyPlateScopeId(legacyIndex = 2, scopes = cnScopes))
+
+        val belowClear = ProberRecord(achievements = 79.9999, ds = 13.0, fc = "", fs = "", level = "13", levelIndex = 3, ra = 0, rate = "a", songId = 8, title = "A", type = "SD")
+        val atClear = ProberRecord(achievements = 80.0, ds = 13.0, fc = "", fs = "", level = "13", levelIndex = 3, ra = 0, rate = "aa", songId = 70, title = "B", type = "SD")
+        assertFalse(CheckDisplayMode.CLEAR.isCompleted(belowClear))
+        assertTrue(CheckDisplayMode.CLEAR.isCompleted(atClear))
+        val stats = ChecklistStats(records = listOf(belowClear, atClear), totalCount = 2)
+        assertEquals(1, stats.clearCount)
     }
 }

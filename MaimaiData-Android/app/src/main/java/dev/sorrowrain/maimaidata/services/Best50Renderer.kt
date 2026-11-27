@@ -9,7 +9,6 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
-import dev.sorrowrain.maimaidata.R
 import dev.sorrowrain.maimaidata.models.MaimaiConstants
 import dev.sorrowrain.maimaidata.models.ProberRecord
 import dev.sorrowrain.maimaidata.models.SongData

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -28,12 +29,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,11 +57,15 @@ import dev.sorrowrain.maimaidata.models.SongData
 import dev.sorrowrain.maimaidata.services.LocalDataStore
 import dev.sorrowrain.maimaidata.theme.AppPageBackground
 import dev.sorrowrain.maimaidata.theme.AppTheme
-import kotlin.math.max
 
 private data class PlateLevelGroup(
     val level: String,
     val songs: List<SongData>
+)
+
+private data class PlateScopeCache(
+    val songsByDifficulty: Map<DifficultyType, List<SongData>>,
+    val groupedByDifficulty: Map<DifficultyType, List<PlateLevelGroup>>
 )
 
 @Composable
@@ -69,10 +74,6 @@ fun VersionCheckScreen(
     onOpenSong: (songId: String, initialDifficultyIndex: Int?) -> Unit
 ) {
     val store = LocalDataStore.current
-
-    var displayMode by rememberSaveable { mutableStateOf(CheckDisplayMode.SSS) }
-    var onlyUnfinished by rememberSaveable { mutableStateOf(false) }
-    var selectedDifficulty by rememberSaveable { mutableStateOf(DifficultyType.MASTER) }
     var showPlateMenu by remember { mutableStateOf(false) }
     var showDifficultyMenu by remember { mutableStateOf(false) }
 
@@ -80,14 +81,13 @@ fun VersionCheckScreen(
         store.activePlateScopes
     }
 
-    val clampedScopeIndex = if (scopes.isEmpty()) {
-        0
-    } else {
-        store.activeVersionCheckIndex.coerceIn(0, max(0, scopes.lastIndex))
-    }
-
-    val activeScope = remember(scopes, clampedScopeIndex) {
-        scopes.getOrElse(clampedScopeIndex) { PlateCheckScope.fallback }
+    val savedScopeId = store.activeVersionCheckScopeId
+    val activeScope = remember(scopes, savedScopeId) {
+        if (savedScopeId != null) {
+            scopes.firstOrNull { it.id == savedScopeId } ?: scopes.firstOrNull() ?: PlateCheckScope.fallback
+        } else {
+            scopes.firstOrNull() ?: PlateCheckScope.fallback
+        }
     }
 
     val availableDifficulties = remember(activeScope.supportsRemaster) {
@@ -109,58 +109,87 @@ fun VersionCheckScreen(
         }
     }
 
-    val effectiveDifficulty = if (selectedDifficulty in availableDifficulties) {
-        selectedDifficulty
+    val effectiveDifficulty = if (store.versionCheckDifficulty in availableDifficulties) {
+        store.versionCheckDifficulty
     } else {
         DifficultyType.MASTER
     }
 
-    LaunchedEffect(availableDifficulties, selectedDifficulty) {
-        if (selectedDifficulty !in availableDifficulties) {
-            selectedDifficulty = DifficultyType.MASTER
+    LaunchedEffect(availableDifficulties) {
+        if (store.versionCheckDifficulty !in availableDifficulties) {
+            store.versionCheckDifficulty = DifficultyType.MASTER
         }
+    }
+
+    val effectiveMode = if (activeScope.goal == PlateCheckScope.Goal.CLEAR) {
+        CheckDisplayMode.CLEAR
+    } else if (store.checklistDisplayMode == CheckDisplayMode.CLEAR) {
+        CheckDisplayMode.SSS
+    } else {
+        store.checklistDisplayMode
+    }
+
+    val scopeCache = remember(store.songs, store.catalogRevision, activeScope, availableDifficulties) {
+        val songsByDiff = HashMap<DifficultyType, List<SongData>>(availableDifficulties.size)
+        val groupedByDiff = HashMap<DifficultyType, List<PlateLevelGroup>>(availableDifficulties.size)
+
+        for (diff in availableDifficulties) {
+            val idx = diff.rawValue
+            val filtered = store.songs.filter { activeScope.contains(it, diff) }
+            val sorted = filtered.sortedByDescending { it.ds.getOrElse(idx) { 0.0 } }
+            songsByDiff[diff] = sorted
+
+            val byLevel = sorted.groupBy { it.level.getOrElse(idx) { "?" } }
+            groupedByDiff[diff] = byLevel.keys
+                .sortedByDescending(MaimaiConstants::levelSortOrder)
+                .map { level ->
+                    PlateLevelGroup(
+                        level = level,
+                        songs = byLevel[level].orEmpty()
+                    )
+                }
+        }
+
+        PlateScopeCache(
+            songsByDifficulty = songsByDiff,
+            groupedByDifficulty = groupedByDiff
+        )
     }
 
     val diffIdx = effectiveDifficulty.rawValue
     val diffTint = effectiveDifficulty.color
+    val activeSongs = scopeCache.songsByDifficulty[effectiveDifficulty].orEmpty()
+    val activeGroups = scopeCache.groupedByDifficulty[effectiveDifficulty].orEmpty()
 
-    val groupedSongs = remember(store.songs, store.catalogRevision, activeScope, effectiveDifficulty) {
-        val filtered = store.songs.filter { activeScope.contains(it, effectiveDifficulty) }
-        val sorted = filtered.sortedByDescending { it.ds.getOrElse(diffIdx) { 0.0 } }
-        val byLevel = sorted.groupBy { it.level.getOrElse(diffIdx) { "?" } }
-        byLevel.keys
-            .sortedByDescending(MaimaiConstants::levelSortOrder)
-            .map { level ->
-                PlateLevelGroup(
-                    level = level,
-                    songs = byLevel[level].orEmpty()
-                )
-            }
+    val activeStats = remember(activeSongs, store.records, diffIdx) {
+        val matched = activeSongs.mapNotNull { store.record(it.numericId, diffIdx) }
+        ChecklistStats(
+            records = matched,
+            totalCount = activeSongs.size
+        )
     }
 
-    val allSongs = remember(groupedSongs) {
-        groupedSongs.flatMap { it.songs }
-    }
-
-    val stats = remember(allSongs, store.records, diffIdx) {
-        val matched = allSongs.mapNotNull { store.record(it.numericId, diffIdx) }
-        ChecklistStats(records = matched, totalCount = allSongs.size)
-    }
-
-    val visibleGroups = remember(groupedSongs, onlyUnfinished, displayMode, store.records, diffIdx) {
-        if (!onlyUnfinished) {
-            groupedSongs
+    val visibleGroups = remember(activeGroups, store.checklistOnlyUnfinished, effectiveMode, store.records, diffIdx) {
+        if (!store.checklistOnlyUnfinished) {
+            activeGroups
         } else {
-            groupedSongs.mapNotNull { group ->
+            activeGroups.mapNotNull { group ->
                 val remaining = group.songs.filter { song ->
-                    !displayMode.isCompleted(store.record(song.numericId, diffIdx))
+                    !effectiveMode.isCompleted(store.record(song.numericId, diffIdx))
                 }
                 if (remaining.isEmpty()) null else PlateLevelGroup(group.level, remaining)
             }
         }
     }
 
-    AppPageBackground(tint = diffTint) {
+    val countSummary = "共 ${activeSongs.size} 首"
+    val footnoteText = if (!activeScope.hasJiangBadge && activeScope.goal == PlateCheckScope.Goal.STANDARD) {
+        "真代无「将」牌，SSS 仅作统计"
+    } else {
+        null
+    }
+
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(
@@ -180,53 +209,15 @@ fun VersionCheckScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
             ) {
-                // 1. Single Horizontal Row Plate Scope Card
+                // 1. Plate Scope Card (single-row balanced layout, stacks at large font scale)
                 item(key = "plate_scope_header") {
+                    val isLargeFont = LocalDensity.current.fontScale >= 1.2f
+                    val versionResId = MaimaiConstants.drawableResId(activeScope.versionAsset)
+
                     AppCard(
-                        padding = AppTheme.cardPadding,
-                        tint = diffTint
+                        padding = AppTheme.cardPadding
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
-                        ) {
-                            val versionResId = MaimaiConstants.drawableResId(activeScope.versionAsset)
-                            Box(
-                                modifier = Modifier.size(width = 92.dp, height = 36.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (versionResId != null) {
-                                    Image(
-                                        painter = painterResource(versionResId),
-                                        contentDescription = activeScope.title,
-                                        contentScale = ContentScale.Fit,
-                                        alignment = Alignment.Center,
-                                        modifier = Modifier.size(width = 92.dp, height = 36.dp)
-                                    )
-                                }
-                            }
-
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    text = activeScope.title,
-                                    style = AppTheme.AppTypography.rowTitle,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "共 ${allSongs.size} 首歌曲",
-                                    style = AppTheme.AppTypography.caption,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
+                        val plateMenuButton: @Composable () -> Unit = {
                             Box {
                                 AppMenuCapsule(
                                     title = "切换牌子",
@@ -238,8 +229,8 @@ fun VersionCheckScreen(
                                     onDismissRequest = { showPlateMenu = false },
                                     modifier = Modifier.heightIn(max = 380.dp)
                                 ) {
-                                    scopes.forEachIndexed { idx, item ->
-                                        val isSelected = idx == clampedScopeIndex
+                                    scopes.forEach { item ->
+                                        val isSelected = item.id == activeScope.id
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
@@ -265,7 +256,7 @@ fun VersionCheckScreen(
                                                 null
                                             },
                                             onClick = {
-                                                store.activeVersionCheckIndex = idx
+                                                store.activeVersionCheckScopeId = item.id
                                                 showPlateMenu = false
                                             }
                                         )
@@ -273,18 +264,114 @@ fun VersionCheckScreen(
                                 }
                             }
                         }
+
+                        if (isLargeFont) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(width = 76.dp, height = 34.dp),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (versionResId != null) {
+                                            Image(
+                                                painter = painterResource(versionResId),
+                                                contentDescription = activeScope.title,
+                                                contentScale = ContentScale.Fit,
+                                                alignment = Alignment.CenterStart,
+                                                modifier = Modifier.size(width = 76.dp, height = 34.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    plateMenuButton()
+                                }
+
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = activeScope.title,
+                                        style = AppTheme.AppTypography.rowTitle,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = countSummary,
+                                        style = AppTheme.AppTypography.caption,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.m)
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(width = 76.dp, height = 34.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (versionResId != null) {
+                                        Image(
+                                            painter = painterResource(versionResId),
+                                            contentDescription = activeScope.title,
+                                            contentScale = ContentScale.Fit,
+                                            alignment = Alignment.Center,
+                                            modifier = Modifier.size(width = 76.dp, height = 34.dp)
+                                        )
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = activeScope.title,
+                                        style = AppTheme.AppTypography.rowTitle,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = countSummary,
+                                        style = AppTheme.AppTypography.caption,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+
+                                plateMenuButton()
+                            }
+                        }
                     }
                 }
 
-                // 2. Completion Stats Header with Difficulty Switcher in leadingAccessory
+                // 2. Completion Stats + Difficulty Switcher
                 item(key = "plate_stats_header") {
                     ChecklistStatsHeader(
-                        stats = stats,
-                        displayMode = displayMode,
-                        onDisplayModeChange = { displayMode = it },
-                        onlyUnfinished = onlyUnfinished,
-                        onOnlyUnfinishedChange = { onlyUnfinished = it },
-                        leadingAccessory = {
+                        stats = activeStats,
+                        displayMode = effectiveMode,
+                        onDisplayModeChange = { next ->
+                            if (activeScope.goal != PlateCheckScope.Goal.CLEAR) {
+                                store.checklistDisplayMode = next
+                            }
+                        },
+                        onlyUnfinished = store.checklistOnlyUnfinished,
+                        onOnlyUnfinishedChange = { store.checklistOnlyUnfinished = it },
+                        isClearGoal = activeScope.goal == PlateCheckScope.Goal.CLEAR,
+                        footnote = footnoteText,
+                        extraTrailing = {
                             Box {
                                 AppMenuCapsule(
                                     title = effectiveDifficulty.shortName,
@@ -323,7 +410,7 @@ fun VersionCheckScreen(
                                                 null
                                             },
                                             onClick = {
-                                                selectedDifficulty = diff
+                                                store.versionCheckDifficulty = diff
                                                 showDifficultyMenu = false
                                             }
                                         )
@@ -352,11 +439,11 @@ fun VersionCheckScreen(
                         }
                     }
 
-                    visibleGroups.isEmpty() && allSongs.isNotEmpty() -> {
+                    visibleGroups.isEmpty() && activeGroups.isNotEmpty() -> {
                         item(key = "plate_all_completed") {
                             AppEmptyState(
                                 icon = Icons.Rounded.CheckCircle,
-                                title = "已全部达成 ${displayMode.title}",
+                                title = "已全部达成 ${effectiveMode.title}",
                                 description = "当前筛选下全部谱面均已达成该目标",
                                 iconTint = AppTheme.accentText
                             )
@@ -373,7 +460,8 @@ fun VersionCheckScreen(
                                 trailing = {
                                     AppCapsuleLabel(
                                         text = "${group.songs.size} 首",
-                                        tint = diffTint
+                                        tint = diffTint,
+                                        isNeutral = false
                                     )
                                 }
                             ) {
@@ -384,8 +472,8 @@ fun VersionCheckScreen(
                                     ChecklistSongTile(
                                         song = song,
                                         record = store.record(song.numericId, diffIdx),
-                                        borderColor = diffTint,
-                                        displayMode = displayMode,
+                                        difficulty = effectiveDifficulty,
+                                        displayMode = effectiveMode,
                                         region = store.serverRegion,
                                         onClick = { onOpenSong(song.id, diffIdx) }
                                     )

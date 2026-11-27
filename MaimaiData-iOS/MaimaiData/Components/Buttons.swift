@@ -54,6 +54,8 @@ struct AppInlineButton: View {
     let title: String
     var icon: String? = nil
     var tint: Color = AppTheme.accent
+    var isNeutral: Bool = false
+    var isSolidActive: Bool = false
     var isLoading: Bool = false
     var isDisabled: Bool = false
     let action: () -> Void
@@ -64,6 +66,7 @@ struct AppInlineButton: View {
                 if isLoading {
                     ProgressView()
                         .controlSize(.mini)
+                        .tint(isSolidActive ? .white : nil)
                 } else if let icon {
                     Image(systemName: icon)
                         .font(AppTheme.Typography.caption2Bold)
@@ -71,11 +74,20 @@ struct AppInlineButton: View {
                 Text(title)
                     .font(AppTheme.Typography.inlineAction)
             }
-            .modifier(TintedActionCapsuleChrome(tint: tint))
+            .modifier(TintedActionCapsuleChrome(tint: tint, isNeutral: isNeutral, isSolidActive: isSolidActive))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ScalePressButtonStyle())
         .opacity(isDisabled ? 0.45 : 1)
         .disabled(isLoading || isDisabled)
+    }
+}
+
+struct ScalePressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .opacity(configuration.isPressed ? 0.92 : 1.0)
+            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
     }
 }
 
@@ -130,22 +142,44 @@ struct AppMenuCapsule: View {
 private struct TintedActionCapsuleChrome: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     let tint: Color
+    var isNeutral: Bool = false
+    var isSolidActive: Bool = false
 
     func body(content: Content) -> some View {
         let isDark = colorScheme == .dark
-        let isNeutral = tint == .secondary
+        let useNeutral = !isSolidActive && (isNeutral || tint == .secondary)
+        let fg: Color = if isSolidActive {
+            .white
+        } else if useNeutral {
+            .secondary
+        } else if isDark {
+            tint.brightened(toAtLeast: 0.92, maxSaturation: 0.65)
+        } else {
+            tint
+        }
+        let bg: Color = if isSolidActive {
+            tint
+        } else if useNeutral {
+            Color.primary.opacity(isDark ? 0.10 : 0.06)
+        } else {
+            tint.opacity(isDark ? 0.18 : 0.11)
+        }
+        let strokeColor: Color = if isSolidActive {
+            Color.clear
+        } else if useNeutral {
+            Color.primary.opacity(isDark ? 0.18 : 0.12)
+        } else {
+            tint.opacity(isDark ? 0.35 : 0.22)
+        }
+
         content
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
-            .foregroundStyle(
-                isNeutral
-                    ? Color.secondary
-                    : (isDark ? tint.brightened(toAtLeast: 0.92, maxSaturation: 0.65) : tint)
-            )
+            .foregroundStyle(fg)
             .padding(.horizontal, 11)
             .padding(.vertical, 6)
-            .background(tint.opacity(isDark && !isNeutral ? 0.18 : 0.11), in: Capsule())
-            .overlay(Capsule().strokeBorder(tint.opacity(isDark && !isNeutral ? 0.35 : 0.22), lineWidth: 0.8))
+            .background(bg, in: Capsule())
+            .overlay(Capsule().strokeBorder(strokeColor, lineWidth: isSolidActive ? 0 : 0.8))
             .contentShape(Capsule())
     }
 }
@@ -162,9 +196,11 @@ struct AppCircleIconButton: View {
             Image(systemName: systemImage)
                 .font(AppTheme.Typography.subheadlineBold)
                 .frame(width: 34, height: 34)
+                .appGlass(in: Circle())
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .appGlass(in: Circle())
+        .buttonStyle(ScalePressButtonStyle())
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.4 : 1)
         .accessibilityLabel(accessibilityLabel)

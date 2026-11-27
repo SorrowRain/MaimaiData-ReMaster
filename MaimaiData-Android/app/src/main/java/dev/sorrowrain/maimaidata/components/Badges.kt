@@ -23,9 +23,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -35,6 +41,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -45,6 +52,7 @@ import dev.sorrowrain.maimaidata.models.ProberRecord
 import dev.sorrowrain.maimaidata.models.SongData
 import dev.sorrowrain.maimaidata.models.brightened
 import dev.sorrowrain.maimaidata.services.CoverImageView
+import dev.sorrowrain.maimaidata.theme.AppDenseFontScale
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import dev.sorrowrain.maimaidata.theme.LocalIsDarkTheme
 import kotlin.math.max
@@ -82,12 +90,13 @@ private data class CapsuleSpec(
 fun AppCapsuleLabel(
     text: String,
     tint: Color = AppTheme.accent,
+    isNeutral: Boolean? = null,
     style: CapsuleStyle = CapsuleStyle.Count,
     modifier: Modifier = Modifier,
     onRemove: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
-    val isNeutral = tint == Color.Unspecified
+    val resolvedNeutral = isNeutral ?: (tint == Color.Unspecified || style == CapsuleStyle.Count)
 
     val spec = when (style) {
         CapsuleStyle.Count -> CapsuleSpec(
@@ -121,7 +130,7 @@ fun AppCapsuleLabel(
         )
     }
 
-    val fgColor = if (isNeutral) {
+    val fgColor = if (resolvedNeutral) {
         MaterialTheme.colorScheme.onSurfaceVariant
     } else if (isDark) {
         tint.brightened(minimumBrightness = 1.0f, maxSaturation = 0.50f)
@@ -129,13 +138,13 @@ fun AppCapsuleLabel(
         tint
     }
 
-    val bgColor = if (isNeutral) {
+    val bgColor = if (resolvedNeutral) {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
     } else {
         tint.copy(alpha = if (isDark) max(spec.bgAlpha, 0.22f) else spec.bgAlpha)
     }
 
-    val effectiveStrokeAlpha = if (isNeutral) {
+    val effectiveStrokeAlpha = if (resolvedNeutral) {
         if (spec.strokeAlpha > 0f) 0.30f else 0f
     } else if (isDark && spec.strokeAlpha > 0f) {
         max(spec.strokeAlpha, 0.42f)
@@ -143,7 +152,7 @@ fun AppCapsuleLabel(
         spec.strokeAlpha
     }
 
-    val strokeColor = if (isNeutral) {
+    val strokeColor = if (resolvedNeutral) {
         MaterialTheme.colorScheme.outline.copy(alpha = effectiveStrokeAlpha)
     } else {
         tint.copy(alpha = effectiveStrokeAlpha)
@@ -182,12 +191,11 @@ fun AppCapsuleLabel(
                 softWrap = false
             )
         }
-        Text(
+        AppAutoShrinkText(
             text = text,
             style = spec.textStyle,
             color = fgColor,
-            maxLines = 1,
-            softWrap = false
+            minScale = 0.78f
         )
         if (onRemove != null) {
             Icon(
@@ -285,83 +293,121 @@ fun AppValueBadge(
 
     Box(
         modifier = modifier
-            .size(width = 44.dp, height = 24.dp)
-            .background(bgColor, shape),
+            .defaultMinSize(minWidth = 44.dp, minHeight = 24.dp)
+            .background(bgColor, shape)
+            .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
+        AppAutoShrinkText(
             text = text,
             style = AppTheme.AppTypography.captionMetaBold,
             color = fgColor,
-            maxLines = 1,
-            softWrap = false
+            minScale = 0.8f
         )
     }
 }
 
 /**
- * Tinted statistic tile with caption [title] above [value] and active selection border state.
+ * Single-line text that automatically shrinks down to [minScale] on horizontal overflow without eliding.
+ */
+@Composable
+fun AppAutoShrinkText(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    minScale: Float = 0.72f,
+    textAlign: TextAlign? = null,
+    modifier: Modifier = Modifier
+) {
+    var scale by remember(text, style) { mutableFloatStateOf(1f) }
+    var readyToDraw by remember(text, style) { mutableStateOf(false) }
+
+    Text(
+        text = text,
+        style = style.copy(fontSize = style.fontSize * scale),
+        color = color,
+        textAlign = textAlign,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && scale > minScale + 0.001f) {
+                scale = (scale * 0.9f).coerceAtLeast(minScale)
+            } else {
+                readyToDraw = true
+            }
+        },
+        modifier = modifier.drawWithContent {
+            if (readyToDraw) drawContent()
+        }
+    )
+}
+
+/**
+ * Tinted statistic tile with caption [title] above [value] (solid fill when selected, no border).
  */
 @Composable
 fun AppStatTile(
     title: String,
     value: String,
     tint: Color,
+    fillTint: Color? = null,
     isSelected: Boolean = false,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val shape = RoundedCornerShape(AppTheme.Radius.tile)
-    val fillAlpha = if (isSelected) {
-        if (isDark) 0.26f else 0.18f
+    val bgColor = if (isSelected) {
+        fillTint ?: tint
     } else {
-        if (isDark) 0.11f else 0.08f
+        tint.copy(alpha = if (isDark) 0.14f else 0.10f)
     }
-    val strokeAlpha = if (isSelected) {
-        if (isDark) 0.90f else 0.78f
-    } else {
-        0.22f
-    }
-    val strokeWidth = if (isSelected) 1.8.dp else 1.dp
-    val titleColor = if (isDark) {
+    val titleColor = if (isSelected) {
+        Color.White
+    } else if (isDark) {
         tint.brightened(minimumBrightness = 0.95f, maxSaturation = 0.60f)
     } else {
         tint
     }
+    val valueColor = if (isSelected) {
+        Color.White.copy(alpha = 0.95f)
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
 
-    Column(
-        modifier = modifier
-            .clip(shape)
-            .background(tint.copy(alpha = fillAlpha), shape)
-            .border(strokeWidth, tint.copy(alpha = strokeAlpha), shape)
-            .then(
-                if (onClick != null) {
-                    Modifier
-                        .semantics { selected = isSelected }
-                        .clickable(role = Role.Tab, onClick = onClick)
-                } else {
-                    Modifier
-                }
+    AppDenseFontScale {
+        Column(
+            modifier = modifier
+                .defaultMinSize(minHeight = 48.dp)
+                .clip(shape)
+                .background(bgColor, shape)
+                .then(
+                    if (onClick != null) {
+                        Modifier
+                            .semantics { selected = isSelected }
+                            .clickable(role = Role.Tab, onClick = onClick)
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(vertical = AppTheme.Space.s, horizontal = AppTheme.Space.xs),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
+        ) {
+            AppAutoShrinkText(
+                text = title,
+                style = AppTheme.AppTypography.caption2Bold,
+                color = titleColor,
+                minScale = 0.75f
             )
-            .padding(vertical = AppTheme.Space.s, horizontal = AppTheme.Space.xs),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        Text(
-            text = title,
-            style = AppTheme.AppTypography.caption2Bold,
-            color = titleColor,
-            maxLines = 1,
-            softWrap = false
-        )
-        Text(
-            text = value,
-            style = AppTheme.AppTypography.captionMeta,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            softWrap = false
-        )
+            AppAutoShrinkText(
+                text = value,
+                style = AppTheme.AppTypography.captionMeta,
+                color = valueColor,
+                minScale = 0.75f
+            )
+        }
     }
 }
 
@@ -381,16 +427,20 @@ fun DifficultyLevelBadge(
     val shape = RoundedCornerShape(AppTheme.Radius.badge)
 
     val bgColor = when {
-        isRemaster && isDark -> difficulty.color.copy(alpha = 0.22f)
+        isRemaster && isDark -> AppTheme.Palette.remasterDarkFill
         isRemaster -> Color.White
         else -> difficulty.solidFill(isDark)
     }
     val textColor = when {
-        isRemaster && isDark -> AppTheme.Palette.boardMainRemaster
+        isRemaster && isDark -> AppTheme.Palette.remasterDarkText
         isRemaster -> AppTheme.Palette.chartRemaster
         else -> difficulty.readableForeground
     }
-    val borderColor = if (isRemaster) difficulty.color else Color.Black.copy(alpha = 0.08f)
+    val borderColor = when {
+        isRemaster && isDark -> difficulty.color.copy(alpha = 0.45f)
+        isRemaster -> difficulty.color
+        else -> Color.Black.copy(alpha = 0.08f)
+    }
     val borderWidth = if (isRemaster) 1.5.dp else 0.5.dp
 
     Box(
@@ -552,7 +602,7 @@ fun SongCoverBadgeView(
 }
 
 /**
- * Selectable filter capsule chip for genre/version/recent-search lists.
+ * Selectable filter chip for genre/version/recent-search lists.
  */
 @Composable
 fun FilterCapsuleChip(
@@ -570,6 +620,7 @@ fun FilterCapsuleChip(
     } else {
         MaterialTheme.colorScheme.outlineVariant
     }
+    val contentTextColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
 
     Box(
         modifier = modifier
@@ -604,7 +655,7 @@ fun FilterCapsuleChip(
         Text(
             text = title,
             style = AppTheme.AppTypography.tag,
-            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+            color = contentTextColor,
             maxLines = 1,
             softWrap = false
         )

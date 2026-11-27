@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.theme.AppTheme
+import dev.sorrowrain.maimaidata.theme.LocalIsDarkTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -115,11 +116,12 @@ fun StatusToastHost(
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 }
         ) {
+            val isDark = LocalIsDarkTheme.current
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface,
+                color = if (isDark) AppTheme.Palette.raisedDark else MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface,
-                tonalElevation = 4.dp,
+                tonalElevation = 0.dp,
                 shadowElevation = 6.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
@@ -159,8 +161,7 @@ fun SyncStatusBanner(
 ) {
     AppCard(
         modifier = modifier,
-        padding = AppTheme.compactCardPadding,
-        tint = if (isLoading) AppTheme.accent else AppTheme.warning
+        padding = AppTheme.compactCardPadding
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -255,7 +256,8 @@ fun AppErrorDialog(
                 }
             },
             shape = RoundedCornerShape(AppTheme.Radius.card),
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 0.dp
         )
     }
 }
@@ -321,7 +323,8 @@ fun AppConfirmDialog(
             }
         },
         shape = RoundedCornerShape(AppTheme.Radius.card),
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp
     )
 }
 
@@ -433,7 +436,7 @@ fun AppTopBar(
         },
         actions = actions,
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+            containerColor = MaterialTheme.colorScheme.surface,
             scrolledContainerColor = MaterialTheme.colorScheme.surface,
             navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
             titleContentColor = MaterialTheme.colorScheme.onSurface,

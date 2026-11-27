@@ -19,7 +19,7 @@ struct RatingCalculatorView: View {
 
     // Single-song calculator state (1...15 + .0 ... .9, default 14.8)
     @State private var intLevelSlider: Double = 14
-    @State private var decSlider: Double = 8
+    @State private var preferredDecimal: Double = 8
     @State private var customAchiInput: String = ""
 
     // Reverse target rating state
@@ -28,15 +28,15 @@ struct RatingCalculatorView: View {
     @State private var targetError: String?
 
     private var intPart: Int {
-        min(max(1, Int(intLevelSlider.rounded())), 15)
+        min(max(MaimaiConstants.minLevelInteger, Int(intLevelSlider.rounded())), MaimaiConstants.maxLevelInteger)
     }
 
     private var decPart: Int {
-        min(max(0, Int(decSlider.rounded())), 9)
+        MaimaiConstants.effectiveDecimalDigit(forInt: intPart, preferred: Int(preferredDecimal.rounded()))
     }
 
     private var selectedDS: Double {
-        Double(intPart) + Double(decPart) / 10.0
+        MaimaiConstants.composeExactDS(intPart: intPart, decPart: decPart)
     }
 
     private var parsedCustomAchi: Double? {
@@ -108,15 +108,23 @@ struct RatingCalculatorView: View {
                                 label: "整数",
                                 valueText: "\(intPart)",
                                 value: $intLevelSlider,
-                                range: 1...15,
+                                range: Double(MaimaiConstants.minLevelInteger)...Double(MaimaiConstants.maxLevelInteger),
                                 accessibilityLabel: "定数整数部分"
                             )
 
                             AppLabeledSliderRow(
                                 label: "小数",
                                 valueText: ".\(decPart)",
-                                value: $decSlider,
+                                value: Binding(
+                                    get: { intPart >= MaimaiConstants.maxLevelInteger ? 0 : preferredDecimal },
+                                    set: { next in
+                                        if intPart < MaimaiConstants.maxLevelInteger {
+                                            preferredDecimal = next
+                                        }
+                                    }
+                                ),
                                 range: 0...9,
+                                enabled: intPart < MaimaiConstants.maxLevelInteger,
                                 accessibilityLabel: "定数小数部分"
                             )
                         }
@@ -198,41 +206,59 @@ struct RatingCalculatorView: View {
                 if !targetRows.isEmpty {
                     AppInsetGroup {
                         VStack(spacing: 0) {
-                            HStack {
+                            HStack(spacing: AppTheme.Space.s) {
                                 Text("定数")
-                                    .frame(width: 48, alignment: .leading)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                                    .frame(minWidth: 40, alignment: .leading)
                                 Text("所需达成率")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text("单曲 Ra")
-                                    .frame(width: 64, alignment: .trailing)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                                    .frame(minWidth: 54, alignment: .trailing)
                                 Text("50首总计")
-                                    .frame(width: 72, alignment: .trailing)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                                    .frame(minWidth: 64, alignment: .trailing)
                             }
                             .font(AppTheme.Typography.caption2Bold)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, AppTheme.Space.m)
                             .padding(.vertical, AppTheme.Space.s)
+                            .appDenseDynamicType()
 
                             ForEach(targetRows) { row in
-                                Divider()
-                                HStack {
+                                AppInsetDivider()
+                                HStack(spacing: AppTheme.Space.s) {
                                     Text(String(format: "%.1f", row.level))
                                         .font(AppTheme.Typography.captionMeta)
-                                        .frame(width: 48, alignment: .leading)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(minWidth: 40, alignment: .leading)
                                     Text(row.achievementText)
                                         .font(AppTheme.Typography.captionMono)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     Text("\(row.singleRating)")
                                         .font(AppTheme.Typography.captionMeta)
                                         .foregroundStyle(AppTheme.accentText)
-                                        .frame(width: 64, alignment: .trailing)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(minWidth: 54, alignment: .trailing)
                                     Text("\(row.totalRating)")
                                         .font(AppTheme.Typography.captionMono)
                                         .foregroundStyle(.secondary)
-                                        .frame(width: 72, alignment: .trailing)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(minWidth: 64, alignment: .trailing)
                                 }
                                 .padding(.horizontal, AppTheme.Space.m)
                                 .padding(.vertical, AppTheme.Space.s)
+                                .appDenseDynamicType()
                             }
                         }
                     }

@@ -126,6 +126,29 @@ class SongFilterTests {
         assertEquals(setOf("maimai", "舞萌DX 2025"), cnPruned.selectedVersions)
         val jpPruned = SongFilter.prunedCriteria(criteria, MaimaiConstants.ServerRegion.JP)
         assertEquals(setOf("maimai", "PRiSM"), jpPruned.selectedVersions)
+
+        // Exact DS clamp for Level 15 (only 15.0 exists)
+        val overMaxDS = SongFilterCriteria(useExactDS = true, exactDS = 15.8)
+        val clamped = SongFilter.prunedCriteria(overMaxDS, MaimaiConstants.ServerRegion.CN)
+        assertEquals(15.0, clamped.exactDS, 0.0001)
+    }
+
+    @Test
+    fun testDefaultSortOrdersByReleaseDateDescendingWithTieBreaker() {
+        val olderHigherId = makeSong(id = "11999", title = "OlderHighId", ds = listOf(13.5), level = listOf("13+")).copy(releaseDate = "2024-05-01")
+        val newerLowerId = makeSong(id = "10030", title = "NewerLowId", ds = listOf(13.5), level = listOf("13+")).copy(releaseDate = "2026-06-10")
+        val sameDayHigherId = makeSong(id = "11500", title = "SameDayHigh", ds = listOf(13.5), level = listOf("13+")).copy(releaseDate = "2026-06-10")
+        val undated = makeSong(id = "99999", title = "Undated", ds = listOf(13.5), level = listOf("13+")).copy(releaseDate = null)
+
+        val sorted = SongFilter.apply(
+            songs = listOf(olderHigherId, newerLowerId, sameDayHigherId, undated),
+            criteria = SongFilterCriteria(),
+            favoriteIds = emptySet(),
+            enableAliasSearch = false,
+            enableCharterSearch = false
+        ).map { it.id }
+
+        assertEquals(listOf("11500", "10030", "11999", "99999"), sorted)
     }
 
     @Test

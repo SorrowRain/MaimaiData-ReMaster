@@ -53,7 +53,6 @@ struct AddIdentitySheet: View {
                 .padding(.horizontal, AppTheme.pagePadding)
                 .padding(.vertical, AppTheme.Space.m)
             }
-            .appPageBackground()
             .navigationTitle("添加档案")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -63,6 +62,8 @@ struct AddIdentitySheet: View {
                 }
             }
             .interactiveDismissDisabled(isSubmitting)
+            .onAppear { store.beginAppUpdatePresentationBlock() }
+            .onDisappear { store.endAppUpdatePresentationBlock() }
             .navigationDestination(for: SyncChannelKind.self) { channel in
                 ChannelBindFormView(
                     channel: channel,
@@ -73,11 +74,13 @@ struct AddIdentitySheet: View {
                 )
             }
         }
+        .appSheetContainer()
     }
 }
 
 /// Sheet opened from `IdentityDetailView` to bind or update a specific channel directly.
 struct ChannelBindSheet: View {
+    @Environment(DataStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     let channel: SyncChannelKind
@@ -102,7 +105,10 @@ struct ChannelBindSheet: View {
                 }
             }
             .interactiveDismissDisabled(isSubmitting)
+            .onAppear { store.beginAppUpdatePresentationBlock() }
+            .onDisappear { store.endAppUpdatePresentationBlock() }
         }
+        .appSheetContainer()
     }
 }
 
@@ -158,7 +164,6 @@ struct FullSyncSheet: View {
                 .dismissKeyboardOnTap()
             }
             .scrollDismissesKeyboard(.interactively)
-            .appPageBackground()
             .navigationTitle("完整同步")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -168,8 +173,11 @@ struct FullSyncSheet: View {
                 }
             }
             .interactiveDismissDisabled(isSubmitting)
+            .onAppear { store.beginAppUpdatePresentationBlock() }
+            .onDisappear { store.endAppUpdatePresentationBlock() }
             .errorAlert("完整同步提示", message: $errorMessage)
         }
+        .appSheetContainer()
     }
 
     private func runFullSync() async {
@@ -237,7 +245,6 @@ private struct ChannelBindFormView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .disabled(store.isLoadingLocalData || isSubmitting)
-        .appPageBackground()
         .navigationTitle("绑定\(channel.displayName)")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(isSubmitting)
@@ -560,7 +567,6 @@ private struct ChannelSecondaryAuthView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .disabled(store.isLoadingLocalData || isSubmitting)
-        .appPageBackground()
         .navigationTitle(navTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(isSubmitting)

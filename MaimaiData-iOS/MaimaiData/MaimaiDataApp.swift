@@ -8,6 +8,7 @@ struct MaimaiDataApp: App {
     var body: some Scene {
         WindowGroup {
             MainTabView()
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .environment(store)
                 .task {
                     // Unit tests load the app as TEST_HOST; do not hit the network or

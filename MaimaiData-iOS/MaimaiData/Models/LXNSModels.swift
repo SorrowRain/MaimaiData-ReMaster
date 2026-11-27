@@ -183,13 +183,16 @@ struct LXNSSongDifficulty: Decodable {
     let levelValue: Double
     let noteDesigner: String?
     let version: Int?
+    let releaseDate: String?
     let notes: LXNSNotes?
 
     enum CodingKeys: String, CodingKey {
         case type, difficulty, level
         case levelValue = "level_value"
         case noteDesigner = "note_designer"
-        case version, notes
+        case version
+        case releaseDate = "release_date"
+        case notes
     }
 }
 
@@ -238,6 +241,7 @@ struct LXNSSongDifficultyUtage: Decodable {
     let levelValue: Double?
     let noteDesigner: String?
     let version: Int?
+    let releaseDate: String?
     let kanji: String?
     let description: String?
     let isBuddy: Bool?
@@ -247,7 +251,9 @@ struct LXNSSongDifficultyUtage: Decodable {
         case type, difficulty, level
         case levelValue = "level_value"
         case noteDesigner = "note_designer"
-        case version, kanji, description
+        case version
+        case releaseDate = "release_date"
+        case kanji, description
         case isBuddy = "is_buddy"
         case notes
     }
@@ -328,6 +334,11 @@ struct CNPlateRuleGroup: Codable, Identifiable, Equatable, Hashable {
 
 /// Region-agnostic plate / version progress scope shared across CN, INTL, and JP in `VersionCheckView`.
 struct PlateCheckScope: Identifiable, Equatable, Hashable {
+    enum Goal: Equatable, Hashable {
+        case standard
+        case clear
+    }
+
     enum Rule: Equatable, Hashable {
         case explicitIds(basicToMaster: Set<Int>, remaster: Set<Int>)
         case versions(
@@ -343,12 +354,32 @@ struct PlateCheckScope: Identifiable, Equatable, Hashable {
     let title: String
     let versionAsset: String
     let rule: Rule
+    let goal: Goal
+    let hasJiangBadge: Bool
+
+    init(
+        id: String,
+        title: String,
+        versionAsset: String,
+        rule: Rule,
+        goal: Goal = .standard,
+        hasJiangBadge: Bool = true
+    ) {
+        self.id = id
+        self.title = title
+        self.versionAsset = versionAsset
+        self.rule = rule
+        self.goal = goal
+        self.hasJiangBadge = hasJiangBadge
+    }
 
     static let fallback = PlateCheckScope(
         id: "default",
         title: "真 · maimai ~ PLUS",
         versionAsset: "maimai",
-        rule: .explicitIds(basicToMaster: [], remaster: [])
+        rule: .explicitIds(basicToMaster: [], remaster: []),
+        goal: .standard,
+        hasJiangBadge: false
     )
 
     var supportsRemaster: Bool {

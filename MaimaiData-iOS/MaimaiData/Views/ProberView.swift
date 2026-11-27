@@ -20,71 +20,61 @@ struct ProberView: View {
         let targetList = store.sortedRecords(isNewVersion: selectedTab == 1)
         let cutoff = selectedTab == 0 ? 35 : 15
 
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: AppTheme.itemSpacing) {
-                    Color.clear
-                        .frame(height: 0)
-                        .id("prober_top")
+        ScrollView {
+            LazyVStack(spacing: AppTheme.itemSpacing) {
+                headerPickerCard(
+                    b35Sum: summary.b35Rating,
+                    b15Sum: summary.b15Rating
+                )
 
-                    headerPickerCard(
-                        b35Sum: summary.b35Rating,
-                        b15Sum: summary.b15Rating,
-                        isMatching: summary.isMatching
-                    )
-
-                    if targetList.isEmpty {
-                        if !store.isLoggedIn {
-                            ContentUnavailableView {
-                                Label("尚未添加成绩档案", systemImage: "person.crop.circle.badge.exclamationmark")
-                            } description: {
-                                let sources = store.isCNDirectAvailable ? "国服直连、落雪或水鱼" : "落雪或水鱼"
-                                Text("绑定\(sources)后即可查看 B35 / B15 并生成 Best50 图")
-                            } actions: {
-                                AppInlineButton(title: "添加档案", icon: "person.badge.key.fill") {
-                                    showLoginSheet = true
-                                }
+                if targetList.isEmpty {
+                    if !store.isLoggedIn {
+                        ContentUnavailableView {
+                            Label("尚未添加成绩档案", systemImage: "person.crop.circle.badge.exclamationmark")
+                        } description: {
+                            let sources = store.isCNDirectAvailable ? "国服直连、落雪或水鱼" : "落雪或水鱼"
+                            Text("绑定\(sources)后即可查看 B35 / B15 并生成 Best50 图")
+                        } actions: {
+                            AppInlineButton(title: "添加档案", icon: "person.badge.key.fill") {
+                                showLoginSheet = true
                             }
-                            .padding(.top, 48)
-                        } else {
-                            ContentUnavailableView(
-                                "暂无成绩数据",
-                                systemImage: "tray",
-                                description: Text("下拉刷新获取最新成绩")
-                            )
-                            .padding(.top, 48)
                         }
+                        .padding(.top, 48)
                     } else {
-                        ForEach(Array(targetList.enumerated()), id: \.element.id) { idx, record in
-                            if idx == cutoff {
-                                HStack(spacing: AppTheme.Space.s) {
-                                    VStack { Divider() }
-                                    Text("以下不计入 Best\(cutoff)")
-                                        .font(AppTheme.Typography.inlineAction)
-                                        .foregroundStyle(.secondary)
-                                    VStack { Divider() }
-                                }
-                                .padding(.vertical, 6)
+                        ContentUnavailableView(
+                            "暂无成绩数据",
+                            systemImage: "tray",
+                            description: Text("下拉刷新获取最新成绩")
+                        )
+                        .padding(.top, 48)
+                    }
+                } else {
+                    ForEach(Array(targetList.enumerated()), id: \.element.id) { idx, record in
+                        if idx == cutoff {
+                            HStack(spacing: AppTheme.Space.s) {
+                                VStack { AppInsetDivider() }
+                                Text("以下不计入 Best\(cutoff)")
+                                    .font(AppTheme.Typography.inlineAction)
+                                    .foregroundStyle(.secondary)
+                                VStack { AppInsetDivider() }
                             }
+                            .padding(.vertical, 6)
+                        }
 
-                            let song = store.songsById[record.songId]
-                            if let song {
-                                NavigationLink(value: SongDetailRoute(song: song, initialDifficulty: record.difficulty)) {
-                                    ProberRecordRow(rank: idx + 1, record: record, song: song, region: store.serverRegion)
-                                }
-                                .buttonStyle(.plain)
-                            } else {
-                                ProberRecordRow(rank: idx + 1, record: record, song: nil, region: store.serverRegion)
+                        let song = store.songsById[record.songId]
+                        if let song {
+                            NavigationLink(value: SongDetailRoute(song: song, initialDifficulty: record.difficulty)) {
+                                ProberRecordRow(rank: idx + 1, record: record, song: song, region: store.serverRegion)
                             }
+                            .buttonStyle(.plain)
+                        } else {
+                            ProberRecordRow(rank: idx + 1, record: record, song: nil, region: store.serverRegion)
                         }
                     }
                 }
-                .padding(.horizontal, AppTheme.pagePadding)
-                .padding(.vertical, AppTheme.Space.m)
             }
-            .onChange(of: selectedTab) { _, _ in
-                proxy.scrollTo("prober_top", anchor: .top)
-            }
+            .padding(.horizontal, AppTheme.pagePadding)
+            .padding(.vertical, AppTheme.Space.m)
         }
         .refreshable {
             guard store.isLoggedIn else { return }
@@ -93,7 +83,7 @@ struct ProberView: View {
         .appPageBackground()
         .sensoryFeedback(.selection, trigger: selectedTab)
         .statusToast(toast)
-        .navigationTitle("总 Rating \(summary.totalRating)")
+        .navigationTitle("Best 50")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -108,7 +98,11 @@ struct ProberView: View {
                                 .font(AppTheme.Typography.caption)
                         }
                     } else {
-                        Label("生成 B50", systemImage: "photo.on.rectangle.angled")
+                        HStack(spacing: 4) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                            Text("生成 B50")
+                        }
+                        .font(AppTheme.Typography.inlineAction)
                     }
                 }
                 .disabled(isRenderingB50 || (summary.b35.isEmpty && summary.b15.isEmpty))
@@ -119,7 +113,7 @@ struct ProberView: View {
                 toast.show(summaryText, duration: 2.0)
             }
         }
-        .sheet(item: $b50PreviewItem) { item in
+        .fullScreenCover(item: $b50PreviewItem) { item in
             B50PreviewSheet(image: item.image)
         }
         .errorAlert("提示", message: $errorMessage)
@@ -133,21 +127,13 @@ struct ProberView: View {
         }
     }
 
-    private func headerPickerCard(b35Sum: Int, b15Sum: Int, isMatching: Bool) -> some View {
-        AppCard(padding: AppTheme.compactCardPadding, tint: AppTheme.accent) {
-            VStack(alignment: .leading, spacing: AppTheme.itemSpacing) {
-                Picker("版本分区", selection: $selectedTab.animation(.snappy(duration: 0.22))) {
-                    Text("旧版本 B35 (\(b35Sum))").tag(0)
-                    Text("现行版本 B15 (\(b15Sum))").tag(1)
-                }
-                .pickerStyle(.segmented)
-
-                if !isMatching && !store.records.isEmpty {
-                    Label("部分成绩未匹配到当前曲库，建议在「设置与数据」中更新曲库", systemImage: "exclamationmark.triangle.fill")
-                        .font(AppTheme.Typography.caption)
-                        .foregroundStyle(AppTheme.warning)
-                }
+    private func headerPickerCard(b35Sum: Int, b15Sum: Int) -> some View {
+        AppCard(padding: AppTheme.compactCardPadding) {
+            Picker("版本分区", selection: $selectedTab) {
+                Text("B35 · \(b35Sum)").tag(0)
+                Text("B15 · \(b15Sum)").tag(1)
             }
+            .pickerStyle(.segmented)
         }
     }
 
@@ -213,7 +199,7 @@ private struct ProberRecordRow: View {
 
     var body: some View {
         let diff = record.difficulty
-        AppCard(padding: AppTheme.compactCardPadding, tint: diff.color) {
+        AppCard(padding: AppTheme.compactCardPadding) {
             HStack(spacing: AppTheme.Space.m) {
                 SongCoverBadgeView(
                     song: song,
@@ -256,6 +242,7 @@ private struct ProberRecordRow: View {
                         AppCapsuleLabel(
                             text: "Ra \(record.computedRating)",
                             tint: AppTheme.accent,
+                            isNeutral: false,
                             style: .count
                         )
                     }

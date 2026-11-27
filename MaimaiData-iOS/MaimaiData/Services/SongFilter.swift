@@ -6,12 +6,14 @@ enum SongFilter {
         _ criteria: SongFilterCriteria,
         for region: MaimaiConstants.ServerRegion
     ) -> SongFilterCriteria {
-        guard !criteria.selectedVersions.isEmpty else { return criteria }
-        let allowed = Set(MaimaiConstants.searchVersionChips(for: region))
-        let pruned = criteria.selectedVersions.intersection(allowed)
-        guard pruned != criteria.selectedVersions else { return criteria }
         var copy = criteria
-        copy.selectedVersions = pruned
+        if !copy.selectedVersions.isEmpty {
+            let allowed = Set(MaimaiConstants.searchVersionChips(for: region))
+            copy.selectedVersions = copy.selectedVersions.intersection(allowed)
+        }
+        if copy.useExactDS {
+            copy.exactDS = MaimaiConstants.clampExactDS(copy.exactDS)
+        }
         return copy
     }
 
@@ -21,8 +23,7 @@ enum SongFilter {
         favoriteIds: Set<String>,
         enableAliasSearch: Bool,
         enableCharterSearch: Bool,
-        region: MaimaiConstants.ServerRegion = .cn,
-        playedSongIds: Set<Int> = []
+        region: MaimaiConstants.ServerRegion = .cn
     ) -> [SongData] {
         let query = normalizeSearchText(criteria.keyword)
         let queryNumericId = Int(query).flatMap { $0 > 0 ? $0 : nil }
@@ -35,7 +36,7 @@ enum SongFilter {
         let seqDiff = criteria.sortOption.filterDifficulty
 
         let filtered = songs.filter { song in
-            if song.isDisabled == true && !playedSongIds.contains(song.numericId) {
+            if song.isDisabled == true {
                 return false
             }
 
@@ -89,7 +90,7 @@ enum SongFilter {
 
         switch criteria.sortOption {
         case .defaultDesc:
-            return filtered.sorted { $0.defaultSortKey > $1.defaultSortKey }
+            return filtered.sorted { SongData.isOrderedBeforeInDefaultSort($0, $1) }
         case .expertAsc:
             return filtered.sorted { ($0.ds[safe: 2] ?? 0) < ($1.ds[safe: 2] ?? 0) }
         case .expertDesc:
@@ -111,7 +112,7 @@ enum SongFilter {
         if aHas != bHas { return aHas }
         let aDs = a.ds[safe: 4] ?? 0
         let bDs = b.ds[safe: 4] ?? 0
-        if aDs == bDs { return a.defaultSortKey > b.defaultSortKey }
+        if aDs == bDs { return SongData.isOrderedBeforeInDefaultSort(a, b) }
         return ascending ? aDs < bDs : aDs > bDs
     }
 

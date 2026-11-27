@@ -2,84 +2,77 @@ import SwiftUI
 
 struct LevelCheckView: View {
     @Environment(DataStore.self) private var store
-    @State private var displayMode: CheckDisplayMode = .sss
-    @State private var onlyUnfinished: Bool = false
-    @State private var dsGroups: [DSGroup] = []
-    @State private var totalChartCount: Int = 0
+    @State private var sliderLevelIndex: Double = 0
+    @State private var sliderCommitTask: Task<Void, Never>?
 
     private var levels: [String] {
         Array(MaimaiConstants.allLevels.dropFirst()) // Drop "ALL"
     }
 
-    private var currentLevelIndex: Int {
-        min(max(0, store.lastLevelCheckIndex), levels.count - 1)
+    private var displayLevelIndex: Int {
+        guard !levels.isEmpty else { return 0 }
+        return min(max(0, Int(sliderLevelIndex.rounded())), levels.count - 1)
     }
 
     private var selectedLevel: String {
-        levels[currentLevelIndex]
+        levels[displayLevelIndex]
     }
 
-    private struct ChartItem: Identifiable {
-        var id: String { "\(song.id)_\(chart.index)" }
-        let song: SongData
-        let chart: ResolvedChart
-    }
-
-    private struct DSGroup: Identifiable {
-        var id: Int { Int((ds * 10.0).rounded()) }
-        let ds: Double
-        let items: [ChartItem]
-    }
-
-    private func rebuildGroups() {
-        let level = selectedLevel
-        let items = store.songs
-            .filter { !$0.isUtage && $0.isDisabled != true }
-            .flatMap { song in
-                song.resolvedCharts
-                    .filter { $0.level == level }
-                    .map { ChartItem(song: song, chart: $0) }
-            }
-            .sorted { $0.chart.ds > $1.chart.ds }
-
-        let grouped = Dictionary(grouping: items) { Int(($0.chart.ds * 10.0).rounded()) }
-        dsGroups = grouped.keys.sorted(by: >).map { tenths in
-            DSGroup(ds: Double(tenths) / 10.0, items: grouped[tenths] ?? [])
+    private func commitLevelIndex(_ idx: Int) {
+        sliderCommitTask?.cancel()
+        let clamped = min(max(0, idx), max(0, levels.count - 1))
+        sliderLevelIndex = Double(clamped)
+        if store.lastLevelCheckIndex != clamped {
+            store.lastLevelCheckIndex = clamped
         }
-        totalChartCount = items.count
+    }
+
+    private func scheduleDebouncedCommit(_ idx: Int) {
+        sliderCommitTask?.cancel()
+        let clamped = min(max(0, idx), max(0, levels.count - 1))
+        sliderCommitTask = Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            if store.lastLevelCheckIndex != clamped {
+                store.lastLevelCheckIndex = clamped
+            }
+        }
     }
 
     var body: some View {
         @Bindable var storeBindable = store
+        let dsGroups = store.levelCheckBuckets[selectedLevel] ?? []
+        let totalChartCount = dsGroups.reduce(0) { $0 + $1.items.count }
+        let effectiveDisplayMode: CheckDisplayMode = store.checklistDisplayMode == .clear ? .sss : store.checklistDisplayMode
 
         let matchedRecords = dsGroups.flatMap(\.items).compactMap {
             store.record(forSongId: $0.song.numericId, difficultyIndex: $0.chart.index)
         }
         let stats = ChecklistStats(records: matchedRecords, totalCount: totalChartCount)
 
-        let visibleGroups: [DSGroup] = onlyUnfinished
+        let visibleGroups: [LevelCheckDSBucket] = store.checklistOnlyUnfinished
             ? dsGroups.compactMap { group in
                 let remaining = group.items.filter { item in
-                    !displayMode.isCompleted(
+                    !effectiveDisplayMode.isCompleted(
                         store.record(forSongId: item.song.numericId, difficultyIndex: item.chart.index)
                     )
                 }
-                return remaining.isEmpty ? nil : DSGroup(ds: group.ds, items: remaining)
+                return remaining.isEmpty ? nil : LevelCheckDSBucket(ds: group.ds, items: remaining)
             }
             : dsGroups
 
         ScrollView {
-            VStack(spacing: AppTheme.cardSpacing) {
-                AppCard(padding: AppTheme.cardPadding, tint: AppTheme.Palette.progressAccent) {
+            LazyVStack(spacing: AppTheme.cardSpacing) {
+                AppCard(padding: AppTheme.cardPadding) {
                     VStack(spacing: AppTheme.Space.m) {
                         HStack {
                             AppCircleIconButton(
                                 systemImage: "chevron.left",
                                 accessibilityLabel: "上一个等级",
-                                isDisabled: currentLevelIndex == 0
+                                isDisabled: displayLevelIndex == 0
                             ) {
-                                if currentLevelIndex > 0 {
-                                    store.lastLevelCheckIndex = currentLevelIndex - 1
+                                if displayLevelIndex > 0 {
+                                    commitLevelIndex(displayLevelIndex - 1)
                                 }
                             }
 
@@ -98,21 +91,23 @@ struct LevelCheckView: View {
                             AppCircleIconButton(
                                 systemImage: "chevron.right",
                                 accessibilityLabel: "下一个等级",
-                                isDisabled: currentLevelIndex == levels.count - 1
+                                isDisabled: displayLevelIndex == levels.count - 1
                             ) {
-                                if currentLevelIndex < levels.count - 1 {
-                                    store.lastLevelCheckIndex = currentLevelIndex + 1
+                                if displayLevelIndex < levels.count - 1 {
+                                    commitLevelIndex(displayLevelIndex + 1)
                                 }
                             }
                         }
 
                         Slider(
-                            value: Binding(
-                                get: { Double(currentLevelIndex) },
-                                set: { storeBindable.lastLevelCheckIndex = Int($0.rounded()) }
-                            ),
-                            in: 0...Double(levels.count - 1),
-                            step: 1
+                            value: $sliderLevelIndex,
+                            in: 0...Double(max(0, levels.count - 1)),
+                            step: 1,
+                            onEditingChanged: { editing in
+                                if !editing {
+                                    commitLevelIndex(Int(sliderLevelIndex.rounded()))
+                                }
+                            }
                         )
                         .tint(AppTheme.accent)
                     }
@@ -120,15 +115,15 @@ struct LevelCheckView: View {
 
                 ChecklistStatsHeader(
                     stats: stats,
-                    displayMode: $displayMode,
-                    onlyUnfinished: $onlyUnfinished
+                    displayMode: Binding(
+                        get: { effectiveDisplayMode },
+                        set: { store.checklistDisplayMode = $0 }
+                    ),
+                    onlyUnfinished: $storeBindable.checklistOnlyUnfinished
                 )
 
                 if store.isSyncingSongs && store.songs.isEmpty {
-                    ProgressView("正在同步\(store.serverRegion.shortName)曲库…")
-                        .font(AppTheme.Typography.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, AppTheme.Space.xl)
+                    AppLoadingState(message: "正在同步\(store.serverRegion.shortName)曲库…")
                 } else if store.songs.isEmpty {
                     ContentUnavailableView(
                         "暂无\(store.serverRegion.shortName)曲库数据",
@@ -138,7 +133,7 @@ struct LevelCheckView: View {
                     .padding(.top, AppTheme.Space.xl)
                 } else if visibleGroups.isEmpty && totalChartCount > 0 {
                     ContentUnavailableView(
-                        "已全部达成 \(displayMode.title)",
+                        "已全部达成 \(effectiveDisplayMode.title)",
                         systemImage: "checkmark.seal.fill",
                         description: Text("本等级全部谱面均已达成该目标")
                     )
@@ -146,7 +141,7 @@ struct LevelCheckView: View {
                 } else {
                     ForEach(visibleGroups) { group in
                         AppSectionCard(title: String(format: "定数 %.1f", group.ds)) {
-                            AppCapsuleLabel(text: "\(group.items.count) 首")
+                            AppCapsuleLabel(text: "\(group.items.count) 张")
                         } content: {
                             ChecklistSongGrid {
                                 ForEach(group.items) { item in
@@ -156,8 +151,8 @@ struct LevelCheckView: View {
                                         ChecklistSongTile(
                                             song: item.song,
                                             record: store.record(forSongId: item.song.numericId, difficultyIndex: item.chart.index),
-                                            borderColor: item.chart.difficulty.color,
-                                            displayMode: displayMode,
+                                            difficulty: item.chart.difficulty,
+                                            displayMode: effectiveDisplayMode,
                                             showTypeBadge: true,
                                             region: store.serverRegion
                                         )
@@ -173,14 +168,29 @@ struct LevelCheckView: View {
             .padding(.vertical, AppTheme.Space.m)
         }
         .appPageBackground()
-        .sensoryFeedback(.selection, trigger: currentLevelIndex)
+        .sensoryFeedback(.selection, trigger: displayLevelIndex)
         .navigationTitle("等级进度表")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            rebuildGroups()
+            sliderLevelIndex = Double(min(max(0, store.lastLevelCheckIndex), max(0, levels.count - 1)))
         }
-        .onChange(of: store.lastLevelCheckIndex) { _, _ in rebuildGroups() }
-        .onChange(of: store.serverRegion) { _, _ in rebuildGroups() }
-        .onChange(of: store.catalogRevision) { _, _ in rebuildGroups() }
+        .onDisappear {
+            sliderCommitTask?.cancel()
+            let current = Int(sliderLevelIndex.rounded())
+            if store.lastLevelCheckIndex != current {
+                store.lastLevelCheckIndex = current
+            }
+        }
+        .onChange(of: sliderLevelIndex) { _, newValue in
+            let next = Int(newValue.rounded())
+            if next != store.lastLevelCheckIndex {
+                scheduleDebouncedCommit(next)
+            }
+        }
+        .onChange(of: store.lastLevelCheckIndex) { _, newValue in
+            if Int(sliderLevelIndex.rounded()) != newValue {
+                sliderLevelIndex = Double(newValue)
+            }
+        }
     }
 }

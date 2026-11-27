@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -18,9 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Photo
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -103,10 +100,6 @@ fun ProberScreen(
         SyncOperationKind.PULL_MERGED
     )
 
-    LaunchedEffect(selectedTab) {
-        listState.scrollToItem(0)
-    }
-
     suspend fun refreshRecords(showToastOnSuccess: Boolean = false) {
         try {
             val outcome = store.syncActiveIdentityDefault()
@@ -150,11 +143,11 @@ fun ProberScreen(
         }
     }
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(
-                    title = "总 Rating ${summary.totalRating}",
+                    title = "Best 50",
                     onBack = onBack,
                     actions = {
                         AppInlineButton(
@@ -229,42 +222,16 @@ fun ProberScreen(
                         // 1. Header Picker Card (exact iOS ProberView parity)
                         item(key = "b50_header_picker_card") {
                             AppCard(
-                                padding = AppTheme.compactCardPadding,
-                                tint = AppTheme.accent
+                                padding = AppTheme.compactCardPadding
                             ) {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(AppTheme.itemSpacing)
-                                ) {
-                                    AppSegmentedControl(
-                                        options = listOf(
-                                            "旧版本 B35 (${summary.b35Rating})",
-                                            "现行版本 B15 (${summary.b15Rating})"
-                                        ),
-                                        selectedIndex = selectedTab,
-                                        onSelect = { selectedTab = it }
-                                    )
-
-                                    if (!summary.isMatching && store.records.isNotEmpty()) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Warning,
-                                                contentDescription = null,
-                                                tint = AppTheme.warningText,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Text(
-                                                text = "部分成绩未匹配到当前曲库，建议在「设置与数据」中更新曲库",
-                                                style = AppTheme.AppTypography.caption,
-                                                color = AppTheme.warningText
-                                            )
-                                        }
-                                    }
-                                }
+                                AppSegmentedControl(
+                                    options = listOf(
+                                        "B35 · ${summary.b35Rating}",
+                                        "B15 · ${summary.b15Rating}"
+                                    ),
+                                    selectedIndex = selectedTab,
+                                    onSelect = { selectedTab = it }
+                                )
                             }
                         }
 
@@ -381,7 +348,6 @@ private fun ProberRecordCard(
 
     AppCard(
         padding = AppTheme.compactCardPadding,
-        tint = diff.color,
         onClick = onClick
     ) {
         Row(
@@ -455,6 +421,7 @@ private fun ProberRecordCard(
                     AppCapsuleLabel(
                         text = "Ra ${record.computedRating}",
                         tint = AppTheme.accent,
+                        isNeutral = false,
                         style = CapsuleStyle.Count
                     )
                 }

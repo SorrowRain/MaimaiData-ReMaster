@@ -99,6 +99,45 @@ final class SongFilterTests: XCTestCase {
         XCTAssertEqual(cnPruned.selectedVersions, ["maimai", "舞萌DX 2025"])
         let jpPruned = SongFilter.prunedCriteria(criteria, for: .jp)
         XCTAssertEqual(jpPruned.selectedVersions, ["maimai", "PRiSM"])
+
+        // Exact DS clamp for Level 15 (only 15.0 exists)
+        var overMaxDS = SongFilterCriteria()
+        overMaxDS.useExactDS = true
+        overMaxDS.exactDS = 15.8
+        let clamped = SongFilter.prunedCriteria(overMaxDS, for: .cn)
+        XCTAssertEqual(clamped.exactDS, 15.0, accuracy: 0.0001)
+    }
+
+    func testDefaultSortOrdersByReleaseDateDescendingWithTieBreaker() throws {
+        func makeDatedSong(id: String, title: String, releaseDate: String?, sortOrder: Int? = nil) throws -> SongData {
+            var dict: [String: Any] = [
+                "basic_info": [
+                    "artist": "A", "bpm": 180, "from": "舞萌DX 2026", "genre": "舞萌",
+                    "is_new": true, "title": title, "version": "25500"
+                ],
+                "charts": [[10, 10, 10, 10, 10]].map { ["charter": "-", "notes": $0] },
+                "ds": [13.5], "id": id, "level": ["13+"],
+                "title": title, "type": "DX"
+            ]
+            if let releaseDate { dict["release_date"] = releaseDate }
+            if let sortOrder { dict["sort_order"] = sortOrder }
+            return try JSONDecoder().decode(SongData.self, from: JSONSerialization.data(withJSONObject: dict))
+        }
+
+        let olderHigherId = try makeDatedSong(id: "11999", title: "OlderHighId", releaseDate: "2024-05-01")
+        let newerLowerId = try makeDatedSong(id: "10030", title: "NewerLowId", releaseDate: "2026-06-10")
+        let sameDayHigherId = try makeDatedSong(id: "11500", title: "SameDayHigh", releaseDate: "2026-06-10")
+        let undated = try makeDatedSong(id: "99999", title: "Undated", releaseDate: nil)
+
+        let sorted = SongFilter.apply(
+            SongFilterCriteria(),
+            to: [olderHigherId, newerLowerId, sameDayHigherId, undated],
+            favoriteIds: [],
+            enableAliasSearch: false,
+            enableCharterSearch: false
+        ).map(\.id)
+
+        XCTAssertEqual(sorted, ["11500", "10030", "11999", "99999"])
     }
 
     func testCounterpartAliasSyncSharesSongNicknamesWhileKeepingTypeSpecificOnes() throws {

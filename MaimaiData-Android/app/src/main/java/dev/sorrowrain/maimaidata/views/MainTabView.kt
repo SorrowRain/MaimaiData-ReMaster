@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,15 +22,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
@@ -42,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,11 +58,14 @@ import androidx.navigation.toRoute
 import dev.sorrowrain.maimaidata.bridges.ExternalLinkLauncher
 import dev.sorrowrain.maimaidata.components.AppCapsuleLabel
 import dev.sorrowrain.maimaidata.components.AppCard
+import dev.sorrowrain.maimaidata.components.AppInsetDivider
 import dev.sorrowrain.maimaidata.components.AppPrimaryButton
 import dev.sorrowrain.maimaidata.components.CapsuleStyle
 import dev.sorrowrain.maimaidata.models.AppReleaseInfo
 import dev.sorrowrain.maimaidata.services.LocalDataStore
+import dev.sorrowrain.maimaidata.theme.AppSurfaceLevel
 import dev.sorrowrain.maimaidata.theme.AppTheme
+import dev.sorrowrain.maimaidata.theme.LocalSurfaceLevel
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -178,10 +178,7 @@ fun MainTabView() {
         bottomBar = {
             if (isOnRootTab) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    HorizontalDivider(
-                        thickness = 0.8.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
+                    AppInsetDivider()
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                         tonalElevation = 0.dp
@@ -416,137 +413,129 @@ private fun AppUpdateSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = AppTheme.Radius.card, topEnd = AppTheme.Radius.card),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
-                .padding(bottom = AppTheme.Space.l),
-            verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+        CompositionLocalProvider(LocalSurfaceLevel provides AppSurfaceLevel.Sheet) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = AppTheme.pagePadding, vertical = AppTheme.Space.s)
+                    .padding(bottom = AppTheme.Space.l),
+                verticalArrangement = Arrangement.spacedBy(AppTheme.cardSpacing)
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.CloudDownload,
-                    contentDescription = null,
-                    tint = AppTheme.accent,
-                    modifier = Modifier.size(22.dp)
-                )
-                Text(
-                    text = "发现新版本",
-                    style = AppTheme.AppTypography.cardTitle,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                AppCapsuleLabel(
-                    text = "v${release.version}",
-                    style = CapsuleStyle.Count
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "关闭",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                        imageVector = Icons.Rounded.CloudDownload,
+                        contentDescription = null,
+                        tint = AppTheme.accentText,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        text = "发现新版本",
+                        style = AppTheme.AppTypography.cardTitle,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    AppCapsuleLabel(
+                        text = "v${release.version}",
+                        isNeutral = false,
+                        style = CapsuleStyle.Count
                     )
                 }
-            }
 
-            AppCard(
-                padding = AppTheme.cardPadding
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 300.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+                AppCard(
+                    padding = AppTheme.cardPadding
                 ) {
-                    if (parsedNotes.isEmpty()) {
-                        Text(
-                            text = "已有新版本发布，建议更新以获得最新功能与体验优化。",
-                            style = AppTheme.AppTypography.body,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        parsedNotes.forEachIndexed { index, item ->
-                            when (item) {
-                                is UpdateNoteLine.Heading -> {
-                                    Text(
-                                        text = item.text,
-                                        style = AppTheme.AppTypography.subheadlineBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(
-                                            top = if (index == 0) 0.dp else AppTheme.Space.xs
-                                        )
-                                    )
-                                }
-                                is UpdateNoteLine.Bullet -> {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s),
-                                        verticalAlignment = Alignment.Top
-                                    ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+                    ) {
+                        if (parsedNotes.isEmpty()) {
+                            Text(
+                                text = "已有新版本发布，建议更新以获得最新功能与体验优化。",
+                                style = AppTheme.AppTypography.body,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            parsedNotes.forEachIndexed { index, item ->
+                                when (item) {
+                                    is UpdateNoteLine.Heading -> {
                                         Text(
-                                            text = "•",
-                                            style = AppTheme.AppTypography.body,
-                                            color = AppTheme.accentText
+                                            text = item.text,
+                                            style = AppTheme.AppTypography.subheadlineBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(
+                                                top = if (index == 0) 0.dp else AppTheme.Space.xs
+                                            )
                                         )
+                                    }
+                                    is UpdateNoteLine.Bullet -> {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s),
+                                            verticalAlignment = Alignment.Top
+                                        ) {
+                                            Text(
+                                                text = "•",
+                                                style = AppTheme.AppTypography.body,
+                                                color = AppTheme.accentText
+                                            )
+                                            Text(
+                                                text = item.text,
+                                                style = AppTheme.AppTypography.body,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                    is UpdateNoteLine.Body -> {
                                         Text(
                                             text = item.text,
                                             style = AppTheme.AppTypography.body,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.weight(1f)
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                }
-                                is UpdateNoteLine.Body -> {
-                                    Text(
-                                        text = item.text,
-                                        style = AppTheme.AppTypography.body,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)
-            ) {
-                AppPrimaryButton(
-                    title = "前往下载",
-                    icon = Icons.AutoMirrored.Rounded.OpenInNew,
-                    onClick = onPrimaryAction
-                )
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalArrangement = Arrangement.spacedBy(AppTheme.Space.xs)
                 ) {
-                    TextButton(onClick = onIgnore) {
-                        Text(
-                            text = "忽略此版本",
-                            style = AppTheme.AppTypography.rowTitle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    TextButton(onClick = onDismiss) {
-                        Text(
-                            text = "稍后提醒",
-                            style = AppTheme.AppTypography.rowTitle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    AppPrimaryButton(
+                        title = "前往下载",
+                        icon = Icons.AutoMirrored.Rounded.OpenInNew,
+                        onClick = onPrimaryAction
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        TextButton(onClick = onIgnore) {
+                            Text(
+                                text = "忽略此版本",
+                                style = AppTheme.AppTypography.rowTitle,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = onDismiss) {
+                            Text(
+                                text = "稍后提醒",
+                                style = AppTheme.AppTypography.rowTitle,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

@@ -7,12 +7,10 @@ final class DataStore {
     // MARK: - Domain Data
     private(set) var songs: [SongData] = []
     private(set) var songsById: [Int: SongData] = [:]
+    private(set) var levelCheckBuckets: [String: [LevelCheckDSBucket]] = [:]
     private(set) var catalogRevision = 0
     private var cnSongs: [SongData] = []
     private var cnSongsById: [Int: SongData] = [:]
-    private(set) var deletedSongsById: [Int: SongData] = [:]
-    private var unresolvableDeletedSongIds: Set<Int> = []
-    private(set) var playedSongIds: Set<Int> = []
     private(set) var plateCatalog: CNPlateCatalog?
     private var zetarakuCatalog: ZetarakuCatalog?
     private var dxDataIdMap: DXDataIdMap?
@@ -21,17 +19,11 @@ final class DataStore {
     private(set) var records: [ProberRecord] = [] {
         didSet {
             var map: [String: ProberRecord] = [:]
-            var songIds = Set<Int>()
             map.reserveCapacity(records.count)
-            songIds.reserveCapacity(records.count)
             for rec in records {
                 map["\(rec.songId)_\(rec.levelIndex)"] = rec
-                if rec.songId > 0 {
-                    songIds.insert(rec.songId)
-                }
             }
             recordsByKey = map
-            playedSongIds = songIds
         }
     }
     private var recordsByKey: [String: ProberRecord] = [:]
@@ -49,9 +41,14 @@ final class DataStore {
     private(set) var isSyncingStats = false
     private(set) var isLoadingLocalData = true
     private(set) var isRestoringCachedRecords = false
-    var statusMessage: String?
+    var catalogSyncMessage: String?
+    var catalogSyncToast: String?
+    var appUpdateMessage: String?
+    var appUpdateToast: String?
     var syncNotice: DataSyncNotice?
     var availableAppUpdate: AppReleaseInfo?
+    private var pendingAppUpdate: AppReleaseInfo?
+    private var appUpdateBlockerCount: Int = 0
     private(set) var isCheckingAppUpdate = false
 
     // Single-flight guard for rotating LXNS OAuth refresh tokens
@@ -82,25 +79,10 @@ final class DataStore {
         }
     }
 
-    private var lastDeletedSongsResolveAttemptDate: Date? {
-        get {
-            guard let ts = UserDefaults.standard.object(forKey: Keys.deletedSongsResolveAttempt) as? TimeInterval else { return nil }
-            return Date(timeIntervalSince1970: ts)
-        }
-        set {
-            if let newValue {
-                UserDefaults.standard.set(newValue.timeIntervalSince1970, forKey: Keys.deletedSongsResolveAttempt)
-            } else {
-                UserDefaults.standard.removeObject(forKey: Keys.deletedSongsResolveAttempt)
-            }
-        }
-    }
-
     private enum SyncPolicy {
         static let catalogAutoRefresh: TimeInterval = 7 * 24 * 3600
         static let catalogManualCooldown: TimeInterval = 10 * 60
         static let unknownSongCatalogCooldown: TimeInterval = 12 * 3600
-        static let deletedSongsResolveCooldown: TimeInterval = 12 * 3600
         static let statsAutoRefresh: TimeInterval = 5 * 24 * 3600
         static let statsManualCooldown: TimeInterval = 5 * 60
         static let appUpdateCheckInterval: TimeInterval = 2 * 3600
@@ -174,9 +156,23 @@ final class DataStore {
     var lastVersionCheckJpIndex: Int {
         didSet { UserDefaults.standard.set(lastVersionCheckJpIndex, forKey: Keys.lastVersionCheckJp) }
     }
+    var lastVersionCheckScopeId: String? {
+        didSet { UserDefaults.standard.set(lastVersionCheckScopeId, forKey: Keys.lastVersionCheckScopeId) }
+    }
+    var lastVersionCheckIntlScopeId: String? {
+        didSet { UserDefaults.standard.set(lastVersionCheckIntlScopeId, forKey: Keys.lastVersionCheckIntlScopeId) }
+    }
+    var lastVersionCheckJpScopeId: String? {
+        didSet { UserDefaults.standard.set(lastVersionCheckJpScopeId, forKey: Keys.lastVersionCheckJpScopeId) }
+    }
     var lastLevelCheckIndex: Int {
         didSet { UserDefaults.standard.set(lastLevelCheckIndex, forKey: Keys.lastLevelCheck) }
     }
+
+    // In-memory session state across navigation push/pop and tab switches
+    var checklistDisplayMode: CheckDisplayMode = .sss
+    var checklistOnlyUnfinished: Bool = false
+    var versionCheckDifficulty: DifficultyType = .master
 
     var activeVersionCheckIndex: Int {
         get {
@@ -195,10 +191,35 @@ final class DataStore {
         }
     }
 
+    var activeVersionCheckScopeId: String? {
+        get {
+            switch serverRegion {
+            case .cn: return lastVersionCheckScopeId
+            case .intl: return lastVersionCheckIntlScopeId
+            case .jp: return lastVersionCheckJpScopeId
+            }
+        }
+        set {
+            switch serverRegion {
+            case .cn: lastVersionCheckScopeId = newValue
+            case .intl: lastVersionCheckIntlScopeId = newValue
+            case .jp: lastVersionCheckJpScopeId = newValue
+            }
+        }
+    }
+
     /// Cached official CN plate rule groups + unified plate scopes for the active server region.
     /// Rebuilt whenever songs, CN baseline, plate catalog, or server region changes.
     private(set) var cnPlateCheckGroups: [CNPlateRuleGroup] = []
     private(set) var activePlateScopes: [PlateCheckScope] = []
+
+    nonisolated static func migrateLegacyPlateScopeId(legacyIndex: Int, scopes: [PlateCheckScope]) -> String? {
+        let legacyOrder = scopes.filter { $0.id != "覇者" }
+        if legacyIndex >= 0, legacyIndex < legacyOrder.count {
+            return legacyOrder[legacyIndex].id
+        }
+        return scopes.first?.id
+    }
 
     private func rebuildPlateScopeCache() {
         var list = plateCatalog?.groups ?? []
@@ -228,6 +249,12 @@ final class DataStore {
             activeSongs: songs,
             zetarakuVersions: zetarakuCatalog?.versions
         )
+        if activeVersionCheckScopeId == nil, !activePlateScopes.isEmpty {
+            activeVersionCheckScopeId = Self.migrateLegacyPlateScopeId(
+                legacyIndex: activeVersionCheckIndex,
+                scopes: activePlateScopes
+            )
+        }
     }
 
     var lastCatalogSyncText: String {
@@ -261,7 +288,6 @@ final class DataStore {
     private var cachedPlatesURL: URL { appSupportDir.appendingPathComponent("plate_rules.json") }
     private var cachedZetarakuURL: URL { appSupportDir.appendingPathComponent("zetaraku_data.json") }
     private var cachedDXDataIdMapURL: URL { appSupportDir.appendingPathComponent("dxdata_id_map.json") }
-    private var cachedDeletedCNSongsURL: URL { appSupportDir.appendingPathComponent("deleted_cn_songs.json") }
     private var cachedStatsURL: URL { appSupportDir.appendingPathComponent("chart_stats.json") }
     private var cachedRecordsURL: URL? {
         guard let activeIdentityId else { return nil }
@@ -334,6 +360,9 @@ final class DataStore {
         self.lastVersionCheckIndex = ud.integer(forKey: Keys.lastVersionCheck)
         self.lastVersionCheckIntlIndex = ud.integer(forKey: Keys.lastVersionCheckIntl)
         self.lastVersionCheckJpIndex = ud.integer(forKey: Keys.lastVersionCheckJp)
+        self.lastVersionCheckScopeId = ud.string(forKey: Keys.lastVersionCheckScopeId)
+        self.lastVersionCheckIntlScopeId = ud.string(forKey: Keys.lastVersionCheckIntlScopeId)
+        self.lastVersionCheckJpScopeId = ud.string(forKey: Keys.lastVersionCheckJpScopeId)
         self.lastLevelCheckIndex = ud.integer(forKey: Keys.lastLevelCheck)
     }
 
@@ -344,7 +373,6 @@ final class DataStore {
         let platesURL = cachedPlatesURL
         let zetarakuURL = cachedZetarakuURL
         let dxIdMapURL = cachedDXDataIdMapURL
-        let deletedURL = cachedDeletedCNSongsURL
         let statsURL = cachedStatsURL
         let recordsURL = cachedRecordsURL
 
@@ -378,9 +406,6 @@ final class DataStore {
             if let idData = try? Data(contentsOf: dxIdMapURL) {
                 cache.dxIdMap = try? JSONDecoder().decode(DXDataIdMap.self, from: idData)
             }
-            if let delData = try? Data(contentsOf: deletedURL) {
-                cache.deletedCache = try? JSONDecoder().decode(DeletedCNSongsCache.self, from: delData)
-            }
             if let data = try? Data(contentsOf: statsURL) {
                 cache.stats = try? JSONDecoder().decode(ChartStatsResponse.self, from: data)
             }
@@ -396,15 +421,6 @@ final class DataStore {
         plateCatalog = caches.plates
         zetarakuCatalog = caches.zetaraku
         dxDataIdMap = caches.dxIdMap
-        if let deletedCache = caches.deletedCache {
-            var deletedMap: [Int: SongData] = [:]
-            deletedMap.reserveCapacity(deletedCache.songs.count)
-            for song in deletedCache.songs where song.numericId > 0 {
-                deletedMap[song.numericId] = song
-            }
-            deletedSongsById = deletedMap
-            unresolvableDeletedSongIds = Set(deletedCache.unresolvableIds)
-        }
         var cnSnapshot: SongSnapshot?
         if let loadedCNSongs = caches.songs {
             cnSnapshot = await storeCNBaseline(loadedCNSongs)
@@ -442,8 +458,9 @@ final class DataStore {
         }
 
         // Defer low-frequency periodic checks so app launch never bursts upstream APIs.
+        let needsReleaseDateBackfill = !cnSongs.isEmpty && cnSongs.allSatisfy { $0.releaseDate == nil }
         try? await Task.sleep(for: .seconds(SyncPolicy.bootstrapDelaySeconds))
-        async let periodicCatalogCheck: Void = syncAllCatalogsAndRules(force: false)
+        async let periodicCatalogCheck: Void = syncAllCatalogsAndRules(force: needsReleaseDateBackfill)
         async let periodicStatsCheck: Void = refreshChartStatsIfStale(force: false)
         async let periodicAppUpdateCheck: Void = checkAppUpdateIfNeeded(manual: false, ignoreInterval: true)
         _ = await (periodicCatalogCheck, periodicStatsCheck, periodicAppUpdateCheck)
@@ -477,14 +494,33 @@ final class DataStore {
             if let latest, latest.isNewer(than: currentShort) {
                 let ignored = UserDefaults.standard.string(forKey: Keys.ignoredAppUpdateVersion)
                 if manual || ignored != latest.version {
-                    availableAppUpdate = latest
+                    if !manual && appUpdateBlockerCount > 0 {
+                        pendingAppUpdate = latest
+                    } else {
+                        pendingAppUpdate = nil
+                        availableAppUpdate = latest
+                    }
                 }
             } else if manual {
-                statusMessage = "当前已是最新版本（v\(currentShort)）"
+                appUpdateToast = "当前已是最新版本（v\(currentShort)）"
             }
         } catch {
             if manual {
-                statusMessage = "检查更新失败，请检查网络连接后重试"
+                appUpdateMessage = "检查更新失败，请检查网络连接后重试"
+            }
+        }
+    }
+
+    func beginAppUpdatePresentationBlock() {
+        appUpdateBlockerCount += 1
+    }
+
+    func endAppUpdatePresentationBlock() {
+        appUpdateBlockerCount = max(0, appUpdateBlockerCount - 1)
+        if appUpdateBlockerCount == 0, let deferred = pendingAppUpdate {
+            pendingAppUpdate = nil
+            if availableAppUpdate == nil {
+                availableAppUpdate = deferred
             }
         }
     }
@@ -492,6 +528,7 @@ final class DataStore {
     func ignoreAppUpdate(version: String) {
         UserDefaults.standard.set(version, forKey: Keys.ignoredAppUpdateVersion)
         availableAppUpdate = nil
+        pendingAppUpdate = nil
     }
 
     @discardableResult
@@ -503,14 +540,6 @@ final class DataStore {
         }.value
         cnSongs = snapshot.songs
         cnSongsById = snapshot.songsById
-        if !deletedSongsById.isEmpty {
-            var remainingDeleted = deletedSongsById
-            for id in snapshot.songsById.keys {
-                remainingDeleted.removeValue(forKey: id)
-            }
-            deletedSongsById = remainingDeleted
-        }
-        unresolvableDeletedSongIds.subtract(snapshot.songsById.keys)
         return snapshot
     }
 
@@ -518,6 +547,7 @@ final class DataStore {
         if let epoch, regionEpoch != epoch { return }
         songs = snapshot.songs
         songsById = snapshot.songsById
+        levelCheckBuckets = snapshot.levelCheckBuckets
         maxNotesStats = snapshot.maxNotes
         catalogRevision &+= 1
         rebuildPlateScopeCache()
@@ -572,23 +602,39 @@ final class DataStore {
 
     nonisolated private static func buildSnapshotSync(from list: [SongData]) -> SongSnapshot {
         let enriched = SongData.mergingCounterpartAliases(list)
-        let sorted = enriched.sorted {
-            if $0.defaultSortKey != $1.defaultSortKey { return $0.defaultSortKey > $1.defaultSortKey }
-            return $0.id > $1.id
-        }
+        let sorted = enriched.sorted { SongData.isOrderedBeforeInDefaultSort($0, $1) }
         var seenIds = Set<String>()
         seenIds.reserveCapacity(sorted.count)
         var ordered: [SongData] = []
         ordered.reserveCapacity(sorted.count)
         var map: [Int: SongData] = [:]
         map.reserveCapacity(sorted.count)
+        var byLevel: [String: [LevelCheckChartItem]] = [:]
         for song in sorted where seenIds.insert(song.id).inserted {
             ordered.append(song)
             if song.numericId > 0 {
                 map[song.numericId] = song
             }
+            if !song.isUtage && song.isDisabled != true {
+                for chart in song.resolvedCharts {
+                    byLevel[chart.level, default: []].append(LevelCheckChartItem(song: song, chart: chart))
+                }
+            }
         }
-        return SongSnapshot(songs: ordered, songsById: map, maxNotes: MaxNotesStats.compute(from: ordered))
+        var levelBuckets: [String: [LevelCheckDSBucket]] = [:]
+        levelBuckets.reserveCapacity(byLevel.count)
+        for (level, items) in byLevel {
+            let grouped = Dictionary(grouping: items) { Int(($0.chart.ds * 10.0).rounded()) }
+            levelBuckets[level] = grouped.keys.sorted(by: >).map { tenths in
+                LevelCheckDSBucket(ds: Double(tenths) / 10.0, items: grouped[tenths] ?? [])
+            }
+        }
+        return SongSnapshot(
+            songs: ordered,
+            songsById: map,
+            levelCheckBuckets: levelBuckets,
+            maxNotes: MaxNotesStats.compute(from: ordered)
+        )
     }
 
     private func applyChartStats(_ response: ChartStatsResponse) {
@@ -621,6 +667,8 @@ final class DataStore {
             } else {
                 songs = []
                 songsById = [:]
+                levelCheckBuckets = [:]
+                maxNotesStats = .fallback
                 catalogRevision &+= 1
                 rebuildPlateScopeCache()
                 await loadOrFetchZetaraku(for: newRegion, epoch: epoch)
@@ -666,7 +714,7 @@ final class DataStore {
                !cnSongs.isEmpty,
                plateCatalog != nil,
                zetarakuCatalog != nil {
-                statusMessage = "当前已是最新数据"
+                catalogSyncToast = "当前已是最新数据"
                 return
             }
         } else {
@@ -708,10 +756,10 @@ final class DataStore {
 
         if force {
             if cnErr == nil && zErr == nil {
-                statusMessage = "已更新至最新数据"
+                catalogSyncToast = "已更新至最新数据"
                 syncNotice = nil
             } else if let err = cnErr ?? zErr {
-                statusMessage = "部分数据同步失败：\(err.localizedDescription)"
+                catalogSyncMessage = "部分数据同步失败：\(err.localizedDescription)"
                 syncNotice = DataSyncNotice(
                     kind: .songs,
                     message: "曲库与规则同步未完全成功，正在使用本地缓存数据。\n\(err.localizedDescription)"
@@ -763,19 +811,6 @@ final class DataStore {
             dxDataIdMap = fetchedIdMap
             if let encoded = try? JSONEncoder().encode(fetchedIdMap) {
                 try? encoded.write(to: cachedDXDataIdMapURL, options: .atomic)
-            }
-            if !unresolvableDeletedSongIds.isEmpty {
-                unresolvableDeletedSongIds.removeAll()
-                let cachePayload = DeletedCNSongsCache(
-                    songs: Array(deletedSongsById.values).sorted { $0.numericId < $1.numericId },
-                    unresolvableIds: []
-                )
-                let cacheURL = cachedDeletedCNSongsURL
-                Task.detached(priority: .utility) {
-                    if let encoded = try? JSONEncoder().encode(cachePayload) {
-                        try? encoded.write(to: cacheURL, options: .atomic)
-                    }
-                }
             }
         }
 
@@ -830,7 +865,7 @@ final class DataStore {
         guard !isSyncingStats else { return }
         if force {
             if let last = lastChartStatsSync, Date().timeIntervalSince(last) < SyncPolicy.statsManualCooldown, !chartStats.isEmpty {
-                statusMessage = "当前已是最新数据"
+                catalogSyncToast = "当前已是最新数据"
                 return
             }
         } else {
@@ -846,11 +881,11 @@ final class DataStore {
             lastChartStatsSync = Date()
             applyChartStats(decoded)
             if force {
-                statusMessage = "拟合定数已刷新"
+                catalogSyncToast = "拟合定数已刷新"
                 syncNotice = nil
             }
         } catch {
-            statusMessage = force ? "拟合定数获取失败：\(error.localizedDescription)" : nil
+            catalogSyncMessage = force ? "拟合定数获取失败：\(error.localizedDescription)" : nil
             syncNotice = DataSyncNotice(
                 kind: .stats,
                 message: "拟合定数获取失败，正在使用本地数据。可前往「设置与数据」重试。"
@@ -1092,7 +1127,7 @@ final class DataStore {
 
             let shouldMakeActive = (activeIdentityId == nil) || (targetIdentityId == nil) || (activeIdentityId == resolvedId)
             try await installFetchedRecords(merged, for: resolvedId, syncMode: mode, makeActive: shouldMakeActive)
-            await resolveUnknownSongsAfterSync(in: merged, for: resolvedId)
+            await refreshCNCatalogIfUnknownSongsFound(in: merged, for: resolvedId)
             SyncDiagnostics.shared.record(operation: "bind_cn", message: "绑定国服直连成功（共 \(merged.count) 条）")
 
             let updatedIdentity = identities.first(where: { $0.id == resolvedId }) ?? list.last!
@@ -1146,7 +1181,7 @@ final class DataStore {
             let merged = ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: incoming)
 
             try await installFetchedRecords(merged, for: targetId, syncMode: .quick, makeActive: false)
-            await resolveUnknownSongsAfterSync(in: merged, for: targetId)
+            await refreshCNCatalogIfUnknownSongsFound(in: merged, for: targetId)
             SyncDiagnostics.shared.record(operation: "quick_sync", message: "快速同步完成（共 \(merged.count) 条）")
 
             if writeback {
@@ -1207,7 +1242,7 @@ final class DataStore {
             let replaced = ScoreSyncEngine.applyFullSync(incoming: incoming)
 
             try await installFetchedRecords(replaced, for: targetId, syncMode: .full, makeActive: false)
-            await resolveUnknownSongsAfterSync(in: replaced, for: targetId)
+            await refreshCNCatalogIfUnknownSongsFound(in: replaced, for: targetId)
             SyncDiagnostics.shared.record(operation: "full_sync", message: "完整同步完成（共 \(replaced.count) 条）")
 
             if writeback {
@@ -1340,7 +1375,7 @@ final class DataStore {
                 finalRecords = ScoreSyncEngine.applyFullSync(incoming: fetched)
             }
             try await installFetchedRecords(finalRecords, for: targetId, syncMode: .divingFish, makeActive: makeActive)
-            await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+            await refreshCNCatalogIfUnknownSongsFound(in: finalRecords, for: targetId)
         }
     }
 
@@ -1509,7 +1544,7 @@ final class DataStore {
                 finalRecords = ScoreSyncEngine.applyFullSync(incoming: converted)
             }
             try await installFetchedRecords(finalRecords, for: targetId, syncMode: .lxns, makeActive: makeActive)
-            await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+            await refreshCNCatalogIfUnknownSongsFound(in: finalRecords, for: targetId)
         }
     }
 
@@ -1600,7 +1635,7 @@ final class DataStore {
                     : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: df.records)
                 let finalRecords = ScoreSyncEngine.mergeQuickSync(existing: withDF, incoming: lx.records)
                 try await installFetchedRecords(finalRecords, for: targetId, syncMode: .lxns, makeActive: false)
-                await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+                await refreshCNCatalogIfUnknownSongsFound(in: finalRecords, for: targetId)
                 SyncDiagnostics.shared.record(operation: "pull_merged", message: "双查分器合并同步完成（共 \(finalRecords.count) 条）")
                 return SyncOutcome()
 
@@ -1618,7 +1653,7 @@ final class DataStore {
                     ? ScoreSyncEngine.applyFullSync(incoming: lx.records)
                     : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: lx.records)
                 try await installFetchedRecords(finalRecords, for: targetId, syncMode: .lxns, makeActive: false)
-                await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+                await refreshCNCatalogIfUnknownSongsFound(in: finalRecords, for: targetId)
                 recordDiagnosticFailure(operation: "pull_merged", channel: "divingFish", error: dfErr)
                 return SyncOutcome(warningMessage: "水鱼同步失败（已合并落雪与本地最佳成绩）：\(dfErr.localizedDescription)")
 
@@ -1636,7 +1671,7 @@ final class DataStore {
                     ? ScoreSyncEngine.applyFullSync(incoming: df.records)
                     : ScoreSyncEngine.mergeQuickSync(existing: existing, incoming: df.records)
                 try await installFetchedRecords(finalRecords, for: targetId, syncMode: .divingFish, makeActive: false)
-                await resolveUnknownSongsAfterSync(in: finalRecords, for: targetId)
+                await refreshCNCatalogIfUnknownSongsFound(in: finalRecords, for: targetId)
                 recordDiagnosticFailure(operation: "pull_merged", channel: "lxns", error: lxErr)
                 return SyncOutcome(warningMessage: "落雪同步失败（已合并水鱼与本地最佳成绩）：\(lxErr.localizedDescription)")
 
@@ -1925,7 +1960,7 @@ final class DataStore {
             finalRecords = ScoreSyncEngine.applyFullSync(incoming: incoming)
         }
         try await installFetchedRecords(finalRecords, for: identityId, syncMode: .divingFish, makeActive: makeActive)
-        await resolveUnknownSongsAfterSync(in: finalRecords, for: identityId)
+        await refreshCNCatalogIfUnknownSongsFound(in: finalRecords, for: identityId)
         SyncDiagnostics.shared.record(operation: "pull_df", channel: "divingFish", message: "同步水鱼成绩完成（共 \(finalRecords.count) 条）")
     }
 
@@ -1958,7 +1993,7 @@ final class DataStore {
             finalRecords = ScoreSyncEngine.applyFullSync(incoming: fetched.records)
         }
         try await installFetchedRecords(finalRecords, for: identityId, syncMode: .lxns, makeActive: makeActive)
-        await resolveUnknownSongsAfterSync(in: finalRecords, for: identityId)
+        await refreshCNCatalogIfUnknownSongsFound(in: finalRecords, for: identityId)
         SyncDiagnostics.shared.record(operation: "pull_lxns", channel: "lxns", message: "同步落雪成绩完成（共 \(finalRecords.count) 条）")
     }
 
@@ -2322,10 +2357,7 @@ final class DataStore {
     }
 
     private func scoreImportSongLookup() -> [Int: SongData] {
-        var map = deletedSongsById
-        if !songsById.isEmpty {
-            map.merge(songsById) { _, active in active }
-        }
+        var map = songsById
         if !cnSongsById.isEmpty {
             map.merge(cnSongsById) { _, cn in cn }
         }
@@ -2386,101 +2418,27 @@ final class DataStore {
         }
     }
 
-    private func resolveUnknownSongsAfterSync(in syncedRecords: [ProberRecord], for identityId: String) async {
-        guard !syncedRecords.isEmpty else { return }
-        func computeUnknownIds() -> Set<Int> {
-            var out = Set<Int>()
-            for rec in syncedRecords {
-                let id = rec.songId
-                if id > 0,
-                   self.cnSongsById[id] == nil,
-                   self.deletedSongsById[id] == nil,
-                   !self.unresolvableDeletedSongIds.contains(id) {
-                    out.insert(id)
-                }
-            }
-            return out
+    /// Triggers at most one 12h-throttled LXNS catalog refresh when newly released CN songs appear in synced records.
+    private func refreshCNCatalogIfUnknownSongsFound(in syncedRecords: [ProberRecord], for identityId: String) async {
+        guard !syncedRecords.isEmpty,
+              !isFetchingCNSongs,
+              syncedRecords.contains(where: { $0.songId > 0 && cnSongsById[$0.songId] == nil }) else {
+            return
+        }
+        if let lastAttempt = lastUnknownSongCatalogRefreshDate,
+           Date().timeIntervalSince(lastAttempt) < SyncPolicy.unknownSongCatalogCooldown {
+            return
         }
 
-        var unknownIds = computeUnknownIds()
-        guard !unknownIds.isEmpty else { return }
+        let result = await performLXNSCatalogSync()
+        guard let fetchedSongs = result.songs, !fetchedSongs.isEmpty else { return }
+        lastUnknownSongCatalogRefreshDate = Date()
 
-        var didRefreshCN = false
-        if !isFetchingCNSongs {
-            let canRefreshCN: Bool = {
-                guard let lastAttempt = lastUnknownSongCatalogRefreshDate else { return true }
-                return Date().timeIntervalSince(lastAttempt) >= SyncPolicy.unknownSongCatalogCooldown
-            }()
-            if canRefreshCN {
-                let result = await performLXNSCatalogSync()
-                if let fetchedSongs = result.songs, !fetchedSongs.isEmpty {
-                    lastUnknownSongCatalogRefreshDate = Date()
-                    didRefreshCN = true
-                    let cnSnapshot = await storeCNBaseline(fetchedSongs)
-                    if serverRegion == .cn {
-                        applySnapshot(cnSnapshot, epoch: regionEpoch)
-                    } else if let catalog = zetarakuCatalog {
-                        await applyZetarakuCatalog(catalog, for: serverRegion, epoch: regionEpoch)
-                    }
-                    unknownIds = computeUnknownIds()
-                }
-            }
-        }
-
-        let didConfirmFreshCNCatalog = didRefreshCN || (
-            !cnSongsById.isEmpty &&
-            (lastCNCatalogSync.map { Date().timeIntervalSince($0) < SyncPolicy.unknownSongCatalogCooldown } ?? false)
-        )
-
-        if !unknownIds.isEmpty && didConfirmFreshCNCatalog {
-            if zetarakuCatalog == nil || dxDataIdMap == nil {
-                let canFetchZetaraku: Bool = {
-                    guard let lastAttempt = lastDeletedSongsResolveAttemptDate else { return true }
-                    return Date().timeIntervalSince(lastAttempt) >= SyncPolicy.deletedSongsResolveCooldown
-                }()
-                if canFetchZetaraku && !isFetchingZetaraku {
-                    let zErr = await performZetarakuSync()
-                    if zErr == nil && zetarakuCatalog != nil {
-                        lastDeletedSongsResolveAttemptDate = Date()
-                    }
-                }
-            }
-
-            if let zCatalog = zetarakuCatalog, let idMap = dxDataIdMap {
-                let resolution = await Task.detached(priority: .userInitiated) {
-                    ZetarakuCatalogConverter.resolveDeletedCNSongs(
-                        unknownIds: unknownIds,
-                        catalog: zCatalog,
-                        dxIdMap: idMap
-                    )
-                }.value
-
-                if !resolution.resolved.isEmpty || !resolution.unresolvableIds.isEmpty {
-                    var updatedDeleted = deletedSongsById
-                    for song in resolution.resolved where song.numericId > 0 {
-                        updatedDeleted[song.numericId] = song
-                    }
-                    deletedSongsById = updatedDeleted
-                    unresolvableDeletedSongIds.formUnion(resolution.unresolvableIds)
-
-                    let cachePayload = DeletedCNSongsCache(
-                        songs: Array(updatedDeleted.values).sorted { $0.numericId < $1.numericId },
-                        unresolvableIds: Array(unresolvableDeletedSongIds).sorted()
-                    )
-                    let cacheURL = cachedDeletedCNSongsURL
-                    Task.detached(priority: .utility) {
-                        if let encoded = try? JSONEncoder().encode(cachePayload) {
-                            try? encoded.write(to: cacheURL, options: .atomic)
-                        }
-                    }
-                    catalogRevision &+= 1
-                    SyncDiagnostics.shared.record(
-                        operation: "resolve_deleted",
-                        message: "解析删除曲 \(resolution.resolved.count) 首，未收录 \(resolution.unresolvableIds.count) 首",
-                        sampleSkippedIds: Array(resolution.unresolvableIds).sorted()
-                    )
-                }
-            }
+        let cnSnapshot = await storeCNBaseline(fetchedSongs)
+        if serverRegion == .cn {
+            applySnapshot(cnSnapshot, epoch: regionEpoch)
+        } else if let catalog = zetarakuCatalog {
+            await applyZetarakuCatalog(catalog, for: serverRegion, epoch: regionEpoch)
         }
 
         if activeIdentityId == identityId.lowercased() {
@@ -2559,26 +2517,13 @@ final class DataStore {
     }
 
     func filteredSongs(criteria: SongFilterCriteria) -> [SongData] {
-        let pool: [SongData]
-        if serverRegion == .cn, !deletedSongsById.isEmpty, !playedSongIds.isEmpty {
-            var list = songs
-            for songId in playedSongIds {
-                if songsById[songId] == nil, let deleted = deletedSongsById[songId] {
-                    list.append(deleted)
-                }
-            }
-            pool = list
-        } else {
-            pool = songs
-        }
-        return SongFilter.apply(
+        SongFilter.apply(
             criteria,
-            to: pool,
+            to: songs,
             favoriteIds: favoriteIds,
             enableAliasSearch: enableAliasSearch,
             enableCharterSearch: enableCharterSearch,
-            region: serverRegion,
-            playedSongIds: playedSongIds
+            region: serverRegion
         )
     }
 
@@ -2589,9 +2534,8 @@ final class DataStore {
     }
 
     func song(forId rawId: String) -> SongData? {
-        if let numId = Int(rawId) {
-            if let active = songsById[numId] { return active }
-            if serverRegion == .cn, let deleted = deletedSongsById[numId] { return deleted }
+        if let numId = Int(rawId), let active = songsById[numId] {
+            return active
         }
         return songs.first { $0.id == rawId }
     }
@@ -2601,8 +2545,9 @@ final class DataStore {
         guard !song.isUtage else { return nil }
         if song.numericId > 0 {
             let targetId = song.numericId < 10_000 ? song.numericId + 10_000 : song.numericId - 10_000
-            if let candidate = songsById[targetId] ?? (serverRegion == .cn ? deletedSongsById[targetId] : nil),
+            if let candidate = songsById[targetId],
                !candidate.isUtage,
+               candidate.isDisabled != true,
                candidate.title == song.title,
                candidate.isDX != song.isDX {
                 return candidate
@@ -2610,6 +2555,7 @@ final class DataStore {
         }
         return songs.first { candidate in
             !candidate.isUtage &&
+            candidate.isDisabled != true &&
             candidate.isDX != song.isDX &&
             candidate.title == song.title &&
             candidate.basicInfo.genre == song.basicInfo.genre
@@ -2660,20 +2606,14 @@ final class DataStore {
 
     func best35AndBest15() -> Best50Summary {
         let region = serverRegion
-        var matching = true
         var oldList: [ProberRecord] = []
         var newList: [ProberRecord] = []
         for rec in records {
-            guard let song = songsById[rec.songId] else {
-                if deletedSongsById[rec.songId] != nil || unresolvableDeletedSongIds.contains(rec.songId) {
-                    continue
-                }
-                if region == .cn || cnSongsById[rec.songId] == nil {
-                    matching = false
-                }
+            if rec.type == "utage" || rec.levelIndex >= 10 || rec.songId >= 100_000 {
                 continue
             }
-            guard !song.isUtage,
+            guard let song = songsById[rec.songId],
+                  !song.isUtage,
                   song.isDisabled != true,
                   song.chartArrayIndex(forRecordLevelIndex: rec.levelIndex) != nil else { continue }
             let projected = rec.projected(onto: song, region: region)
@@ -2687,7 +2627,7 @@ final class DataStore {
         newList.sort(by: Self.recordOrder)
         let b35 = Array(oldList.prefix(35))
         let b15 = Array(newList.prefix(15))
-        return Best50Summary(b35: b35, b15: b15, isMatching: matching)
+        return Best50Summary(b35: b35, b15: b15)
     }
 
     private static func recordOrder(_ lhs: ProberRecord, _ rhs: ProberRecord) -> Bool {
@@ -2717,7 +2657,6 @@ private struct LocalCaches {
     var plates: CNPlateCatalog?
     var zetaraku: ZetarakuCatalog?
     var dxIdMap: DXDataIdMap?
-    var deletedCache: DeletedCNSongsCache?
     var stats: ChartStatsResponse?
     var records: [ProberRecord]?
 }
@@ -2725,22 +2664,33 @@ private struct LocalCaches {
 private struct SongSnapshot {
     let songs: [SongData]
     let songsById: [Int: SongData]
+    let levelCheckBuckets: [String: [LevelCheckDSBucket]]
     let maxNotes: MaxNotesStats
+}
+
+struct LevelCheckChartItem: Identifiable, Equatable {
+    var id: String { "\(song.id)_\(chart.index)" }
+    let song: SongData
+    let chart: ResolvedChart
+}
+
+struct LevelCheckDSBucket: Identifiable, Equatable {
+    var id: Int { Int((ds * 10.0).rounded()) }
+    let ds: Double
+    let items: [LevelCheckChartItem]
 }
 
 struct Best50Summary {
     let b35: [ProberRecord]
     let b15: [ProberRecord]
-    let isMatching: Bool
     let b35Rating: Int
     let b15Rating: Int
 
     var totalRating: Int { b35Rating + b15Rating }
 
-    init(b35: [ProberRecord], b15: [ProberRecord], isMatching: Bool) {
+    init(b35: [ProberRecord], b15: [ProberRecord]) {
         self.b35 = b35
         self.b15 = b15
-        self.isMatching = isMatching
         self.b35Rating = b35.reduce(0) { $0 + $1.computedRating }
         self.b15Rating = b15.reduce(0) { $0 + $1.computedRating }
     }

@@ -136,7 +136,7 @@ fun FinaleToDxScreen(
         breakScore = ""
     }
 
-    AppPageBackground(tint = AppTheme.accent) {
+    AppPageBackground {
         Scaffold(
             topBar = {
                 AppTopBar(

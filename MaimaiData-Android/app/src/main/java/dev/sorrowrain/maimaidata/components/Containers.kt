@@ -34,62 +34,48 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.sorrowrain.maimaidata.models.brightened
+import dev.sorrowrain.maimaidata.theme.AppSurfaceLevel
 import dev.sorrowrain.maimaidata.theme.AppTheme
 import dev.sorrowrain.maimaidata.theme.LocalIsDarkTheme
+import dev.sorrowrain.maimaidata.theme.LocalSurfaceLevel
 
 /**
- * Clean Material 3 minimal surface card with optional subtle top-start tint wash and 1dp hairline border.
+ * Clean Material 3 minimal surface card with 1dp hairline border.
  */
 @Composable
 fun AppCard(
     modifier: Modifier = Modifier,
     padding: Dp = AppTheme.cardPadding,
-    tint: Color? = null,
+    useRaisedSurface: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val isDark = LocalIsDarkTheme.current
+    val surfaceLevel = LocalSurfaceLevel.current
     val shape = RoundedCornerShape(AppTheme.Radius.card)
+    val containerColor = AppTheme.cardSurfaceColor(
+        isDark = isDark,
+        surfaceLevel = surfaceLevel,
+        useRaisedSurface = useRaisedSurface
+    )
     val borderStroke = BorderStroke(
         width = 1.dp,
-        color = if (isDark) {
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.50f)
-        } else {
-            MaterialTheme.colorScheme.outlineVariant
-        }
+        color = AppTheme.cardBorderColor(isDark)
     )
 
     val cardBody: @Composable () -> Unit = {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(
-                    if (tint != null) {
-                        Modifier.background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    tint.copy(alpha = if (isDark) 0.11f else 0.06f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(padding),
-                content = content
-            )
-        }
+                .padding(padding),
+            content = content
+        )
     }
 
     if (onClick != null) {
@@ -97,7 +83,7 @@ fun AppCard(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             shape = shape,
-            color = MaterialTheme.colorScheme.surface,
+            color = containerColor,
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
@@ -108,7 +94,7 @@ fun AppCard(
         Surface(
             modifier = modifier.fillMaxWidth(),
             shape = shape,
-            color = MaterialTheme.colorScheme.surface,
+            color = containerColor,
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
@@ -128,45 +114,81 @@ fun AppSectionHeader(
     modifier: Modifier = Modifier,
     trailing: (@Composable () -> Unit)? = null
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(3.5.dp)
-                .height(16.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(AppTheme.accent, AppTheme.accentBright)
-                    )
-                )
-        )
+    val stackTrailing = trailing != null && LocalDensity.current.fontScale >= 1.2f
 
+    if (stackTrailing) {
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            modifier = modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
         ) {
-            Text(
-                text = title,
-                style = AppTheme.AppTypography.cardTitle,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            if (!subtitle.isNullOrEmpty()) {
-                Text(
-                    text = subtitle,
-                    style = AppTheme.AppTypography.caption,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+            ) {
+                SectionAccentBar()
+                SectionHeaderTitles(title = title, subtitle = subtitle, modifier = Modifier.weight(1f))
+            }
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                trailing?.invoke()
             }
         }
-
-        if (trailing != null) {
-            Box(contentAlignment = Alignment.CenterEnd) {
-                trailing()
+    } else {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(AppTheme.Space.s)
+        ) {
+            SectionAccentBar()
+            SectionHeaderTitles(title = title, subtitle = subtitle, modifier = Modifier.weight(1f))
+            if (trailing != null) {
+                Box(contentAlignment = Alignment.CenterEnd) {
+                    trailing()
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun SectionAccentBar() {
+    Box(
+        modifier = Modifier
+            .width(4.dp)
+            .height(16.dp)
+            .clip(CircleShape)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(AppTheme.accent, AppTheme.accentBright)
+                )
+            )
+    )
+}
+
+@Composable
+private fun SectionHeaderTitles(
+    title: String,
+    subtitle: String?,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = title,
+            style = AppTheme.AppTypography.cardTitle,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        if (!subtitle.isNullOrEmpty()) {
+            Text(
+                text = subtitle,
+                style = AppTheme.AppTypography.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -211,13 +233,20 @@ fun AppInsetGroup(
     padding: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val isDark = LocalIsDarkTheme.current
+    val surfaceLevel = LocalSurfaceLevel.current
     val shape = RoundedCornerShape(AppTheme.Radius.inset)
+    val bgColor = when {
+        isDark && surfaceLevel == AppSurfaceLevel.Sheet -> AppTheme.Palette.sheetInsetDark
+        isDark -> AppTheme.Palette.insetDark
+        else -> Color.Black.copy(alpha = 0.04f)
+    }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant, shape)
+            .background(bgColor, shape)
             .padding(padding),
         content = content
     )
@@ -246,7 +275,7 @@ fun Modifier.appInsetRowHighlight(
     if (!isHighlighted) return this
     val isDark = LocalIsDarkTheme.current
     return this.background(
-        color = tint.copy(alpha = if (isDark) 0.18f else 0.10f),
+        color = tint.copy(alpha = if (isDark) 0.16f else 0.08f),
         shape = RectangleShape
     )
 }

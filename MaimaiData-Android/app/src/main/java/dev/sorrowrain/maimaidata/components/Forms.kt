@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -328,7 +329,8 @@ fun AppSlider(
     valueRange: IntRange,
     modifier: Modifier = Modifier,
     tint: Color = AppTheme.accent,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    onValueChangeFinished: (() -> Unit)? = null
 ) {
     val isDark = LocalIsDarkTheme.current
     val haptic = LocalHapticFeedback.current
@@ -376,6 +378,7 @@ fun AppSlider(
                 settledAnim.snapTo(dragRawFloat)
                 isDragging = false
             }
+            onValueChangeFinished?.invoke()
         },
         valueRange = minInt.toFloat()..safeEndFloat,
         steps = 0,
@@ -434,6 +437,7 @@ fun AppLabeledSliderRow(
     onValueChange: (Int) -> Unit,
     valueRange: IntRange,
     isActive: Boolean = true,
+    enabled: Boolean = true,
     accessibilityLabel: String = label,
     modifier: Modifier = Modifier
 ) {
@@ -446,15 +450,19 @@ fun AppLabeledSliderRow(
             text = label,
             style = AppTheme.AppTypography.inlineAction,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(30.dp)
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.defaultMinSize(minWidth = 30.dp)
         )
-        AppValueBadge(text = valueText, isActive = isActive)
+        AppValueBadge(text = valueText, isActive = isActive && enabled)
         AppSlider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
+            enabled = enabled,
             modifier = Modifier
                 .weight(1f)
+                .alpha(if (enabled) 1f else 0.45f)
                 .semantics { contentDescription = "$accessibilityLabel：$valueText" }
         )
     }

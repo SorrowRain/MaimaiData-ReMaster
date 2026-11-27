@@ -89,11 +89,11 @@ struct FinaleToDxView: View {
                 } content: {
                     VStack(spacing: AppTheme.Space.m) {
                         noteGroup("TAP", color: AppTheme.Palette.noteTap, p: sanitizedBinding($tapP), gr: sanitizedBinding($tapGr), gd: sanitizedBinding($tapGd), m: sanitizedBinding($tapM))
-                        Divider()
+                        AppInsetDivider()
                         noteGroup("HOLD", color: AppTheme.Palette.noteHold, p: sanitizedBinding($holdP), gr: sanitizedBinding($holdGr), gd: sanitizedBinding($holdGd), m: sanitizedBinding($holdM))
-                        Divider()
+                        AppInsetDivider()
                         noteGroup("SLIDE", color: AppTheme.Palette.noteSlide, p: sanitizedBinding($slideP), gr: sanitizedBinding($slideGr), gd: sanitizedBinding($slideGd), m: sanitizedBinding($slideM))
-                        Divider()
+                        AppInsetDivider()
                         noteGroup("BREAK", color: AppTheme.Palette.noteBreak, p: sanitizedBinding($breakP), gr: sanitizedBinding($breakGr), gd: sanitizedBinding($breakGd), m: sanitizedBinding($breakM))
                     }
                 }
