@@ -404,41 +404,34 @@ struct SongFilterCriteria: Equatable {
     }
 }
 
-struct GitHubLatestReleasePayload: Decodable {
-    let tagName: String
-    let htmlURL: String
-    let body: String?
-
-    enum CodingKeys: String, CodingKey {
-        case tagName = "tag_name"
-        case htmlURL = "html_url"
-        case body
-    }
-}
-
 struct AppReleaseInfo: Identifiable, Equatable {
     var id: String { version }
     let version: String
     let notes: String
     let htmlURL: String
 
-    static func from(payload: GitHubLatestReleasePayload) -> AppReleaseInfo? {
-        let rawTag = payload.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleaned = rawTag.replacingOccurrences(
-            of: #"^[vV]+"#,
-            with: "",
-            options: .regularExpression
-        )
-        guard !cleaned.isEmpty else { return nil }
-        let trimmedNotes = (payload.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let cappedNotes = trimmedNotes.count > 420
-            ? String(trimmedNotes.prefix(420)) + "…"
-            : trimmedNotes
-        return AppReleaseInfo(
-            version: cleaned,
-            notes: cappedNotes,
-            htmlURL: payload.htmlURL
-        )
+    private enum AtomError: Error {
+        case invalidXML
+        case noStableRelease
+    }
+
+    static func fromAtom(_ data: Data) throws -> AppReleaseInfo {
+        let otherEncoding = #"\A\uFEFF?<\?xml\s+[^?]*\bencoding\s*=\s*(['"])(?!UTF-8\1)"#
+        guard let text = String(data: data, encoding: .utf8),
+              !text.utf8.contains(0), !text.contains("<!DOCTYPE"),
+              text.range(of: otherEncoding, options: [.regularExpression, .caseInsensitive]) == nil else {
+            throw AtomError.invalidXML
+        }
+
+        let delegate = ReleaseAtomParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.shouldProcessNamespaces = true
+        parser.shouldResolveExternalEntities = false
+        parser.externalEntityResolvingPolicy = .never
+        guard parser.parse(), parser.parserError == nil else { throw AtomError.invalidXML }
+        guard let latest = delegate.latest else { throw AtomError.noStableRelease }
+        return latest
     }
 
     func isNewer(than currentVersion: String) -> Bool {
@@ -446,6 +439,136 @@ struct AppReleaseInfo: Identifiable, Equatable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: #"^[vV]+"#, with: "", options: .regularExpression)
         return VersionString.isNewer(version, than: cleanedCurrent)
+    }
+}
+
+private final class ReleaseAtomParser: NSObject, XMLParserDelegate {
+    private static let namespace = "http://www.w3.org/2005/Atom"
+    private static let linkPrefix = "https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v"
+    private static let htmlTags = try! NSRegularExpression(
+        pattern: #"(?is)<!--.*?-->|<(/?)([a-z][a-z0-9:-]*)(?:[^"'<>]|"[^"]*"|'[^']*')*>"#
+    )
+    private static let htmlEntities = try! NSRegularExpression(
+        pattern: #"&(amp|lt|gt|quot|apos|nbsp|#[0-9]+|#[xX][0-9a-fA-F]+);"#
+    )
+
+    private var depth = 0
+    private var inEntry = false
+    private var readingContent = false
+    private var link: (version: String, url: String)?
+    private var content: (isHTML: Bool, text: String)?
+    private(set) var latest: AppReleaseInfo?
+
+    func parser(
+        _ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+        qualifiedName: String?, attributes: [String: String]
+    ) {
+        depth += 1
+        if depth == 1, elementName != "feed" || namespaceURI != Self.namespace {
+            parser.abortParsing()
+            return
+        }
+        guard namespaceURI == Self.namespace else { return }
+        switch (depth, elementName) {
+        case (2, "entry"):
+            inEntry = true
+            link = nil
+            content = nil
+        case (3, "link") where inEntry && link == nil && attributes["rel"] == "alternate":
+            guard let url = attributes["href"], url.hasPrefix(Self.linkPrefix) else { return }
+            let version = String(url.dropFirst(Self.linkPrefix.count))
+            guard version.range(of: #"\A[0-9]+\.[0-9]+\.[0-9]+\z"#, options: .regularExpression) != nil,
+                  version.split(separator: ".").allSatisfy({ Int32($0) != nil }) else { return }
+            link = (version, url)
+        case (3, "content") where inEntry && content == nil:
+            let type = attributes["type"] ?? "text"
+            if ["html", "text", "text/plain"].contains(type) {
+                content = (type == "html", "")
+                readingContent = true
+            }
+        default:
+            break
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if depth == 3 && readingContent { content?.text += string }
+    }
+
+    func parser(_ parser: XMLParser, foundCDATA data: Data) {
+        if let string = String(data: data, encoding: .utf8) {
+            self.parser(parser, foundCharacters: string)
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
+        defer { depth -= 1 }
+        if depth == 3 { readingContent = false }
+        guard depth == 2, inEntry else { return }
+        inEntry = false
+        guard let link, latest.map({ VersionString.isNewer(link.version, than: $0.version) }) ?? true else { return }
+        let notes = (content.map { $0.isHTML ? Self.plainText($0.text) : $0.text } ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let scalars = notes.unicodeScalars
+        let cappedNotes = scalars.count > 420 ? String(scalars.prefix(420)) + "…" : notes
+        latest = AppReleaseInfo(version: link.version, notes: cappedNotes, htmlURL: link.url)
+    }
+
+    private static func plainText(_ html: String) -> String {
+        let tightened = html.replacingOccurrences(
+            of: #"(?i)(<li\b[^>]*>)\s*(?:<p\b[^>]*>\s*)?"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        let text = replacingMatches(in: tightened, of: htmlTags) { source, match in
+            let name = match.range(at: 2)
+            guard name.location != NSNotFound else { return "" }
+            switch source.substring(with: name).lowercased() {
+            case "li": return match.range(at: 1).length == 0 ? "\n- " : "\n"
+            case "p", "br", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "div", "blockquote", "pre", "hr":
+                return "\n"
+            default: return ""
+            }
+        }
+        let decoded = replacingMatches(in: text, of: htmlEntities) { source, match in
+            let entity = source.substring(with: match.range(at: 1))
+            switch entity {
+            case "amp": return "&"
+            case "lt": return "<"
+            case "gt": return ">"
+            case "quot": return "\""
+            case "apos": return "'"
+            case "nbsp": return " "
+            default:
+                let digits = entity.dropFirst()
+                let hex = digits.first == "x" || digits.first == "X"
+                if let value = UInt32(hex ? digits.dropFirst() : digits, radix: hex ? 16 : 10),
+                   let scalar = UnicodeScalar(value) {
+                    return String(scalar)
+                }
+                return source.substring(with: match.range)
+            }
+        }
+        return decoded.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private static func replacingMatches(
+        in text: String, of pattern: NSRegularExpression,
+        with replacement: (NSString, NSTextCheckingResult) -> String
+    ) -> String {
+        let source = text as NSString
+        let range = NSRange(location: 0, length: source.length)
+        var output = ""
+        var offset = 0
+        for match in pattern.matches(in: text, range: range) {
+            output += source.substring(with: NSRange(location: offset, length: match.range.location - offset))
+            output += replacement(source, match)
+            offset = NSMaxRange(match.range)
+        }
+        return output + source.substring(from: offset)
     }
 }
 

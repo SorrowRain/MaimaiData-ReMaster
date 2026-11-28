@@ -491,26 +491,17 @@ enum MaimaiAPI {
 
     // MARK: - 5. GitHub Latest Release Update Check
 
-    private static let githubLatestReleaseURL = URL(
-        string: "https://api.github.com/repos/SorrowRain/MaimaiData-ReMaster/releases/latest"
+    private static let githubReleasesAtomURL = URL(
+        string: "https://github.com/SorrowRain/MaimaiData-ReMaster/releases.atom"
     )!
 
-    static func fetchLatestGitHubRelease(timeout: TimeInterval = 6) async throws -> AppReleaseInfo? {
-        var req = URLRequest(url: githubLatestReleaseURL, timeoutInterval: timeout)
+    static func fetchLatestGitHubRelease(timeout: TimeInterval = 6) async throws -> AppReleaseInfo {
+        var req = URLRequest(url: githubReleasesAtomURL, timeoutInterval: timeout)
         req.setValue(appUserAgent, forHTTPHeaderField: "User-Agent")
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("application/atom+xml", forHTTPHeaderField: "Accept")
         let (data, resp) = try await session.data(for: req)
-        guard let httpResp = resp as? HTTPURLResponse else {
-            throw MaimaiAPIError.httpError(-1, "无效响应")
-        }
-        if httpResp.statusCode == 404 {
-            return nil
-        }
-        guard (200...299).contains(httpResp.statusCode) else {
-            throw MaimaiAPIError.httpError(httpResp.statusCode, extractErrorMessage(from: data))
-        }
-        let payload = try JSONDecoder().decode(GitHubLatestReleasePayload.self, from: data)
-        return AppReleaseInfo.from(payload: payload)
+        try validateHTTP(resp, data: data)
+        return try AppReleaseInfo.fromAtom(data)
     }
 
     // MARK: - 6. Third-Party Prober Writeback & Diving-Fish Titles

@@ -1,5 +1,6 @@
 package dev.sorrowrain.maimaidata
 
+import dev.sorrowrain.maimaidata.models.AppReleaseInfo
 import dev.sorrowrain.maimaidata.models.DifficultyType
 import dev.sorrowrain.maimaidata.models.ProberRecord
 import dev.sorrowrain.maimaidata.models.RatingCalculator
@@ -152,18 +153,89 @@ class RatingCalculatorTests {
     }
 
     @Test
-    fun testAppReleaseInfoTagParsingAndVersionCheck() {
-        val payload = dev.sorrowrain.maimaidata.models.GitHubLatestReleasePayload(
-            tagName = "v1.1.0",
-            htmlUrl = "https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.1.0",
-            body = "  新增功能与体验优化  "
+    fun testAppReleaseInfoUsesHighestStableAtomTag() {
+        val releases = "https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/"
+        val feed = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" href="${releases}nightly"/></entry>
+              <entry><link rel="alternate" href="${releases}v9.9.9-beta"/></entry>
+              <entry><link rel="alternate" href="https://github.com/Other/MaimaiData-ReMaster/releases/tag/v9.0.0"/></entry>
+              <entry><link rel="alternate" href="${releases}v2147483648.0.0"/></entry>
+              <entry><link rel="alternate" href="${releases}v1.9.9"/></entry>
+              <entry>
+                <link rel="self" href="${releases}v8.0.0"/>
+                <link rel="alternate" href="${releases}v1.10.0"/>
+                <link rel="alternate" href="${releases}v2.0.0"/>
+                <content type="html">&lt;ul&gt;&lt;li&gt;
+                &lt;p&gt;优化 &amp;amp; 修复&lt;/p&gt;&lt;/li&gt;&lt;li&gt;&amp;lt;内容&amp;gt;&lt;/li&gt;&lt;/ul&gt;</content>
+              </entry>
+            </feed>
+        """.trimIndent()
+        val info = AppReleaseInfo.fromAtom(feed.toByteArray())
+        assertEquals("1.10.0", info.version)
+        assertEquals("- 优化 & 修复\n- <内容>", info.notes)
+        assertEquals("${releases}v1.10.0", info.htmlUrl)
+        assertTrue(info.isNewerThan("1.9.9"))
+        assertFalse(info.isNewerThan("v1.10.0"))
+        assertFalse(info.isNewerThan("1.11.0"))
+    }
+
+    @Test
+    fun testAppReleaseInfoRejectsInvalidAtomFeeds() {
+        val namespace = "http://www.w3.org/2005/Atom"
+        val release = "https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.2.1"
+        val link = """<link rel="alternate" href="$release"/>"""
+        val entry = "<entry>$link</entry>"
+        val openFeed = """<feed xmlns="$namespace">"""
+        val valid = "$openFeed$entry</feed>"
+        val invalid = listOf(
+            "$openFeed$entry",
+            "$valid<extra/>",
+            valid.replace("v1.2.1", "v1.2.1-rc.1"),
+            valid.replace("<feed", "<other").replace("</feed>", "</other>"),
+            valid.replace(namespace, "urn:other"),
+            "$openFeed<wrapper>$entry</wrapper></feed>",
+            "$openFeed<entry><wrapper>$link</wrapper></entry></feed>",
+            """<?xml version="1.0"?><!DOCTYPE feed>$valid""",
+            """<?xml version="1.0" encoding="ISO-8859-1"?>$valid"""
         )
-        val info = dev.sorrowrain.maimaidata.models.AppReleaseInfo.from(payload)!!
-        assertEquals("1.1.0", info.version)
-        assertEquals("新增功能与体验优化", info.notes)
-        assertTrue(info.isNewerThan("1.0.0"))
-        assertFalse(info.isNewerThan("1.1.0"))
-        assertFalse(info.isNewerThan("1.2.0"))
+        for (feed in invalid) {
+            assertThrows(Exception::class.java) { AppReleaseInfo.fromAtom(feed.toByteArray()) }
+        }
+        assertThrows(Exception::class.java) { AppReleaseInfo.fromAtom(byteArrayOf(0xFF.toByte())) }
+        assertThrows(Exception::class.java) { AppReleaseInfo.fromAtom(valid.toByteArray(Charsets.UTF_16LE)) }
+    }
+
+    @Test
+    fun testAppReleaseInfoFormatsHtmlAndDecodesEntitiesOnce() {
+        val feed = """
+            <atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+              <atom:entry>
+                <atom:link rel="alternate" href="https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.2.1"/>
+                <atom:content type="html"><![CDATA[<h2>更新</h2><p><strong>&quot;修复&apos;</strong><br/>&#20013;&#x1F600;&nbsp;&amp;lt;</p>]]></atom:content>
+              </atom:entry>
+            </atom:feed>
+        """.trimIndent()
+        val info = AppReleaseInfo.fromAtom(feed.toByteArray())
+        assertEquals("更新\n\"修复'\n中😀 &lt;", info.notes)
+    }
+
+    @Test
+    fun testAppReleaseInfoTrimsAndCapsPlainNotes() {
+        val text = "e\u0301".repeat(210)
+        val content = """<content type="text">  $text 末  </content>"""
+        val feed = """
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry>
+                <link rel="alternate" href="https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.2.1"/>
+                $content
+              </entry>
+            </feed>
+        """.trimIndent()
+        val info = AppReleaseInfo.fromAtom(feed.toByteArray())
+        assertEquals("$text…", info.notes)
+        assertEquals("", AppReleaseInfo.fromAtom(feed.replace(content, "").toByteArray()).notes)
     }
 
     @Test

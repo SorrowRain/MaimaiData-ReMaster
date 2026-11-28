@@ -491,7 +491,7 @@ final class DataStore {
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Keys.appUpdateCheck)
             let currentShort = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
 
-            if let latest, latest.isNewer(than: currentShort) {
+            if latest.isNewer(than: currentShort) {
                 let ignored = UserDefaults.standard.string(forKey: Keys.ignoredAppUpdateVersion)
                 if manual || ignored != latest.version {
                     if !manual && appUpdateBlockerCount > 0 {

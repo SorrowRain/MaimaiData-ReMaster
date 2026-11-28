@@ -127,15 +127,88 @@ final class RatingCalculatorTests: XCTestCase {
         XCTAssertTrue(loggedOutRows.allSatisfy { $0.b50Gain == nil })
     }
 
-    func testAppReleaseInfoTagParsingAndVersionCheck() throws {
-        let json = #"{"tag_name":"v1.1.0","html_url":"https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.1.0","body":"  新增功能与体验优化  "}"#
-        let payload = try JSONDecoder().decode(GitHubLatestReleasePayload.self, from: Data(json.utf8))
-        let info = try XCTUnwrap(AppReleaseInfo.from(payload: payload))
-        XCTAssertEqual(info.version, "1.1.0")
-        XCTAssertEqual(info.notes, "新增功能与体验优化")
-        XCTAssertTrue(info.isNewer(than: "1.0.0"))
-        XCTAssertFalse(info.isNewer(than: "1.1.0"))
-        XCTAssertFalse(info.isNewer(than: "1.2.0"))
+    func testAppReleaseInfoUsesHighestStableAtomTag() throws {
+        let releases = "https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/"
+        let feed = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <entry><link rel="alternate" href="\(releases)v9.9.9-beta"/></entry>
+          <entry><link rel="alternate" href="\(releases)nightly"/></entry>
+          <entry><link rel="alternate" href="https://github.com/Other/MaimaiData-ReMaster/releases/tag/v9.0.0"/></entry>
+          <entry><link rel="alternate" href="\(releases)v2147483648.0.0"/></entry>
+          <entry><link rel="alternate" href="\(releases)v1.9.9"/></entry>
+          <entry>
+            <title>发布说明</title>
+            <link rel="self" href="\(releases)v8.0.0"/>
+            <link rel="alternate" href="\(releases)v1.10.0"/>
+            <link rel="alternate" href="\(releases)v7.0.0"/>
+            <content type="html">&lt;ul&gt;&lt;li&gt;
+            &lt;p&gt;优化 &amp;amp; 修复&lt;/p&gt;&lt;/li&gt;&lt;li&gt;&amp;lt;内容&amp;gt;&lt;/li&gt;&lt;/ul&gt;</content>
+          </entry>
+        </feed>
+        """
+        let info = try AppReleaseInfo.fromAtom(Data(feed.utf8))
+        XCTAssertEqual(info.version, "1.10.0")
+        XCTAssertEqual(info.notes, "- 优化 & 修复\n- <内容>")
+        XCTAssertEqual(info.htmlURL, "\(releases)v1.10.0")
+        XCTAssertTrue(info.isNewer(than: "1.9.9"))
+        XCTAssertFalse(info.isNewer(than: "v1.10.0"))
+        XCTAssertFalse(info.isNewer(than: "1.11.0"))
+    }
+
+    func testAppReleaseInfoRejectsInvalidAtomFeeds() throws {
+        let link = """
+        <link rel="alternate" href="https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.2.1"/>
+        """
+        let entry = "<entry>\(link)</entry>"
+        let openFeed = "<feed xmlns=\"http://www.w3.org/2005/Atom\">"
+        let valid = "\(openFeed)\(entry)</feed>"
+        let invalid = [
+            "\(openFeed)\(entry)",
+            "\(valid)<extra/>",
+            valid.replacingOccurrences(of: "v1.2.1", with: "v1.2.1-rc.1"),
+            valid.replacingOccurrences(of: "feed", with: "other"),
+            valid.replacingOccurrences(of: "http://www.w3.org/2005/Atom", with: "urn:other"),
+            "\(openFeed)<wrapper>\(entry)</wrapper></feed>",
+            "\(openFeed)<entry><wrapper>\(link)</wrapper></entry></feed>",
+            "<?xml version=\"1.0\"?><!-- feed --><!DOCTYPE feed>\(valid)",
+            "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\(valid)"
+        ]
+        for feed in invalid {
+            XCTAssertThrowsError(try AppReleaseInfo.fromAtom(Data(feed.utf8)), feed)
+        }
+        XCTAssertThrowsError(try AppReleaseInfo.fromAtom(Data([0xFF])))
+        let utf16 = try XCTUnwrap(valid.data(using: .utf16LittleEndian))
+        XCTAssertThrowsError(try AppReleaseInfo.fromAtom(utf16))
+    }
+
+    func testAppReleaseInfoFormatsHTMLAndDecodesEntitiesOnce() throws {
+        let feed = """
+        <atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+          <atom:entry>
+            <atom:link rel="alternate" href="https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.2.1"/>
+            <atom:content type="html"><![CDATA[<h2>更新</h2><p><strong>&quot;修复&apos;</strong><br/>&#20013;&#x1F600;&nbsp;&amp;lt;</p>]]></atom:content>
+          </atom:entry>
+        </atom:feed>
+        """
+        let info = try AppReleaseInfo.fromAtom(Data(feed.utf8))
+        XCTAssertEqual(info.notes, "更新\n\"修复'\n中😀 &lt;")
+    }
+
+    func testAppReleaseInfoTrimsAndCapsPlainNotes() throws {
+        let text = String(repeating: "e\u{301}", count: 210)
+        let feed = """
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <entry>
+            <link rel="alternate" href="https://github.com/SorrowRain/MaimaiData-ReMaster/releases/tag/v1.2.1"/>
+            <content type="text">  \(text)末  </content>
+          </entry>
+        </feed>
+        """
+        let info = try AppReleaseInfo.fromAtom(Data(feed.utf8))
+        XCTAssertEqual(info.notes, text + "…")
+        let withoutNotes = feed.replacingOccurrences(of: "<content type=\"text\">  \(text)末  </content>", with: "")
+        XCTAssertEqual(try AppReleaseInfo.fromAtom(Data(withoutNotes.utf8)).notes, "")
     }
 
     func testRecordAccessibilityLabelsAndChartToleranceMetrics() throws {

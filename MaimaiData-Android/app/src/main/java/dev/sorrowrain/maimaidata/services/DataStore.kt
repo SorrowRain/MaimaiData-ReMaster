@@ -667,7 +667,7 @@ class DataStore(context: Context) {
             prefs.edit().putLong(PreferenceKeys.appUpdateCheck, System.currentTimeMillis()).apply()
             val currentShort = BuildConfig.VERSION_NAME
 
-            if (latest != null && latest.isNewerThan(currentShort)) {
+            if (latest.isNewerThan(currentShort)) {
                 val ignored = prefs.getString(PreferenceKeys.ignoredAppUpdateVersion, null)
                 if (manual || ignored != latest.version) {
                     if (!manual && appUpdateBlockerCount > 0) {
