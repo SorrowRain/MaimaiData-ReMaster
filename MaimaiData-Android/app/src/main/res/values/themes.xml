@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.MaimaiData" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="launch_window_background">#F2F2F7</color>
+    <style name="Theme.MaimaiData" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/launch_window_background</item>
+    </style>
 </resources>
